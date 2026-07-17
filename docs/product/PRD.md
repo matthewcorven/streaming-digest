@@ -7,23 +7,35 @@ Target platform: on-prem Linux Docker Compose deployment; macOS ARM and Windows 
 
 ## 1. Product summary
 
-Streaming Digest is a self-hosted personal YouTube knowledge ingestion, search, and curation application.
+Streaming Digest is a self-hosted personal YouTube video knowledge base.
 
-It monitors a manually configured list of subscribed YouTube channels, ingests newly published long-form videos within a configurable lookback window, extracts transcripts, semantic segments, timecoded screenshots, external links, repository metadata, and website content, then stores searchable metadata and vector embeddings in PostgreSQL with pgvector.
+It monitors a manually configured list of public YouTube channels, ingests newly published long-form videos within a configurable lookback window, extracts transcripts, semantic segments, timecoded screenshots, external links, GitHub repository metadata, website content, recent searches, and personal notes, then stores searchable metadata and vector embeddings in PostgreSQL with pgvector.
 
-The primary user experience is a Blazor WASM search interface where the user can search across video metadata, transcript segments, external links, repositories, scraped pages, and personal notes using hybrid text + semantic vector search. Results are ranked, explain why they matched, and link directly to the relevant YouTube timestamp, channel profile, code repository, website, or edit/note workflow.
+The primary user experience is a Blazor WASM search interface where the user can search across video metadata, transcript segments, external links, GitHub repositories, scraped pages, recent searches, and personal notes using hybrid text + semantic vector search. Results are clustered by video, ranked by weighted aggregate score, explain why they matched, show related matches across the whole corpus with relative-similarity percentages, and link to whatever useful artifacts are available for that video at search time, such as a YouTube timestamp, channel profile, code repository, website, or note workflow.
 
-The secondary user experience is operational: daily/manual ingestion summaries are sent over Matrix with end-to-end encryption, and the application exposes rich observability through Aspire locally and Prometheus/Grafana/Loki/Tempo in deployment.
+The secondary user experience is operational and mobile-friendly: daily/manual ingestion summaries are sent over Matrix so the user can open the web UI from Android over Tailscale, and the application exposes rich observability through Aspire locally and Prometheus/Grafana/Loki/Tempo in deployment. Matrix end-to-end encryption is MVP+.
 
 ## 2. MVP scope
 
 This is a hard MVP: all items below are required for the first usable release.
 
-### 2.1 Ingestion scope
+Product priority order is: search, daily digest, notes/search curation, ingestion observability/admin, then repository/website enrichment. The dashboard priority order is daily digest, search launchpad, then pending-action inbox.
+
+### 2.1 Primary MVP use case
+
+The MVP is centered on one killer journey:
+
+> A user adds one YouTube channel, waits for the scheduled ingestion run, searches for a vague project idea, and immediately finds the relevant video cluster with top-level metadata, warning state, and whatever useful artifacts are available at that time for that video, such as timestamps, repositories, websites, notes, screenshots, and related items.
+
+This journey is the product-scope anchor. Search/recall and discovery have equal product weight. Synthesis/research-map experiences and daily monitoring are useful side effects but not primary MVP product goals. Features outside the anchor may still be required for hard MVP when they strengthen ingestion quality, search trust, correction, notifications, or operational reliability, but logged-in YouTube account features and broader source imports are MVP+.
+
+### 2.2 Ingestion scope
 
 MVP must support:
 
 - Manual channel list management.
+- Add-channel MVP input is a public YouTube channel URL, handle, or channel ID, such as `https://www.youtube.com/@TonbisAIGarage`.
+- MVP is optimized for one configured channel, unbounded channel history over time, roughly five new ingested videos per day, unknown user-triggered backfill, about 150 ingested videos per month, and about 1,800 per year. Multi-channel scale beyond the first channel remains supported by design but is not the MVP optimization target; 500+ channels are MVP+.
 - Regular public long-form YouTube videos only.
 - Exclusion of Shorts and private/member-only content.
 - Configurable max-age lookback, default 30 days.
@@ -71,8 +83,7 @@ MVP must support:
   - Learn over time from user corrections via deterministic domain/rule lists and few-shot examples.
 - Repository ingestion:
   - GitHub.
-  - GitLab.
-  - Bitbucket.
+  - GitLab and Bitbucket are MVP+.
   - Repository metadata.
   - README text.
   - LICENSE text.
@@ -86,7 +97,7 @@ MVP must support:
   - Do not store raw HTML by default.
   - Optional per-video debug capture of raw HTML is available in MVP.
 
-### 2.2 Embedding scope
+### 2.3 Embedding scope
 
 MVP must generate vector embeddings for:
 
@@ -97,6 +108,11 @@ MVP must generate vector embeddings for:
 - Scraped website page text.
 - Repository README chunks.
 - User notes.
+- Recent searches.
+
+User-authored notes are searchable weighting content, not a major MVP product surface. A note attached to a video, segment, repository, or link is embedded and evaluated for search weighting, and its presence/content can affect the parent video cluster score. Recent searches are a major product primitive: they provide UI convenience, long-term user-interest memory, digest subscription signals, and ranking personalization. They are stored in PostgreSQL, embedded with the active embedding model, visible in a recent-searches panel, and clearable as a whole by the user. Granular per-query deletion is MVP+.
+
+MVP must support similarity discovery: search results show related items with `Relative similarity` percentages; the daily digest can include new videos/items similar to recent searches; and high-signal candidates are items above a configurable global similarity threshold, defaulting to 80%, against recent-search embeddings. Notes and clicked/opened results boost future signal strength.
 
 MVP must store LICENSE text but does not embed LICENSE text by default.
 
@@ -109,7 +125,7 @@ Default embedding configuration:
 - Fall back/document `nomic-embed-text` as a simpler option.
 - Store embedding model ID, dimensions, provider, and source content hash with each embedding.
 
-### 2.3 Local LLM and audio-to-text scope
+### 2.4 Local LLM and audio-to-text scope
 
 MVP requires a local LLM runtime.
 
@@ -133,7 +149,7 @@ Audio-to-text:
 - Prefer whisper.cpp if it provides the best local CPU/GPU and ARM portability.
 - Temporary audio/video files are deleted after processing.
 
-### 2.4 Search and curation scope
+### 2.5 Search and curation scope
 
 MVP must provide:
 
@@ -141,19 +157,24 @@ MVP must provide:
 - REST API.
 - Single-user login.
 - Hybrid search combining text match and vector similarity.
-- Configurable text/vector ranking weights.
-- Unified ranked result list.
+- Configurable text/vector ranking weights exposed as a global app setting and applied to subsequent or active searches.
+- Unified ranked result list clustered by video.
 - Filters:
   - Channel.
   - Date range.
   - Result type.
-  - Link classification.
   - Has transcript.
   - Has repo.
   - Has notes.
   - Ingestion status.
-- Result unit is the best matching item with parent video context.
+- Link-classification filtering and hide/show-by-category behavior are MVP+. Classification correction remains MVP because corrections improve future classification and ranking quality.
+- Search box MVP supports natural-language text only. Advanced query syntax such as `repo:`, `channel:`, `has:notes`, `type:segment`, exact-phrase operators, and date expressions are MVP+.
+- Result unit is one clustered video result. Multiple clusters must not reference the same video. Repositories or websites linked from multiple videos may appear in multiple video clusters.
+- Cluster title is the video override title when present, otherwise the original scraped title.
+- Cluster score is a weighted aggregate score over the cluster's matches, with note/user-signal boosts.
+- One video with many matching segments appears as one result, e.g. "12 matches inside", with the best timestamp directly reachable.
 - Result cards show:
+  - Collapsed state: title, channel, publish date, note indicator/button, processing/stale/failed indicator, retry button when applicable, primary match, and score.
   - Match type and explanation.
   - Matched field/snippet.
   - Rank/score details sufficient for user trust.
@@ -165,6 +186,8 @@ MVP must provide:
   - Notes indicator.
   - Edit action.
   - Notes action.
+  - Expanded state: all submatches, related/similar items from across the whole corpus with relative-similarity percentages, screenshot thumbnail, timestamp links, repository/website links, score components, and processing warnings. Related items appear in the same result container, visually distinguished by border color and type.
+  - No separate result detail page is required for MVP; result expansion and edit/note modals carry the interaction.
 - Edit modal supports overrides for:
   - Video title.
   - Video description.
@@ -181,14 +204,19 @@ MVP must provide:
 - Override version history records previous value and changed_at.
 - Notes:
   - Private local notes.
-  - Attach to video, segment, external link, and repository.
-  - Markdown support using EasyMDE.
+  - Attach to video, segment, external link, and repository once the target appears in search results.
+  - MVP note UX is intentionally lightweight; notes exist so note content is embedded and evaluated in search/ranking, not to make notes a primary curation workflow.
+  - Markdown support using EasyMDE is acceptable if cheap, but a rich note-taking surface is not required.
+  - Notes boost their parent item based on note content/presence; if a note is cleared, the note embedding and video-cluster aggregate are updated so repeated searches reflect live state.
+- Edit UI uses a well-organized modal with tabbed groups of fields rather than one giant form.
+- Link-classification corrections show "Future similar links will use this correction" when saved and when the corrected item is later viewed.
 
-### 2.5 Admin and operations scope
+### 2.6 Admin and operations scope
 
 MVP admin UI must support:
 
 - Add/remove/pause channels.
+- Add-channel form initially requires only a public YouTube URL/handle/channel ID and validates that the URL is a supported YouTube channel source.
 - Trigger ingestion now.
 - Trigger channel backfill with days/max-count.
 - View last channel ingestion status.
@@ -203,15 +231,17 @@ MVP admin UI must support:
 - Link to Hangfire dashboard.
 - Link to Grafana.
 - Link to other observability dashboards where configured.
+- Ingestion run details show timeline by stage, per-video status, failures with retry buttons, extracted links/repos/websites, transcript status, screenshot status, embedding status, and logs/trace links.
+- Retry defaults to failed stages/items only, but the user can select all, one, or multiple retryable operations.
 
 Deletion behavior:
 
 - Deleting a channel can optionally delete all related videos, segments, links, notes, embeddings, and screenshots.
 - Destructive deletes require confirmation.
 
-### 2.6 Notifications scope
+### 2.7 Notifications scope
 
-MVP must send Matrix notifications with E2EE.
+MVP must send Matrix notifications. Matrix E2EE is MVP+.
 
 Requirements:
 
@@ -219,7 +249,7 @@ Requirements:
 - Separate `streaming-digest-matrix-notifier` container/service.
 - Matrix crypto/session store persisted and backed up.
 - Manual one-time login and verification using the user's Android Matrix client documented.
-- Configurable encrypted room ID.
+- Configurable room ID. Encrypted rooms/E2EE are MVP+.
 - Notifications sent for manual and scheduled ingestion runs by default.
 - Notification behavior configurable in app settings.
 
@@ -231,9 +261,13 @@ Notification summary includes:
 - Videos failed/skipped.
 - Transcripts found/missing.
 - Repositories found.
+- Websites/resources found.
+- High-signal matches similar to recent searches, including the matching recent search, percentage, timestamp when available, and repo/website links when available.
 - Link to web dashboard ingestion run.
 
-### 2.7 Observability scope
+The web daily digest page includes new videos ingested, new repositories found, new websites/resources found, items similar to recent searches, and failed/skipped items.
+
+### 2.8 Observability scope
 
 MVP must include:
 
@@ -250,10 +284,10 @@ MVP must include:
 - Full logs stored in Loki.
 - Metrics stored in Prometheus-compatible backend.
 - Traces stored in Tempo.
-- Telemetry retention: 90 days for logs, metrics, and traces.
+- Telemetry retention follows the first-run disk policy: 90 days when free space is greater than 5 GB, 30 days when greater than 1 GB, otherwise disabled with warning.
 - Ingestion run summaries retained indefinitely or until configured retention policy says otherwise.
 
-### 2.8 Security scope
+### 2.9 Security scope
 
 MVP must include:
 
@@ -267,7 +301,20 @@ MVP must include:
 - Tailscale-oriented access model.
 - Secrets configured through environment variables, Docker secrets, or equivalent.
 
-### 2.9 Backup/restore scope
+### 2.10 First-run and setup scope
+
+MVP first-run onboarding distinguishes core value from full operational hardening:
+
+- The app starts in onboarding if setup is incomplete.
+- Required before first ingestion: admin password setup/change, embedding model verification, local LLM verification, first public YouTube channel, and ingestion schedule confirmation.
+- Audio-to-text/Whisper verification is required for full setup completeness and for no-caption video support, but captioned-video ingestion may still proceed with a prominent warning if it is unavailable.
+- Matrix bot login/verification and room send are required for full notification readiness, but missing Matrix configuration should block notifications, not basic search UI access. Matrix end-to-end encryption is MVP+.
+- Grafana/observability endpoint verification is required for full operational readiness, but missing dashboard links should surface as warnings, not block search UI access.
+- Each setup step provides live verification, inline retry, retained previously-entered values, clear success state, and actionable failure messages.
+- Default ingestion schedule is 6 AM in the user's local time and is configurable during first run.
+- Post-login routing precedence is: incomplete onboarding, last selected mode, dashboard summary after the first daily run, then ingestion/new-videos digest.
+
+### 2.11 Backup/restore scope
 
 MVP documentation and implementation must cover backup/restore for:
 
@@ -281,6 +328,8 @@ MVP documentation and implementation must cover backup/restore for:
 The following are out of scope unless explicitly promoted later:
 
 - YouTube OAuth subscription import.
+- Logged-in YouTube subscription scraping/import.
+- Search of the user's whole YouTube watch history.
 - Unlimited historical ingestion without user-provided backfill bounds.
 - Shorts support.
 - Private/member-only video support.
@@ -289,6 +338,7 @@ The following are out of scope unless explicitly promoted later:
 - Multi-user collaboration.
 - Public publishing/export workflows.
 - Mobile-native application.
+- MCP server and CLI integrations for external AI agents/harnesses.
 
 ## 4. User journeys
 
@@ -310,11 +360,11 @@ Example query: "code project that searches for project ideas not yet achieved ac
 
 1. User enters query.
 2. API performs hybrid text/vector search.
-3. Results include transcript segments, video metadata, repository README matches, scraped websites, and notes.
-4. Results are ranked and show explanations.
-5. User opens a timestamped YouTube link, repository, website, or note.
-6. User optionally edits metadata or adds a note.
-7. Modified fields trigger embedding regeneration using overrides.
+3. Results include video-clustered matches from transcript segments, video metadata, repository README matches, scraped websites, recent-search similarity, and notes.
+4. Results are ranked by weighted aggregate score and show explanations, score components, and exact related-item percentages.
+5. User expands the clustered result to see all submatches and opens a timestamped YouTube link, repository, website, or note.
+6. User optionally edits metadata or adds a note from modals.
+7. Modified fields trigger embedding regeneration using overrides and notes boost the parent result.
 
 ### 4.3 Correct link classification
 
@@ -337,47 +387,50 @@ Example query: "code project that searches for project ideas not yet achieved ac
 1. Scheduled ingestion run starts.
 2. Worker checks channels and processes eligible videos.
 3. Domain events and stats are recorded.
-4. Matrix notifier sends encrypted summary to configured room.
+4. Matrix notifier sends summary to configured room, including new videos, repos, websites/resources, failed/skipped items, and high-signal matches similar to recent searches. E2EE is MVP+.
 5. User opens dashboard link from Android Matrix client.
 
 ## 5. Acceptance criteria
 
 MVP is acceptable when:
 
-- A user can configure at least one channel and run ingestion.
+- A user can add one public YouTube channel and run ingestion.
+- A user can wait for the default scheduled run, search a vague project idea, and find the relevant video cluster in the top 3 results with top-level metadata and whatever timestamp/repository/website/note/related-item data is available at that time.
 - Ingestion processes a long-form public video with transcript without manual intervention.
 - Ingestion automatically transcribes a video without captions using local audio-to-text.
 - Ingestion generates semantic segments and WebP screenshots.
 - Ingestion extracts description and pinned-comment links best-effort.
-- GitHub, GitLab, and Bitbucket repo links can be recognized and stored.
+- GitHub repo links can be recognized and stored; GitLab and Bitbucket are MVP+.
 - README text is stored and embedded.
 - LICENSE text is stored.
 - DeepWiki URL is stored only when a non-placeholder page exists.
 - A website link can be scraped one page deep with Crawlee/Playwright, stored, and embedded.
-- Search returns hybrid ranked results with explanations and filters.
+- Search returns video-clustered hybrid ranked results with explanations, filters, score components, incomplete-processing warning badges, and related-item relative-similarity percentages.
 - Timestamped result links open YouTube at the correct time.
+- The user can find not only the one or two items they had in mind but also related items across the whole corpus with a visible relative-similarity percentage.
 - User can edit all required override fields.
 - Embedding regeneration uses overrides.
 - User can create/edit/delete markdown notes using EasyMDE.
-- Matrix E2EE notification reaches the configured encrypted room.
-- Hangfire dashboard and Grafana links are visible from the app.
+- Matrix notification reaches the configured room; Matrix E2EE is MVP+.
+- Daily digest supports the expected user behavior: open high-signal items, open new videos from selected channels, and use the digest as a reading queue.
+- Hangfire dashboard and Grafana links are visible from the app when enabled/configured.
 - Observability data appears in local Aspire dashboard and production observability stack.
 - Backup/restore procedure is documented.
 
 ## 6. Risks and product tradeoffs
 
 - This MVP is large and operationally complex.
-- Matrix E2EE requires careful one-time device verification and durable crypto state.
+- Matrix E2EE, when promoted after MVP, requires careful one-time device verification and durable crypto state.
 - Whisper fallback can be CPU/GPU expensive for long videos.
 - Semantic segmentation quality depends on local model capability.
 - Pinned comments and YouTube scraping are inherently best-effort.
 - Stealth browser scraping must be rate-limited and respectful.
 - Observability must not compete with application queries; full logs/traces should remain outside primary app tables.
-- Repository APIs differ; normalizing GitHub/GitLab/Bitbucket requires careful abstractions.
+- Repository APIs differ; GitHub normalization is MVP, while GitLab/Bitbucket normalization is MVP+.
 
 ## 7. Legal/privacy constraints
 
-Streaming Digest is intended for personal archival/search use on the user's own infrastructure.
+Streaming Digest is intended for personal archival/search use on the user's own infrastructure. MVP legal/product UX uses minimal disclaimers in docs/settings rather than prominent first-run or per-source acknowledgements.
 
 Docs and UI should communicate:
 

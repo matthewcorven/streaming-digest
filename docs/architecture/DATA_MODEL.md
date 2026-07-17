@@ -8,7 +8,7 @@ Database: PostgreSQL + pgvector
 - Preserve original scraped values.
 - Store user overrides separately and use effective values for search/embedding.
 - Keep immutable-ish source identity fields stable.
-- Model search around best-match items with parent video context.
+- Model search around video cluster search results with parent video context.
 - Treat ingestion as resumable and retryable.
 - Store embeddings with source content hashes and model metadata.
 - Store screenshots/files on mounted volume, not in PostgreSQL.
@@ -17,11 +17,11 @@ Database: PostgreSQL + pgvector
 ## 2. Core identity rules
 
 - Channel unique identity: YouTube channel ID.
-- Video unique identity: YouTube video ID.
-- Repository unique identity: canonical normalized repository URL.
+- Video unique identity: composite `(platform, platform_video_url, platform_video_id)`. For YouTube, `platform_video_url` is the normalized watch URL without query string and `platform_video_id` is the YouTube video ID.
+- Repository unique identity: canonical normalized repository URL. MVP supports GitHub; GitLab and Bitbucket are MVP+.
 - External link unique identity: normalized final URL after redirects and tracking parameter removal.
 - Segment unique identity: video ID + source type + start timestamp + sequence/version.
-- Embedding unique identity: source entity + source field/chunk + embedding model + content hash.
+- Embedding unique identity: source entity + source field/chunk + embedding model + dimensions + content hash.
 
 ## 3. Tables
 
@@ -55,9 +55,13 @@ Important settings:
 - `ingestion.defaultMaxAgeDays`, default `30`
 - `ingestion.defaultConcurrency`, default `1` or `2`
 - `ingestion.maxSegmentsPerVideo`, default `60`
+- `ingestion.defaultScheduleLocalTime`, default `06:00`
+- `ingestion.tempMedia.maxBytes`, default to 50% of first-run free disk bytes
 - `screenshots.offsetSeconds`, default `5`
 - `search.textWeight`
 - `search.vectorWeight`
+- `search.highSignalThresholdPercent`, default `80`
+- `search.recentSearchRetentionDays` if later added; MVP supports clear-all rather than granular deletion
 - `notifications.matrix.enabled`
 - `notifications.matrix.onManualRuns`
 - `notifications.matrix.onScheduledRuns`
@@ -96,7 +100,10 @@ YouTube videos.
 Columns:
 
 - `id uuid primary key`
-- `youtube_video_id text not null unique`
+- `platform text not null default 'youtube'`
+- `platform_video_url text not null`
+- `platform_video_id text not null`
+- `youtube_video_id text not null` retained as YouTube convenience alias to `platform_video_id`
 - `channel_id uuid not null references channels(id)`
 - `author_original text not null`
 - `author_override text null`
@@ -115,6 +122,11 @@ Columns:
 - `raw_metadata_json jsonb null`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
+
+Indexes:
+
+- Unique `(platform, platform_video_url, platform_video_id)`.
+- Index `(platform, platform_video_id)`.
 
 Suggested statuses:
 
@@ -304,9 +316,8 @@ Columns:
 
 `host` values:
 
-- `github`
-- `gitlab`
-- `bitbucket`
+- `github` for MVP.
+- `gitlab` and `bitbucket` are MVP+.
 
 ### 3.12 `external_link_repositories`
 
@@ -359,13 +370,14 @@ Columns:
 - `visible_text_override text null`
 - `robots_allowed boolean null`
 - `scrape_status text not null`
+- `exclusion_reason text null`
 - `scraped_at timestamptz null`
 - `raw_html_debug_path text null`
 - `error_summary text null`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
 
-Raw HTML is not stored by default. If per-video debug capture is enabled, store raw HTML on a debug volume/file path and record path here.
+Raw HTML is not stored by default. If per-video debug capture is enabled, store raw HTML on a debug volume/file path and record path here. Rejected/excluded scrape attempts are persisted with `scrape_status = 'excluded'` and `exclusion_reason`; future retries skip that URL unless the URL value changes.
 
 ### 3.15 `notes`
 
@@ -447,12 +459,12 @@ Indexes:
 
 ### 3.18 `embeddings`
 
-Vector embeddings.
+Vector embeddings for individual search documents and recent searches. All vector comparisons for a query must use the active provider/model/dimensions.
 
 Columns:
 
 - `id uuid primary key`
-- `search_document_id uuid not null references search_documents(id)`
+- `search_document_id uuid null references search_documents(id)`
 - `provider text not null`
 - `model text not null`
 - `dimensions integer not null`
@@ -463,9 +475,94 @@ Columns:
 Indexes:
 
 - HNSW or IVFFlat vector index depending pgvector version and dataset size.
-- Unique `(search_document_id, provider, model, content_hash)`.
+- Unique `(search_document_id, provider, model, content_hash)` when `search_document_id` is not null.
 
-### 3.19 `ingestion_runs`
+### 3.19 `video_cluster_embeddings`
+
+Required MVP aggregate vectors for video-cluster scoring, high-signal digest matching, and coarse related-item discovery. Do not use these as the only search index; fine-grained `search_documents` remain the primary search units.
+
+Columns:
+
+- `id uuid primary key`
+- `video_id uuid not null references videos(id)`
+- `provider text not null`
+- `model text not null`
+- `dimensions integer not null`
+- `content_hash text not null`
+- `embedding vector not null`
+- `component_weights_json jsonb not null`
+- `is_stale boolean not null default false`
+- `requires_user_approval boolean not null default false`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+Construction:
+
+- Build only from normalized embeddings that share provider/model/dimensions.
+- Weighted centroid is acceptable for digest/high-signal matching when all vectors are in the same embedding space.
+- Search ranking should still aggregate document scores rather than rely only on this centroid.
+
+### 3.20 `recent_searches`
+
+Search history used for recent-search UI and high-signal digest matching.
+
+Columns:
+
+- `id uuid primary key`
+- `query_text text not null`
+- `searched_at timestamptz not null`
+- `text_weight numeric not null`
+- `vector_weight numeric not null`
+- `filters_json jsonb null`
+
+MVP supports clear-all search history. Clearing recent search history deletes `recent_searches` rows only; associated interaction events and other historical effects are retained unless separately purged by future privacy tooling. Granular per-search deletion is MVP+.
+
+### 3.21 `search_query_embeddings`
+
+Embeddings for recent search queries. This table avoids a circular relation between `recent_searches` and generic `embeddings`.
+
+Columns:
+
+- `id uuid primary key`
+- `recent_search_id uuid not null references recent_searches(id)`
+- `provider text not null`
+- `model text not null`
+- `dimensions integer not null`
+- `content_hash text not null`
+- `embedding vector not null`
+- `created_at timestamptz not null`
+
+Indexes:
+
+- Vector index using the same pgvector strategy as content embeddings.
+- Unique `(recent_search_id, provider, model, content_hash)`.
+
+Mismatched provider/model/dimensions are ignored for active-vector comparisons and regenerated as needed.
+
+### 3.22 `user_interaction_events`
+
+MVP user signals for clicked/opened result boosts.
+
+Columns:
+
+- `id uuid primary key`
+- `recent_search_id uuid null references recent_searches(id)`
+- `video_id uuid null references videos(id)`
+- `search_document_id uuid null references search_documents(id)`
+- `result_type text not null`
+- `event_type text not null`
+- `activated_at timestamptz not null`
+- `metadata_json jsonb null`
+
+`event_type` MVP values:
+
+- `result_opened`
+- `timestamp_opened`
+- `repository_opened`
+- `website_opened`
+- `note_opened`
+
+### 3.23 `ingestion_runs`
 
 Top-level manual/scheduled/backfill runs.
 
@@ -494,7 +591,7 @@ Columns:
 - `manual`
 - `backfill`
 
-### 3.20 `ingestion_items`
+### 3.24 `ingestion_items`
 
 Per-channel/video/link/repo work item status.
 
@@ -514,7 +611,7 @@ Columns:
 - `completed_at timestamptz null`
 - `created_at timestamptz not null`
 
-### 3.21 `domain_events`
+### 3.25 `domain_events`
 
 Important application/domain events and warning/error summaries.
 
@@ -535,7 +632,7 @@ Retention default:
 - Warning/error/domain summaries: 90 days unless configured.
 - Ingestion run summaries: retained longer/indefinitely.
 
-### 3.22 `classification_corrections`
+### 3.26 `classification_corrections`
 
 User corrections for link classification learning.
 
@@ -554,7 +651,7 @@ Used for:
 - Deterministic domain allow/block/classification lists.
 - Few-shot examples in local LLM prompts.
 
-### 3.23 `notifications`
+### 3.27 `notifications`
 
 Notification audit records.
 
@@ -611,20 +708,36 @@ Vector search:
 
 Hybrid ranking:
 
-- `combined_score = textWeight * normalizedTextScore + vectorWeight * normalizedVectorScore`
+- Individual document score: `document_score = textWeight * normalizedTextScore + vectorWeight * normalizedVectorScore`.
+- UI label is `Relative similarity`; it is a normalized vector rank score within the current result set, displayed as a percentage with a tooltip explaining that it is relative to the active query/model/result set and not an absolute semantic truth or confidence.
+- Video cluster score is a weighted aggregate over the top document matches for one video cluster. MVP formula:
+  - `base = 0.65 * max(document_score) + 0.25 * average(top 3 document_scores) + 0.10 * coverage_score`
+  - `coverage_score = min(distinctMatchedDocumentTypes / 4, 1.0)`
+  - `note_boost = 0.08` when the cluster has a matching note, otherwise `0`
+  - `interaction_boost = min(0.05, 0.01 * recent_open_count_for_cluster)`
+  - `cluster_score = min(1.0, base + note_boost + interaction_boost)`
 - Return score components for explainability.
 - Include matched field/snippet.
 
-## 7. Retention
+## 7. Staleness and invalidation rules
+
+MVP invalidation should be narrow and explicit:
+
+- Editing video top-level metadata marks the video metadata search document stale and marks the corresponding `video_cluster_embeddings` row stale. It does not automatically mark all segment, link, repository, or website documents stale.
+- Editing transcript, segment, link, repository, or website fields marks only the directly affected search document(s) stale plus the parent video-cluster aggregate embedding.
+- Creating, editing, or clearing a note updates the note embedding/search document and the parent video-cluster aggregate embedding so repeated searches reflect live state.
+- Related-item caches, if introduced later, must be invalidated when their source embeddings or cluster aggregates become stale.
+
+## 8. Retention
 
 - Raw transcripts: retain indefinitely unless video/channel deleted.
 - Screenshots: retain indefinitely unless purged/deleted.
 - Ingestion run summaries: retain indefinitely or configurable long retention.
-- Detailed ingestion events: 90 days by default.
-- Logs/metrics/traces: retained in observability stack for 90 days.
-- Old embeddings: delete when replaced unless later version history is required.
+- Detailed ingestion events: 90 days by default, unless disk-based first-run policy lowers retention.
+- Logs/metrics/traces: 90 days when first-run free space is greater than 5 GB; 30 days when greater than 1 GB; disabled with warning when 1 GB or less is available.
+- Old embeddings: invalidated when the active embedding model changes after user confirmation, then regenerated in background.
 
-## 8. Deletion behavior
+## 9. Deletion behavior
 
 Channel deletion options:
 
@@ -635,7 +748,7 @@ Repository records may be shared by multiple videos/links. If deleting a channel
 
 Screenshots and raw debug captures must be removed from file volumes when corresponding records are purged.
 
-## 9. Migration notes
+## 10. Migration notes
 
 Use EF Core migrations for core schema and raw SQL for:
 

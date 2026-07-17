@@ -385,6 +385,7 @@ Detailed project documents are available in `docs/`:
 - `docs/architecture/DATA_MODEL.md`
 - `docs/api/API_SPEC.md`
 - `docs/implementation/IMPLEMENTATION_PLAN.md`
+- `docs/operations/UPGRADE_PATHS.md`
 
 ## Legal and privacy notes
 

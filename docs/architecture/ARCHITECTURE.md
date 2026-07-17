@@ -13,7 +13,7 @@ Streaming Digest must be:
 - Private by default and suitable for Tailscale-only access.
 - Single-user authenticated.
 - Capable of local embeddings, local LLM inference, and local audio-to-text.
-- Robust against partial ingestion failures.
+- Robust against partial ingestion failures, explicit retries, idempotent daily ingestion, and deferred processing under rate limits.
 - Designed for hybrid text/vector search over YouTube-derived knowledge artifacts.
 
 ## 2. Logical services
@@ -87,6 +87,7 @@ The service should expose an internal HTTP or gRPC API:
 - Input: temporary audio file path or uploaded audio stream.
 - Output: transcript with timestamps.
 - Metadata: model name, language, duration, confidence if available.
+- Model management: execute configured CLI download/use commands against a mounted model volume, including user-provided host model paths mounted into the container.
 
 ### 2.6 Browser scraper: `streaming-digest-scraper`
 
@@ -104,12 +105,11 @@ This may be integrated into the worker container or kept separate. Prefer separa
 
 Responsibilities:
 
-- Dedicated Matrix E2EE notification service.
-- Maintains Matrix device/session/crypto store on durable volume.
-- Sends encrypted notifications to configured room ID.
-- Supports one-time login and manual verification via Android Matrix client.
+- Dedicated Matrix notification service.
+- Sends ingestion/digest notifications to the configured room ID so the user can open the web UI from Android over Tailscale.
+- E2EE, Matrix crypto/session persistence, and manual device verification are MVP+.
 
-Keep this separate from the API/worker so Matrix crypto dependencies and state are isolated.
+Prefer a .NET implementation until features or stability require a non-.NET SDK/service. Keep this separate from the API/worker if Matrix dependencies or state isolation justify it.
 
 ### 2.8 Observability stack
 
@@ -157,7 +157,7 @@ Production should expose only the services intentionally reachable over Tailscal
 3. User triggers ingestion or scheduled Hangfire job starts.
 4. Worker resolves channel metadata and videos using yt-dlp/adapter and optional YouTube API key.
 5. Worker filters regular long-form public videos within configured max age or backfill parameters.
-6. Worker skips already processed videos unless retry/reprocess requested.
+6. Worker skips already processed videos unless retry/reprocess is explicitly requested. A processed video URL should not be reprocessed during normal daily ingestion.
 7. Worker creates an ingestion run and per-video ingestion records.
 8. Worker processes each video with configurable concurrency.
 
@@ -166,11 +166,11 @@ Production should expose only the services intentionally reachable over Tailscal
 1. Fetch metadata and description.
 2. Best-effort fetch pinned comment.
 3. Extract transcript/captions.
-4. If no usable transcript, download temporary audio/video and run local audio-to-text.
-5. Delete temporary media.
+4. If no usable transcript, download temporary audio/video into the service child `temp/` folder and run local audio-to-text.
+5. Delete temporary media after success/failure; startup and post-run cleanup jobs remove leftovers. Lost temp files after a container crash cause the affected processing step to repeat.
 6. Detect author-provided chapters.
-7. If chapters absent, chunk transcript deterministically and refine with local LLM.
-8. Generate WebP screenshot per segment at configured timestamp offset.
+7. If chapters absent, chunk transcript deterministically and refine with local LLM. Segments are stable by default and regenerated only on explicit user request.
+8. Generate WebP screenshot per segment at configured timestamp offset. If segments or screenshot offset change by explicit request, screenshots are purged/recreated immediately.
 9. Extract and normalize links from description and pinned comment.
 10. Classify links with rules + local LLM + user correction examples.
 11. Process repository links and website links.
@@ -205,10 +205,11 @@ Production should expose only the services intentionally reachable over Tailscal
 2. API normalizes query.
 3. API generates query embedding through Semantic Kernel/Ollama.
 4. API runs hybrid search using PostgreSQL text indexes and pgvector.
-5. Ranking combines text score and vector score using configurable weights.
-6. Results are shaped into result cards with parent video context.
-7. API includes match explanations and snippets.
-8. Blazor renders unified result list and filters.
+5. Ranking combines text score and vector score using configurable weights, then aggregates document matches into video cluster search results.
+6. Video cluster scores use weighted aggregate submatch scores, note boosts, interaction boosts, and coverage signals.
+7. UI `Relative similarity` percentage is a normalized vector rank score within the current result set and includes a tooltip explaining that it is relative to the query/model/result set and not confidence.
+8. API includes match explanations, score components, snippets, and related-item percentages.
+9. Blazor renders video-clustered result cards and filters.
 
 ### 4.6 Edit and re-embedding flow
 
@@ -226,6 +227,32 @@ Production should expose only the services intentionally reachable over Tailscal
 4. Matrix notifier formats summary.
 5. Matrix notifier sends encrypted message to configured room ID.
 6. Notification event/status is stored.
+
+### 4.8 Idempotency and retry flow
+
+- Daily ingestion uses the normalized YouTube video URL without query string as the idempotency key, with YouTube video ID as canonical platform identity.
+- Already processed videos are skipped unless the user explicitly retries selected stages/items.
+- Failures without an active retry may short-circuit the affected item early while allowing other items to continue.
+- Retry uses Hangfire OSS jobs plus application-owned progression/batch tracking in PostgreSQL, defaults to failed stages/items only, and supports user-selected all/one/multiple retryable operations. Do not depend on Hangfire Pro batches for MVP.
+- External adapter failures use exponential backoff for two retries, then circuit-break the affected channel/dependency and mark the channel degraded until a later daily run succeeds without failures.
+
+### 4.9 Deferred rate-limit flow
+
+- Repository/API rate limits defer remaining processing instead of failing the whole run.
+- Resume after the `Retry-After` value when present, otherwise after one hour.
+- While a deferment is active, the dashboard shows it prominently and Matrix sends a notification when configured.
+
+## 4.10 Search UX and dashboard conventions
+
+- Search result success target: the intended recalled video cluster should appear in the top 3 results for the representative vague-query corpus.
+- Collapsed result cards have two equal jobs: help the user decide whether to expand and provide immediate jumps to available timestamp/repository/website artifacts.
+- Incomplete videos are visible in search with warning badges rather than hidden.
+- Related items are drawn from across the whole corpus and rendered inside the same result container with border color/type variants.
+- The dashboard priority is daily digest, search launchpad, then pending-action inbox. Pending-action ordering is pending approvals, failed ingestion, degraded channels, deferred rate limits, stale embeddings, model/service warnings, new digest items, recent-search matches, and storage/retention warnings.
+
+## 4.11 Runtime configuration ownership
+
+The configuration split follows `docs/operations/UPGRADE_PATHS.md`: Docker environment variables and secrets are for bootstrap/secrets/service wiring/runtime environment/mounted volume paths; schema-validated JSON config is for durable runtime/deployment configuration and first-run outputs; PostgreSQL app settings are for user-facing product behavior, onboarding/readiness state, operational state, and domain data.
 
 ## 5. Technology choices
 
@@ -318,9 +345,15 @@ Avoid storing every log line in PostgreSQL.
 
 Retention:
 
-- Logs/metrics/traces: 90 days.
+- Logs/metrics/traces: 90 days when first-run free space is greater than 5 GB, 30 days when greater than 1 GB, otherwise disabled with warning.
 - Ingestion run summaries: indefinite or configurable.
 - Detailed ingestion events: default 90 days unless configured otherwise.
+
+### 6.3 Observability deployment policy
+
+The observability stack is included in Compose, default-on for localhost development, and default-off elsewhere unless enabled during first run or toggled on demand in the UI. Observability dashboard links render only when enabled. When observability is disabled, the API container/reverse proxy should serve friendly placeholder pages for observability routes/ports explaining that observability is disabled and how to re-enable it. When observability is enabled, the same API/reverse-proxy paths route to the real observability services.
+
+Retention is selected during first run from available free space: 90 days if free space is greater than 5 GB, 30 days if greater than 1 GB, otherwise disabled with a prominent warning.
 
 ## 7. Security architecture
 
@@ -355,9 +388,9 @@ Secrets include:
 
 Use environment variables, Docker secrets, or host secret management. Do not store secrets in Git.
 
-### 7.4 Matrix E2EE
+### 7.4 Matrix E2EE MVP+
 
-Matrix notifier must persist crypto state. Losing this store may require device re-verification or may make historical encrypted messages unreadable by the bot.
+Matrix E2EE is MVP+. When enabled later, the Matrix notifier must persist crypto state. Losing this store may require device re-verification or may make historical encrypted messages unreadable by the bot.
 
 Backup:
 
@@ -397,10 +430,35 @@ Defaults should be conservative.
 
 Browser scraper must:
 
-- Check robots.txt where applicable.
+- Check robots.txt where applicable. If disallowed, skip scraping but store the link. Per-domain user overrides are allowed in app configuration.
 - Identify itself appropriately where possible.
 - Avoid recursive crawling in MVP.
 - Use bounded timeouts and page size limits.
+- Support PDFs, JavaScript-rendered pages, CDN URLs, and displayed/visible HTML text extraction.
+- Exclude login pages, tracking redirects, non-PDF file downloads, hidden/invisible text, and raw HTML content by default.
+- Allow non-tracking redirects and store both original and resulting URLs, with the result URL available as the override/canonical URL.
+- Treat excluded scrape attempts as partial failures that are skipped from retry unless the URL changes.
+
+Pinned-comment extraction is best-effort. MVP should determine during early development whether `yt-dlp` can provide pinned comments reliably; if not, use public browser scrape where practical.
+
+Repository fetching defaults to unauthenticated public REST APIs for GitHub in MVP. GitLab and Bitbucket are MVP+. User-provided PATs are MVP+, OAuth is MVP++.
+
+DeepWiki detection is MVP-simple: store the URL only when the fetch returns HTTP 200 and the response does not contain `Index your code`.
+
+### 9.1 Recommended MVP concurrency defaults
+
+Safe starting defaults for small on-prem hosts:
+
+- Channels processed concurrently: `1` scheduled, `1` manual/backfill unless user raises it.
+- Videos per channel concurrently: `1`.
+- Screenshots concurrently: `1` per worker, because ffmpeg/browser work is CPU and I/O heavy.
+- Embedding batch size: `16` short documents or adaptive token-budget batching; one embedding worker by default.
+- Website scrapes: global `2`, per-host `1`.
+- Repository API calls: global `2`, per-host `1`, with rate-limit deferment.
+- Whisper jobs: `1` globally by default.
+- Local LLM classification/segmentation jobs: `1` globally by default.
+
+These defaults prioritize reliability over throughput and should be configurable after the MVP works.
 
 ## 10. Backup and restore
 
@@ -408,7 +466,7 @@ Back up:
 
 - PostgreSQL database.
 - Screenshot/media volume.
-- Matrix crypto/session store.
+- Matrix crypto/session store when E2EE is enabled after MVP.
 - Configuration/secrets.
 
 Restore procedure must validate:
@@ -416,8 +474,16 @@ Restore procedure must validate:
 - App can log in.
 - Search works.
 - Screenshots resolve.
-- Matrix notifier can send encrypted test message.
+- Matrix notifier can send a test message; encrypted test send applies when E2EE is enabled after MVP.
 - Embedding service can regenerate embeddings.
+
+### 10.1 Backup, migration, and upgrade policy
+
+MVP provides a UI backup button. Automated scheduled backup jobs, CLI backup commands, and advanced restore workflows are MVP+.
+
+Upgrades use versioned Compose tags and EF migrations on startup, with a clear recommendation to take a backup before migration. Detailed upgrade categories, version tracking, edge cases, and UI requirements live in `docs/operations/UPGRADE_PATHS.md`.
+
+The upgrade system tracks `appVersion`, `dbSchemaVersion`, `configSchemaVersion`, and `deploymentSchemaVersion` so the app can distinguish app-only upgrades from deployment/Compose migrations and high-risk infrastructure migrations. Workers must not process jobs until DB/config/deployment compatibility checks pass.
 
 ## 11. Aspire and Compose
 

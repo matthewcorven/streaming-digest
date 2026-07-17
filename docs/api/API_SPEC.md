@@ -277,7 +277,7 @@ Retries link scraping/classification/repository processing.
 
 ### POST `/api/repositories/{repositoryId}/retry`
 
-Retries repository metadata/README/LICENSE/DeepWiki processing.
+Retries repository metadata/README/LICENSE/DeepWiki processing for GitHub repositories in MVP. GitLab and Bitbucket are MVP+.
 
 ## 7. Search endpoints
 
@@ -292,7 +292,7 @@ Request:
     "channelIds": ["uuid"],
     "publishedFrom": "2026-01-01T00:00:00Z",
     "publishedTo": "2026-12-31T23:59:59Z",
-    "resultTypes": ["segment", "repository", "external_link", "note"],
+    "resultTypes": ["video_cluster", "segment", "repository", "external_link", "note"],
     "linkClassifications": ["code_repository", "website_resource"],
     "hasTranscript": true,
     "hasRepo": true,
@@ -308,17 +308,18 @@ Request:
 }
 ```
 
-Response item:
+Response item is a video cluster search result. One video appears at most once per response page.
 
 ```json
 {
-  "id": "search-document-uuid",
-  "resultType": "segment",
-  "sourceEntityType": "segment",
+  "id": "video-cluster-result-uuid",
+  "resultType": "video_cluster",
+  "sourceEntityType": "video",
   "sourceEntityId": "uuid",
-  "title": "Semantic segment title",
-  "snippet": "Matched transcript snippet...",
+  "title": "Video title or override",
+  "snippet": "Primary matched snippet...",
   "score": 0.87,
+  "relativeSimilarityPercent": 87,
   "scoreExplanation": {
     "textScore": 0.73,
     "vectorScore": 0.91,
@@ -349,6 +350,15 @@ Response item:
       "title": "owner/repo"
     }
   ],
+  "relatedItems": [
+    {
+      "type": "video_cluster",
+      "id": "uuid",
+      "title": "Related item",
+      "relativeSimilarityPercent": 81
+    }
+  ],
+  "warnings": ["transcript_missing"],
   "hasNotes": true
 }
 ```
@@ -588,7 +598,7 @@ Returns dependency health summary:
 
 ### POST `/api/admin/test-matrix`
 
-Sends encrypted test notification.
+Sends Matrix test notification. E2EE/encrypted sends are MVP+.
 
 ### POST `/api/admin/test-embedding`
 
@@ -622,7 +632,7 @@ Response:
 
 ## 16. Matrix notifier internal API
 
-This API should be internal to the Compose network.
+This API should be internal to the Compose network. MVP Matrix sends are not required to be E2EE; E2EE is MVP+.
 
 ### POST `/internal/matrix/send-ingestion-summary`
 
@@ -685,6 +695,10 @@ Response:
 ```
 
 ## 18. Audio-to-text internal API
+
+### POST `/internal/audio-to-text/models/download`
+
+Executes configured CLI download/use command against the mounted model volume. This also supports user-provided host model paths mounted into the container.
 
 ### POST `/internal/audio-to-text/transcribe`
 
