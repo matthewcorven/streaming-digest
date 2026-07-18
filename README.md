@@ -21,7 +21,8 @@ Instead of searching YouTube manually, Streaming Digest searches across:
 - timecoded screenshots
 - external links
 - scraped website metadata and page text
-- GitHub, GitLab, and Bitbucket repository metadata
+- GitHub repository metadata
+- GitLab and Bitbucket repository metadata when MVP+ support is enabled
 - repository README files
 - private personal notes
 
@@ -67,10 +68,8 @@ Search results are ranked using hybrid keyword + semantic vector search and link
 - URL normalization and tracking parameter removal
 - Link classification using rules, local LLM classification, and user correction history
 - All links are retained, including likely ads/sponsors, with classification metadata
-- Repository support for:
-  - GitHub
-  - GitLab
-  - Bitbucket
+- Repository support for GitHub in MVP
+- GitLab and Bitbucket repository support are MVP+
 - Repository metadata ingestion
 - README ingestion and embedding
 - LICENSE ingestion
@@ -130,11 +129,12 @@ Search results are ranked using hybrid keyword + semantic vector search and link
 
 ### Notifications
 
-- Matrix notifications with end-to-end encryption
+- Matrix notifications in MVP
+- Matrix end-to-end encryption is MVP+
 - Dedicated Matrix bot account
 - Separate Matrix notifier service/container
-- Manual Android client verification flow
-- Configurable encrypted Matrix room
+- MVP unencrypted Matrix room ID configuration
+- Manual Android client/device verification and encrypted Matrix room readiness are MVP+
 - Notifications for manual and scheduled runs by default
 - Summary includes:
   - channels checked
@@ -201,7 +201,7 @@ Core services:
 - `streaming-digest-ollama` — local embeddings and local LLM runtime
 - `streaming-digest-whisper` — local audio-to-text service
 - `streaming-digest-scraper` — Crawlee/Playwright scraper service
-- `streaming-digest-matrix-notifier` — Matrix E2EE notification service
+- `streaming-digest-matrix-notifier` — Matrix notification service; E2EE is MVP+
 - `streaming-digest-otel-collector` — OpenTelemetry Collector
 - `streaming-digest-prometheus` — metrics store
 - `streaming-digest-grafana` — dashboards
@@ -237,7 +237,7 @@ PostgreSQL is internal by default.
 - local audio-to-text, typically whisper.cpp-backed
 - yt-dlp
 - Crawlee + Playwright
-- Matrix E2EE notifier service
+- Matrix notifier service; E2EE is MVP+
 - OpenTelemetry
 - Prometheus
 - Grafana
@@ -280,7 +280,7 @@ Security features:
 - CSRF protection for mutating endpoints
 - login rate limiting
 - internal-only service networking by default
-- separate Matrix bot account and persisted crypto/session store
+- separate Matrix bot account and persisted bot session/config store; E2EE crypto/session store is MVP+
 
 ## Backup and restore
 
@@ -289,7 +289,7 @@ Back up these components:
 - PostgreSQL database
 - screenshot/media volume
 - optional raw HTML debug-capture volume
-- Matrix crypto/session store
+- Matrix bot session/config store; E2EE crypto/session store is MVP+
 - configuration and secrets
 - observability data if long-term telemetry history matters
 
@@ -310,7 +310,7 @@ Prerequisites:
 - Tailscale or another private network access method
 - sufficient disk space for screenshots, transcripts, embeddings, and telemetry
 - local model files pulled into Ollama
-- Matrix bot account and encrypted room prepared
+- Matrix bot account and room ID prepared; encrypted room readiness is MVP+
 
 Start the stack:
 
@@ -330,7 +330,7 @@ On first startup:
 2. Change the bootstrap password.
 3. Configure Ollama embedding and LLM models.
 4. Configure the local audio-to-text service.
-5. Configure Matrix bot credentials and encrypted room ID.
+5. Configure Matrix bot credentials and room ID; encrypted room setup is MVP+.
 6. Send a Matrix test notification.
 7. Add YouTube channels.
 8. Run manual ingestion or configure the schedule.
@@ -397,7 +397,7 @@ You are responsible for complying with:
 - copyright rules for transcripts, screenshots, and video-derived artifacts
 - robots.txt and website scraping expectations
 - repository licenses and attribution requirements
-- Matrix credential and E2EE session protection
+- Matrix credential protection; E2EE session protection applies when MVP+ E2EE is enabled
 
 Do not expose the application publicly without reviewing authentication, transport security, rate limits, and secret handling.
 
@@ -412,7 +412,7 @@ Streaming Digest has reached MVP completeness for the agreed hard-MVP scope:
 - link/repository/website processing
 - hybrid search
 - curation and notes
-- Matrix E2EE notifications
+- Matrix notifications; E2EE is MVP+
 - observability
 - on-prem Compose deployment
 

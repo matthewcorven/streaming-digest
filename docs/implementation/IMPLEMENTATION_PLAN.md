@@ -12,6 +12,16 @@ The MVP is anchored on one killer journey: a user adds one public YouTube channe
 
 MVP explicitly supports public YouTube channel URL/handle/channel ID input only. Logged-in YouTube subscription scraping/import, YouTube watch-history search, advanced query syntax, link-classification hide/show filters, granular search-history deletion, 500+ channel scale, MCP/CLI integrations, and other source imports are MVP+.
 
+## MVP scope conformance checklist
+
+Before implementation work is considered MVP-complete, every hard-MVP requirement from `docs/product/PRD.md`, `docs/architecture/ARCHITECTURE.md`, `docs/architecture/DATA_MODEL.md`, `docs/api/API_SPEC.md`, and `docs/operations/UPGRADE_PATHS.md` must be either implemented and verified or explicitly reclassified in the product docs. The implementation plan must not silently pull MVP+ work into MVP. In particular:
+
+- Matrix MVP means unencrypted bot notifications to a configured room. Matrix E2EE, Android/device verification, and E2EE crypto-store readiness are MVP+.
+- GitHub repository ingestion is MVP. GitLab, Bitbucket, repository PATs, and repository OAuth are MVP+.
+- Link classification correction is MVP. Link-classification search filtering/hide-show behavior is MVP+.
+- Recent-search clear-all is MVP. Granular per-query deletion is MVP+.
+- Public YouTube channel URL/handle/channel ID input is MVP. Logged-in subscription import, watch-history import, and broader source imports are MVP+.
+
 ## Architecture summary
 
 - ASP.NET Core 10 LTS is a hard requirement and hosts Blazor WASM.
@@ -19,7 +29,7 @@ MVP explicitly supports public YouTube channel URL/handle/channel ID input only.
 - PostgreSQL stores relational data, pgvector embeddings, Hangfire storage, and domain events.
 - Microsoft Semantic Kernel abstracts Ollama embedding/local LLM and audio-to-text provider.
 - Crawlee/Playwright performs first-page website scraping.
-- Matrix notifier service handles E2EE messaging and crypto state.
+- Matrix notifier service sends MVP Matrix notifications without requiring E2EE; E2EE messaging, durable Matrix crypto state, and device verification are MVP+.
 - Aspire orchestrates local development and produces Compose deployment artifacts.
 - Production observability uses OTel Collector, Prometheus, Grafana, Loki, and Tempo.
 
@@ -279,11 +289,14 @@ Retryable stage names:
 - `link_classification`
 - `repository_metadata`
 - `repository_readme`
+- `repository_license`
+- `deepwiki_check`
 - `website_scrape`
+- `search_documents`
 - `embeddings`
 - `notification`
 
-Retry can operate at video, stage, external-link, repository, search-document/embedding, and notification levels as needed.
+Retry can operate at video, stage, external link occurrence, external resource, repository, search-document/embedding, and notification levels as needed.
 
 Verification:
 
@@ -302,6 +315,22 @@ Endpoints:
 Verification:
 
 - Integration tests confirm job enqueue and status updates.
+
+### Task 4.5: Implement rate-limit deferment service
+
+Requirements:
+
+- Persist host/dependency deferments in `rate_limit_deferments` for YouTube, repository hosts, DeepWiki, and website hosts.
+- Workers check active deferments before starting host-scoped work.
+- Resume after `Retry-After` when present, otherwise after the configured default delay.
+- Dashboard and ingestion-run details show active deferments prominently.
+- Matrix/web daily digest includes active deferments when configured.
+- Manual clear endpoint is available for careful operator override.
+
+Verification:
+
+- Repository, DeepWiki, website, and YouTube rate-limit fixtures create deferments and prevent new host-scoped work until expiry/clear.
+- Dashboard/API exposes active, expired, and cleared deferments.
 
 ## Phase 5: YouTube ingestion adapter
 
@@ -752,6 +781,22 @@ Verification:
 - Clear-all removes recent-search history.
 - Opened result creates a user-signal event used by high-signal ranking.
 
+### Task 11.7: Implement video-cluster aggregate embeddings
+
+Requirements:
+
+- Build `video_cluster_embeddings` from normalized child document embeddings that share provider, model, and dimensions.
+- Store content hash, provider/model/dimensions, component weights, stale state, and operation provenance.
+- Use aggregate cluster vectors for high-signal digest matching and coarse related-item discovery.
+- Do not use aggregate cluster vectors as the only search index; fine-grained `search_documents` remain the primary search units.
+- Mark cluster embeddings stale when child search documents, notes, overrides, or active embedding model changes require invalidation.
+
+Verification:
+
+- Integration test creates a cluster embedding after document embeddings exist.
+- Editing a note/title/transcript marks only the affected document(s) and parent cluster aggregate stale.
+- High-signal digest matching ignores mismatched provider/model/dimension vectors.
+
 ## Search performance targets
 
 MVP corpus assumption is fewer than 500 videos in PostgreSQL, while design should remain reasonable up to about 2,000 videos. Show a spinner or progress state after 1 second.
@@ -837,6 +882,21 @@ Verification:
 - Integration test confirms multiple segment matches from one video produce one cluster.
 - High-signal query fixture returns expected items over the configured threshold.
 
+### Task 12.6: Implement dashboard daily digest and pending-action inbox
+
+Requirements:
+
+- Dashboard priority order is daily digest, search launchpad, then pending-action inbox.
+- Daily digest shows new videos ingested, new repositories found, new websites/resources found, high-signal matches similar to recent searches, and failed/skipped items.
+- Pending-action inbox orders pending approvals, failed ingestion, degraded channels, deferred rate limits, stale embeddings, model/service warnings, new digest items, recent-search matches, and storage/retention warnings.
+- Post-login routing follows the product rule: incomplete onboarding, last selected mode, dashboard summary after first daily run, then ingestion/new-videos digest.
+
+Verification:
+
+- Fixture ingestion run renders digest sections in the correct priority order.
+- High-signal recent-search matches appear with relative-similarity percentages and links to available timestamp/repository/website artifacts.
+- Pending-action fixture renders retry/approve/test actions without requiring log inspection.
+
 ## Phase 13: Notes and edit modals
 
 ### Task 13.1: Implement override APIs
@@ -886,19 +946,19 @@ Verification:
 
 ### Task 14.1: Select Matrix SDK/implementation
 
-Choose a mature OSS Matrix SDK/service approach. Prefer .NET until feature or stability issues justify Node/Rust/Python or another mature SDK. E2EE support and durable crypto store are MVP+.
+Choose a mature OSS Matrix SDK/service approach. Prefer .NET until feature or stability issues justify Node/Rust/Python or another mature SDK. MVP sends normal unencrypted Matrix messages. E2EE support, Android/device verification, and durable Matrix crypto state are MVP+.
 
 Requirements:
 
-- dedicated bot account.
-- manual login.
-- Android client verification.
-- room ID config.
-- E2EE/encrypted room support is MVP+.
+- Dedicated bot account.
+- Manual login/token/configuration flow appropriate for the selected SDK.
+- Configurable room ID.
+- Unencrypted test send for MVP readiness.
+- E2EE/encrypted room support, Android/device verification, and E2EE crypto-store backup/restore readiness are MVP+.
 
 Verification:
 
-- Bot can send test message. Encrypted test message applies when E2EE is later enabled.
+- Bot can send an unencrypted test message for MVP. Encrypted test message applies only when E2EE is later enabled.
 
 ### Task 14.2: Build Matrix notifier service
 
@@ -926,6 +986,7 @@ Notification content includes:
 - New websites/resources found.
 - Items similar to recent searches.
 - Failed/skipped items.
+- Active rate-limit deferments where relevant.
 - Link to web dashboard ingestion run.
 
 Configurable app settings.
@@ -934,6 +995,21 @@ Verification:
 
 - Manual run completion sends Matrix summary. Encrypted/E2EE summary is MVP+.
 - Scheduled run notification includes high-signal matches similar to recent searches.
+
+### Task 14.4: Implement notification audit and outbox dispatch
+
+Requirements:
+
+- Persist notification attempts/results in `notifications`, including provider, target, status, payload/rendered body, provider message ID, attempt count, retry time, and error summary.
+- Use `outbox_messages` for reliable dispatch of Matrix notifications and other side effects.
+- Failed notification sends are retryable and visible in ingestion-run details/admin UI.
+- Notification status is linked to the originating operation and ingestion run.
+
+Verification:
+
+- Successful send creates notification audit row with provider message ID.
+- Simulated notifier failure creates retryable notification/outbox state without failing the whole ingestion run.
+- Retried notification updates attempt count and final status.
 
 ## Phase 15: Observability
 
@@ -1001,6 +1077,21 @@ Verification:
 
 - Links render from settings.
 
+### Task 15.5: Implement retention and cleanup jobs
+
+Requirements:
+
+- Enforce telemetry retention selected during first run: 90 days when free space is > 5 GB, 30 days when > 1 GB, otherwise disabled with warning.
+- Clean up detailed domain/ingestion events according to configured retention while preserving long-lived ingestion run summaries.
+- Purge screenshots and raw HTML debug captures from mounted volumes when corresponding records are purged/deleted.
+- Preserve raw transcripts and screenshots indefinitely unless explicitly purged/deleted.
+
+Verification:
+
+- Retention job deletes expired detailed events but not retained run summaries.
+- Channel/video delete with media purge removes screenshot/debug files from disk.
+- Low-disk first-run fixture disables or lowers telemetry retention with a visible warning.
+
 ## Phase 16: Admin operations
 
 Recommended MVP concurrency defaults:
@@ -1057,7 +1148,7 @@ Volumes:
 - Postgres data.
 - screenshots/media.
 - optional raw HTML debug capture.
-- Matrix crypto/session store.
+- Matrix bot session/config store for the selected MVP SDK; E2EE crypto/session store is MVP+.
 - Grafana/Prometheus/Loki/Tempo data as needed.
 
 Verification:
@@ -1070,7 +1161,7 @@ Backup:
 
 - PostgreSQL.
 - screenshots/media volume.
-- Matrix crypto/session store.
+- Matrix bot session/config store for the selected MVP SDK; E2EE crypto/session store is MVP+.
 - app config/secrets.
 
 MVP UI:
@@ -1088,7 +1179,21 @@ Restore validation:
 - Matrix test send succeeds; encrypted send applies when E2EE is enabled.
 - embedding test works.
 
-### Task 17.4: Implement upgrade and migration policy
+### Task 17.4: Document and test restore runbook
+
+Requirements:
+
+- Document restore procedure for PostgreSQL, screenshots/media, Matrix bot session/config, app config, and secrets.
+- Restore to a fresh Compose stack during validation rather than only checking that backup files exist.
+- Record backup artifact metadata and verification status in `backup_artifacts`/maintenance operations.
+- Keep polished automated restore UI, scheduled backups, and CLI backup/restore as MVP+.
+
+Verification:
+
+- Restore dry run validates login, search, screenshots, Matrix test send, and embedding test.
+- Restore docs clearly distinguish MVP Matrix bot session/config from MVP+ E2EE crypto-store restore verification.
+
+### Task 17.5: Implement upgrade and migration policy
 
 Requirements:
 
@@ -1108,7 +1213,23 @@ Verification:
 - Worker refuses to process jobs when DB/config/deployment versions are incompatible.
 - Upgrade & Maintenance panel renders risk level and required next action.
 
-## Phase 18: End-to-end acceptance tests
+## Phase 18: REST API contract conformance
+
+Requirements:
+
+- Implement every MVP endpoint and response shape in `docs/api/API_SPEC.md`, including auth/CSRF, operations, ingestion, search, recent searches, video details, edit/override, notes, embeddings, screenshots, repositories, external resources/link occurrences, admin health/tests, backups, and maintenance endpoints.
+- Endpoints whose behavior is explicitly MVP+ must be omitted from MVP docs or documented as MVP+ rather than implemented accidentally.
+- Mutation endpoints return stale search-document IDs, stale cluster IDs, and queued operations where relevant.
+- Errors use consistent RFC 7807-style problem details.
+- Batch retry/regenerate/delete endpoints return per-item acceptance/rejection details.
+
+Verification:
+
+- API conformance test enumerates `docs/api/API_SPEC.md` MVP endpoints and verifies route existence/auth behavior.
+- Search response fixture matches video-cluster contract and excludes MVP+ link-classification filters.
+- Admin health/test, maintenance, backup, screenshot, repository, and external-resource endpoint smoke tests pass.
+
+## Phase 19: End-to-end acceptance tests
 
 ### Scenario 18.1: Captioned video ingestion
 
@@ -1196,8 +1317,10 @@ Build in vertical slices after the foundation:
 8. Local LLM classification/semantic segmentation.
 9. Whisper fallback.
 10. Notes/edit/re-embedding.
-11. Matrix notification; E2EE is MVP+.
-12. Observability/deployment hardening.
+11. Video-cluster aggregate embeddings, high-signal matching, and daily digest dashboard.
+12. Matrix notification audit/outbox; E2EE is MVP+.
+13. Observability, retention, deployment, backup/restore, and upgrade hardening.
+14. REST API contract conformance and end-to-end acceptance tests.
 
 Even though all are hard MVP, this sequence produces testable increments.
 
@@ -1214,6 +1337,12 @@ Before declaring MVP complete:
 - Search latency is acceptable on representative dataset.
 - Ingestion handles partial failures and retries.
 - Backup/restore dry run documented and tested.
+- Daily digest dashboard and pending-action inbox satisfy priority/order requirements.
+- Notification audit/outbox retry behavior is verified.
+- Video-cluster aggregate embeddings are generated, invalidated, and used for high-signal matching.
+- Rate-limit deferments are persisted, enforced, surfaced, and clearable.
+- Retention/cleanup jobs handle domain events, telemetry policy, screenshots, and raw debug captures.
+- API contract conformance tests pass for all MVP endpoints.
 
 ## Open implementation decisions
 

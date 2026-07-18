@@ -1,0 +1,60 @@
+{
+  "agents": {
+    "lead": {
+      "persistent_name": "Morpheus",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "frontend-dev": {
+      "persistent_name": "Trinity",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "backend-dev": {
+      "persistent_name": "Tank",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "platform-dev": {
+      "persistent_name": "Dozer",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "data-ai-search": {
+      "persistent_name": "Neo",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "tester": {
+      "persistent_name": "Switch",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "scribe": {
+      "persistent_name": "Scribe",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "ralph": {
+      "persistent_name": "Ralph",
+      "universe": "The Matrix",
+      "created_at": "2026-07-18T00:02:46Z",
+      "legacy_named": false,
+      "status": "active"
+    }
+  }
+}

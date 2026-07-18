@@ -247,9 +247,10 @@ Requirements:
 
 - Dedicated Matrix bot account, separate from the user personal account.
 - Separate `streaming-digest-matrix-notifier` container/service.
-- Matrix crypto/session store persisted and backed up.
-- Manual one-time login and verification using the user's Android Matrix client documented.
-- Configurable room ID. Encrypted rooms/E2EE are MVP+.
+- Matrix bot session/config store persisted and backed up for the selected MVP SDK.
+- Manual Matrix bot login documented for MVP.
+- Configurable room ID.
+- E2EE crypto/session store persistence, Android client/device verification, and encrypted rooms/E2EE are MVP+.
 - Notifications sent for manual and scheduled ingestion runs by default.
 - Notification behavior configurable in app settings.
 
@@ -320,7 +321,7 @@ MVP documentation and implementation must cover backup/restore for:
 
 - PostgreSQL database.
 - Screenshot/media mounted volume.
-- Matrix crypto/session store.
+- Matrix bot session/config store for the selected MVP SDK; E2EE crypto/session store is MVP+.
 - Relevant app configuration/secrets.
 
 ## 3. Non-goals for MVP
