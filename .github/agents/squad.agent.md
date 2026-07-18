@@ -597,6 +597,12 @@ To enable full parallelism, shared writes use a drop-box pattern that eliminates
 
 **log/** — No change. Already per-session files.
 
+**Decision Classification** — Before writing to the decisions inbox, classify the decision:
+- **ARCHITECTURAL** (hard to reverse, real trade-off, a future reader needs the "why") → write a full ADR at `docs/adr/NNNN-<slug>.md` using the format in `.agents/skills/domain-modeling/ADR-FORMAT.md` (read it before writing; use the next unused NNNN number in `docs/adr/`), AND record only a one-line pointer in the inbox: `ADR-NNNN: <title> — see docs/adr/NNNN-<slug>.md (By: {agent})`
+- **TEAM/PROCESS/SCOPE** (roster, casting, routing, review verdicts, user directives, governance) → decisions inbox as today.
+
+`.squad/decisions.md` remains the single index — every decision is discoverable there — but architectural rationale lives exactly once, in the ADR. No duplicated summaries. Applies going forward; existing decisions.md entries and ADR numbering are not retroactively changed.
+
 ### Worktree Awareness
 
 Squad and all spawned agents may be running inside a **git worktree** rather than the main checkout. All `.squad/` paths (charters, history, decisions, logs) MUST be resolved relative to a known **team root**, never assumed from CWD.
@@ -803,8 +809,11 @@ prompt: |
   AFTER work:
   1. APPEND to .squad/agents/{name}/history.md under "## Learnings":
      architecture decisions, patterns, user preferences, key file paths.
-  2. If you made a team-relevant decision, write to:
-     .squad/decisions/inbox/{name}-{brief-slug}.md
+  2. If you made a team-relevant decision, classify it per the Decision
+     Classification rule (Shared File Architecture — Drop-Box Pattern):
+     architectural → full ADR in docs/adr/ + one-line pointer in
+     .squad/decisions/inbox/{name}-{brief-slug}.md;
+     team/process → .squad/decisions/inbox/{name}-{brief-slug}.md as today.
   3. SKILL EXTRACTION: If you found a reusable pattern, write/update
      .squad/skills/{skill-name}/SKILL.md (read templates/skill.md for format).
   
@@ -861,9 +870,12 @@ prompt: |
   1. ORCHESTRATION LOG: Write .squad/orchestration-log/{timestamp}-{agent}.md per agent. Use ISO 8601 UTC timestamp.
   2. SESSION LOG: Write .squad/log/{timestamp}-{topic}.md. Brief. Use ISO 8601 UTC timestamp.
   3. DECISION INBOX: Merge .squad/decisions/inbox/ → decisions.md, delete inbox files. Deduplicate.
+     Preserve ADR pointer lines verbatim (`ADR-NNNN: <title> — see docs/adr/...`) —
+     they are indexes, not content to expand.
   4. CROSS-AGENT: Append team updates to affected agents' history.md.
   5. DECISIONS ARCHIVE: If decisions.md exceeds ~20KB, archive entries older than 30 days to decisions-archive.md.
   6. GIT COMMIT: git add .squad/ && commit (write msg to temp file, use -F). Skip if nothing staged.
+     When ADRs were created this batch, also `git add docs/adr/` so ADRs land in the same commit.
   7. HISTORY SUMMARIZATION: If any history.md >12KB, summarize old entries to ## Core Context.
 
   Never speak to user. ⚠️ End with plain text summary after all tool calls.
@@ -924,7 +936,8 @@ If the user wants to remove someone:
 | File | Status | Who May Write | Who May Read |
 |------|--------|---------------|--------------|
 | `.github/agents/squad.agent.md` | **Authoritative governance.** All roles, handoffs, gates, and enforcement rules. | Repo maintainer (human) | Squad (Coordinator) |
-| `.squad/decisions.md` | **Authoritative decision ledger.** Single canonical location for scope, architecture, and process decisions. | Squad (Coordinator) — append only | All agents |
+| `.squad/decisions.md` | **Authoritative decision index.** Single canonical index of all decisions (architectural and team/process); full text for team/process decisions only — architectural full text lives in `docs/adr/`, referenced by pointer lines. | Squad (Coordinator) — append only | All agents |
+| `docs/adr/` | **Authoritative architectural rationale.** Full text of architectural decisions; indexed by pointer lines in `.squad/decisions.md`. | Any agent (per Decision Classification rule) | All agents |
 | `.squad/team.md` | **Authoritative roster.** Current team composition. | Squad (Coordinator) | All agents |
 | `.squad/routing.md` | **Authoritative routing.** Work assignment rules. | Squad (Coordinator) | Squad (Coordinator) |
 | `.squad/ceremonies.md` | **Authoritative ceremony config.** Definitions, triggers, and participants for team ceremonies. | Squad (Coordinator) | Squad (Coordinator), Facilitator agent (read-only at ceremony time) |
