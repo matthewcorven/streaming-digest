@@ -12,6 +12,7 @@ Format: JSON unless otherwise noted
 - All admin/operational endpoints require authentication.
 - Errors use consistent RFC 7807-style problem details.
 - Long-running operations enqueue application-owned operations and usually Hangfire jobs; callers track `/api/operations/{operationId}` instead of depending on Hangfire internals.
+- Re-running work has exactly two verbs (ADR-0002): **Retry** re-executes failed/deferred work only and is idempotent; **Reprocess** re-executes the full pipeline for an already-succeeded entity, bypassing the idempotency guard. "Regenerate" never appears as a user-facing verb.
 - Search endpoints return explainable ranking components.
 - Top-level MVP search results are video clusters. Use `matchedDocumentTypes` to filter which document types may match inside clusters.
 - Detail/edit DTOs for scraped editable fields expose `original`, `override`, and `effective` values.
@@ -83,12 +84,14 @@ Pagination conventions:
   "queuedOperations": [
     {
       "operationId": "uuid",
-      "operationType": "regenerate_embeddings",
+      "operationType": "reprocess_embeddings",
       "statusUrl": "/api/operations/{operationId}"
     }
   ]
 }
 ```
+
+`staleSearchDocumentIds` and `staleClusterEmbeddingIds` report entities whose stored content no longer matches current Effective Values (staleness is derived, ADR-0001); the queued reprocess clears them as a downstream consequence.
 
 ### 2.5 Batch operation request
 
@@ -100,7 +103,7 @@ Batch endpoints use a common item shape and should be all-or-report rather than 
     {
       "entityType": "search_document",
       "entityId": "uuid",
-      "action": "regenerate"
+      "action": "reprocess"
     }
   ],
   "dryRun": false
@@ -305,7 +308,7 @@ Request:
 
 ### POST `/api/models/activate-embedding-model`
 
-Changes active embedding model only after explicit confirmation. Model changes invalidate incompatible embeddings and queue regeneration.
+Changes the Active Embedding Model only after explicit confirmation. The pointer flips immediately, old-model embeddings become stale by derivation (ADR-0001), and the system enters Embedding Transition (ADR-0008) until the queued bulk reprocess completes.
 
 ```json
 {
@@ -354,10 +357,14 @@ Response item may flatten effective values:
   "name": "Channel Name",
   "profileUrl": "https://www.youtube.com/channel/UC...",
   "isPaused": false,
+  "isDegraded": false,
+  "consecutiveFailures": 0,
   "lastIngestedAt": "2026-07-16T00:00:00Z",
   "lastIngestionStatus": "processed_with_warnings"
 }
 ```
+
+Channel state precedence is Deleted > Paused > Degraded > Active: a Paused channel is never probed or processed; a Degraded channel gets a single lightweight metadata probe per scheduled run, with a successful probe clearing the Degraded state (ADR-0003).
 
 ### POST `/api/channels`
 
@@ -534,6 +541,12 @@ Response includes summary counts, item status, stage summary, warnings, defermen
     "videosFailed": 1,
     "repositoriesFound": 2
   },
+  "liveRollup": {
+    "pendingRetryCount": 0,
+    "deferredCount": 1,
+    "failedCount": 0,
+    "processedCount": 5
+  },
   "stageSummary": [
     {
       "stage": "transcript",
@@ -555,6 +568,8 @@ Response includes summary counts, item status, stage summary, warnings, defermen
 }
 ```
 
+Runs are immutable once `completedAt` is set (ADR-0005): `status` and `summary` are the frozen historical record, while `liveRollup` is derived from the current state of the run's items — the two can legitimately differ after successful retries. UI copy should distinguish "run outcome" from "current state."
+
 ### GET `/api/ingestion/runs/{runId}/items`
 
 Query params:
@@ -569,7 +584,7 @@ Retries failed/deferred item stage. Response: accepted operation.
 
 ### POST `/api/videos/{videoId}/retry`
 
-Retries full video ingestion or selected stages.
+Retries failed/deferred stages of a video. Applies only to stages in a failed or deferred state (ADR-0002); requests naming succeeded stages are rejected per-stage with a validation error.
 
 Request:
 
@@ -579,6 +594,20 @@ Request:
   "retryFailedOnly": true
 }
 ```
+
+### POST `/api/videos/{videoId}/reprocess`
+
+Re-runs the full ingestion pipeline for an already-succeeded video, bypassing the idempotency/skip guard (ADR-0002). A Reprocess discovers fresh platform state (including a higher-preference transcript, which activates via transcript cutover, ADR-0010), resets Retry Budgets, and marks affected search documents stale by derivation.
+
+Request:
+
+```json
+{
+  "notifyOnCompletion": false
+}
+```
+
+Response: accepted operation.
 
 ### POST `/api/external-link-occurrences/{occurrenceId}/retry`
 
@@ -590,7 +619,11 @@ Retries canonical resource classification/scraping/repository association proces
 
 ### POST `/api/repositories/{repositoryId}/retry`
 
-Retries repository metadata/README/LICENSE/DeepWiki processing for GitHub repositories in MVP. GitLab and Bitbucket are MVP+.
+Retries failed repository metadata/README/LICENSE/DeepWiki processing for GitHub repositories in MVP. GitLab and Bitbucket are MVP+.
+
+### POST `/api/repositories/{repositoryId}/reprocess`
+
+Re-runs the full repository pipeline for a succeeded repository (ADR-0002). Refreshes metadata, README, and LICENSE, and re-runs the DeepWiki check when its stored outcome was negative (no page or placeholder — the repo may have been indexed since). A stored reachable DeepWiki URL is not re-verified.
 
 ### GET `/api/rate-limit-deferments`
 
@@ -602,11 +635,11 @@ Clears an active deferment manually. Use carefully; normal expiry follows `retry
 
 ### POST `/api/batch/retry`
 
-Queues retries for multiple retryable items such as ingestion items, videos, external resources, repositories, notifications, or embeddings. Response uses the batch operation response shape.
+Queues retries for multiple retryable items such as ingestion items, videos, external resources, repositories, or notifications. Response uses the batch operation response shape. Items that have exhausted their Retry Budget are rejected per-item with `is_retryable = false`.
 
-### POST `/api/batch/regenerate`
+### POST `/api/batch/reprocess`
 
-Queues regeneration for multiple derived-data items such as search documents, embeddings, video-cluster embeddings, screenshots, or segment candidates. Response uses the batch operation response shape.
+Queues full-pipeline reprocessing for multiple succeeded entities (videos, external resources, repositories). Staleness and embedding regeneration follow as downstream consequences (ADR-0002). Response uses the batch operation response shape.
 
 ### POST `/api/batch/delete`
 
@@ -722,10 +755,16 @@ Response item is a video cluster search result. One video appears at most once p
     "embeddingProvider": "ollama",
     "embeddingModel": "bge-m3",
     "rankingFormulaVersion": "mvp-1",
-    "relativeSimilarityExplanation": "Relative to the active query, model, and pre-pagination candidate set; not confidence."
+    "relativeSimilarityExplanation": "Relative to the active query, model, and pre-pagination candidate set; not confidence.",
+    "embeddingTransition": {
+      "inTransition": false,
+      "coveragePercent": 100
+    }
   }
 }
 ```
+
+During an Embedding Transition (ADR-0008), vector search covers only Active-Embedding-Model embeddings and `embeddingTransition` reports rebuild progress; the UI shows a "search coverage rebuilding" banner rather than silently returning sparse results.
 
 `relativeSimilarityPercent` is calculated over the pre-pagination candidate set, defaulting to the top 200 vector candidates before hybrid aggregation.
 
@@ -742,11 +781,11 @@ Query params:
 
 ### GET `/api/search-documents/stale`
 
-Returns stale search documents for diagnostics/admin repair.
+Returns currently-stale search documents for diagnostics/admin repair. Staleness is computed (content-hash or model mismatch, ADR-0001), not read from a flag.
 
-### POST `/api/search-documents/{id}/regenerate`
+### POST `/api/search-documents/{id}/reprocess`
 
-Queues regeneration for a single search document. Response: accepted operation.
+Queues reprocessing for a single search document and its embedding. Response: accepted operation.
 
 ### GET `/api/vector-index/status`
 
@@ -875,7 +914,7 @@ Query params:
 
 ## 11. Edit/override endpoints
 
-All override endpoints return the immediate mutation shape and include effective values, stale search documents, stale cluster embeddings, and queued regeneration operations.
+All override endpoints return the immediate mutation shape and include effective values, stale search documents, stale cluster embeddings, and queued reprocess operations.
 
 ### PUT `/api/videos/{videoId}/overrides`
 
@@ -955,6 +994,8 @@ Query params:
 
 ### POST `/api/notes`
 
+MVP allows one note per target: creating when a live note already exists returns `409 Conflict`; use `PUT` to edit the existing note. Multiple notes per target are MVP+.
+
 Request:
 
 ```json
@@ -1008,9 +1049,9 @@ Response: immediate mutation.
 
 ## 13. Embedding endpoints
 
-### POST `/api/embeddings/regenerate`
+### POST `/api/embeddings/reprocess`
 
-Regenerate embeddings, typically after model change.
+Bulk reprocess of embeddings, typically after an embedding model change (this is the operation queued by `activate-embedding-model`, ADR-0008).
 
 Request:
 
@@ -1023,7 +1064,7 @@ Request:
 
 Response: accepted operation.
 
-### POST `/api/embeddings/regenerate-item`
+### POST `/api/embeddings/reprocess-item`
 
 Request:
 
@@ -1038,13 +1079,13 @@ Response: accepted operation.
 
 ### GET `/api/embeddings/status`
 
-Returns model, dimensions, stale count, failed count, last regeneration time, and active operation if present.
+Returns model, dimensions, computed stale count, failed count, last reprocess time, active operation if present, and embedding-transition state (`inTransition`, `coveragePercent`).
 
 ## 14. Screenshot/media endpoints
 
 ### GET `/api/screenshots/{screenshotId}`
 
-Returns WebP file.
+Returns the WebP file. When the file is missing from the volume (or the row is marked failed), returns a stable placeholder image instead of a 404, so result cards keep a fixed layout; the missing file is recorded as a domain event and the row becomes retryable as an Enrichment Stage failure.
 
 ### DELETE `/api/videos/{videoId}/screenshots`
 
@@ -1058,7 +1099,7 @@ Purge screenshots for channel. Response: accepted operation.
 
 ### GET `/api/repositories/{repositoryId}`
 
-Returns metadata, README status, LICENSE status, DeepWiki URL, source resources/videos, and original/override/effective editable fields.
+Returns metadata, README status, LICENSE status, DeepWiki URL, source resources/videos, and original/override/effective editable fields. The Repository is the single source for repository metadata and overrides (ADR-0009): a linked external resource classified `code_repository` delegates its title/description effective values to the Repository, and its own metadata override fields are ignored for display/search while the association exists.
 
 ### GET `/api/repositories/{repositoryId}/documents`
 
@@ -1070,7 +1111,7 @@ Returns videos/link occurrences that reference the repository.
 
 ### POST `/api/repositories/{repositoryId}/check-deepwiki`
 
-Queues DeepWiki check. Response: accepted operation.
+Queues a DeepWiki check. Re-check is meaningful only when the stored outcome was negative (no page or placeholder); a stored reachable DeepWiki URL is not re-verified in MVP. Response: accepted operation.
 
 ## 16. External resource and link occurrence endpoints
 
@@ -1101,11 +1142,11 @@ Returns all known video/source occurrences for a canonical resource.
 
 ### POST `/api/external-resources/{resourceId}/reclassify`
 
-Queues local LLM reclassification using current correction history.
+Queues local LLM reclassification using current correction history (active Corrections only, ADR-0007).
 
-### POST `/api/external-resources/{resourceId}/rescrape`
+### POST `/api/external-resources/{resourceId}/reprocess`
 
-Queues Crawlee/Playwright rescrape.
+Re-runs resource processing (scrape/classify/repository association) for a succeeded resource, bypassing the idempotency guard (ADR-0002). Response: accepted operation.
 
 ## 17. Admin health/test endpoints
 
@@ -1249,9 +1290,9 @@ Returns migration/config/deployment/derived-data preview and risk level.
 
 Applies allowed app/config/DB migrations when deployment compatibility checks pass. High-risk infrastructure migrations should point to guided/manual runbooks.
 
-### POST `/api/admin/derived-data/regenerate`
+### POST `/api/admin/derived-data/reprocess`
 
-Queues stale search document, embedding, aggregate vector, or index regeneration.
+Queues reprocessing of stale search documents, embeddings, aggregate vectors, or index rebuilds.
 
 ## 19. Matrix notifier internal API
 
@@ -1473,7 +1514,8 @@ MVP search results are video-clustered. Segment/repository/link/note matches app
 
 - `ingestion_run`
 - `retry_stage`
-- `regenerate_embeddings`
+- `reprocess`
+- `reprocess_embeddings`
 - `segment_regeneration`
 - `backup`
 - `migration`

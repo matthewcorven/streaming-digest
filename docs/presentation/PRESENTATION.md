@@ -1167,13 +1167,13 @@ Terminal events: `ingestion.completed`, `ingestion.failed` — trigger toast (§
 }
 ```
 
-**③ Operation status** — drives progress for accepted operations (model downloads, embedding regeneration, backups, batch retries).
+**③ Operation status** — drives progress for accepted operations (model downloads, embedding reprocessing, backups, batch retries).
 
 ```json
 {
   "type": "operation.status",
   "operationId": "uuid",
-  "operationType": "regenerate_embeddings",
+  "operationType": "reprocess_embeddings",
   "status": "running",
   "percentComplete": 41,
   "statusUrl": "/api/operations/uuid"

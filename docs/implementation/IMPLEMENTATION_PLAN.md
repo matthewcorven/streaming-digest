@@ -184,7 +184,7 @@ Verification:
 Requirements:
 
 - Seed missing `app_settings` defaults on startup without overwriting existing user values, per `docs/operations/UPGRADE_PATHS.md` app-setting seed rules.
-- Seed all settings listed in `docs/architecture/DATA_MODEL.md` §3.2, including `search.highSignalThresholdPercent` (default `80`), text/vector weights, ingestion defaults, `ingestion.defaultScheduleLocalTime` (`06:00`), `ingestion.tempMedia.maxBytes` (50% of first-run free disk bytes), screenshot offset, Matrix notification toggles, observability defaults, and debug raw-HTML default.
+- Seed all settings listed in `docs/architecture/DATA_MODEL.md` §3.2, including `search.highSignalThresholdPercent` (default `80`), `search.interactionBoostWindowDays` (default `90`), text/vector weights, ingestion defaults, `ingestion.scheduleLocalTime` (`06:00`) and `ingestion.scheduleTimeZone` (IANA zone captured from the browser during onboarding), `ingestion.minDurationSeconds` (default `61`), `ingestion.tempMedia.maxBytes` (50% of first-run free disk bytes), screenshot offset, Matrix notification toggles including `notifications.matrix.onBackfillRuns` (default `false`), observability defaults, and debug raw-HTML default.
 - Seed failures are logged and block startup only for settings required to boot.
 
 Verification:
@@ -245,11 +245,13 @@ Build the ingestion run detail view required by `docs/product/PRD.md` §2.6:
 - Extracted links/repos/websites, transcript status, screenshot status, and embedding status per item.
 - Links to Hangfire job, logs, and traces for the run.
 - Prominent display of active rate-limit deferments for the run (Task 4.5).
+- Runs are immutable once completed (ADR-0005): the page shows the frozen run outcome plus a live rollup derived from current item states, with copy distinguishing "run outcome" from "current state." Item timelines show retry history from domain events.
 
 Verification:
 
 - Fixture ingestion run renders stage timeline, per-item statuses, and retry actions.
 - Deferment fixture renders active deferments prominently on the run detail page.
+- A completed run with a subsequently retried-and-succeeded item renders frozen outcome and live rollup side by side.
 
 ### Task 2.3c: Establish PWA baseline
 
@@ -304,13 +306,13 @@ Requirements:
 - First-run can trigger selected model download through an internal service HTTP API that executes configured CLI commands against a mounted model volume.
 - User may alternatively provide an existing host model path that is mounted into the container, or follow displayed CLI commands manually.
 - Provide a refresh button to detect completion after file-path, mounted-model, or command-line setup.
-- Confirm before embedding model changes after initial setup; on confirmation invalidate old embeddings and queue regeneration.
+- Confirm before embedding model changes after initial setup; on confirmation the Active Embedding Model pointer flips immediately, old-model embeddings become stale by derivation (ADR-0001), and the system enters Embedding Transition (ADR-0008) with a coverage-rebuilding banner until the bulk reprocess completes.
 
 Verification:
 
 - Missing model shows options and command snippets.
 - Inline download records verified model state.
-- Embedding model switch asks confirmation and marks old embeddings invalid/stale.
+- Embedding model switch asks confirmation, enters Embedding Transition, and vector search covers only new-model embeddings until the reprocess finishes.
 
 ## Phase 3: Channel management
 
@@ -392,7 +394,7 @@ Retryable stage names:
 - `embeddings`
 - `notification`
 
-Retry can operate at video, stage, external link occurrence, external resource, repository, search-document/embedding, and notification levels as needed.
+Retry can operate at video, stage, external link occurrence, external resource, repository, search-document/embedding, and notification levels as needed. Vocabulary (ADR-0002): Retry applies to failed/deferred work only and is idempotent; Reprocess re-runs the full pipeline for a succeeded entity, bypassing the idempotency guard. Retry Budget (DATA_MODEL §3.29): 2 automatic backoff attempts + 5 manual Retries per item-stage; reaching the cap sets `is_retryable = false`, and Reprocess resets the budget.
 
 Job payload durability per `docs/operations/UPGRADE_PATHS.md`:
 
@@ -465,14 +467,15 @@ Verification:
 
 Rules:
 
-- Exclude Shorts.
+- Exclude Shorts per the Long-form selection rule: platform Shorts signal (`/shorts/` URL form or Shorts metadata flag) or duration below `ingestion.minDurationSeconds` (default 61). Excluded videos are counted in `videos_skipped` with reason `short_form` on the run — selection only, never retryable.
 - Regular public long-form videos only.
 - Default max age 30 days.
-- Backfill uses separate days/max-count.
+- Backfill uses separate days/max-count and preserves the idempotency guard (already-processed videos are skipped; Backfill is never an implicit Reprocess). Backfill produces a Digest marked `run_type: backfill`; Matrix notification defaults off via `notifications.matrix.onBackfillRuns`.
 
 Verification:
 
 - Unit tests for filtering.
+- Backfill over previously processed videos skips them.
 
 ### Task 5.4: Implement video idempotency and degraded-channel handling
 
@@ -481,14 +484,17 @@ Requirements:
 - Normalize YouTube video URL by removing query string and use it as idempotency key, with YouTube video ID as canonical platform identifier.
 - Normal daily ingestion skips already processed videos.
 - Previously processed videos are reprocessed only through explicit user retry/reprocess actions.
-- Adapter failures retry with exponential backoff for two retries, then circuit-break and mark channel degraded until a future daily run succeeds without failures.
+- Adapter failures retry with exponential backoff for two retries, then circuit-break and mark the channel Degraded (ADR-0003): stored on the channel, entered after two consecutive adapter-stage failures.
+- Degraded channels are skipped by scheduled ingestion, but each scheduled run performs a single lightweight probe (one metadata fetch) on Degraded non-Paused channels: success clears Degraded and the channel rejoins the run; failure increments the failure count.
+- An active Deferment pauses the failure counter; Paused channels are never probed; channel-state precedence is Deleted > Paused > Degraded > Active.
 - Failures without active retry may early-return for the affected item while allowing other items to continue.
 
 Verification:
 
 - Daily re-run does not duplicate or reprocess a processed video.
 - Explicit retry processes selected failed stages/items.
-- Repeated adapter failure marks channel degraded.
+- Two consecutive adapter failures mark the channel Degraded; a successful probe on the next scheduled run clears it.
+- A Paused-Degraded channel is never probed and stays Degraded until unpaused.
 
 ## Phase 6: Transcript and audio-to-text
 
@@ -499,9 +505,12 @@ Store:
 - `video_transcripts`
 - `transcript_cues`
 
+Exactly one active transcript per video, chosen by fixed preference `youtube_caption` > `local_whisper` > `youtube_auto_caption` (ADR-0010). A Reprocess that discovers a higher-preference transcript performs a transcript cutover: cue-level search documents are rebuilt from the new cues, segments re-map by timestamp overlap within the same Segment Generation, and cue overrides on the old transcript are preserved but inert. Manual transcript selection is MVP+.
+
 Verification:
 
 - Fixture transcript stored with timestamps.
+- Cutover integration test: auto-caption transcript active, then author captions arrive on Reprocess and become active with documents rebuilt.
 
 ### Task 6.2: Implement audio-to-text provider abstraction
 
@@ -582,13 +591,14 @@ Using Semantic Kernel + Ollama:
 - Output JSON segment boundaries/titles/summaries.
 - Validate output against schema.
 - Schema validation is the only MVP repair mechanism; invalid output is logged and written to stdout for development diagnostics, then deterministic chunks are used.
-- Never regenerate segments during normal daily ingestion. Segment regeneration is explicit user action only. If regenerated segments would change embeddings, stage embedding updates for user approval and surface the pending approval on dashboard and daily report.
+- Never re-segment during normal daily ingestion. Re-segmentation is explicit user action only, producing a new Segment Generation; approval performs the cutover (ADR-0001..0002 vocabulary): the new generation becomes Active, old-generation screenshots are purged, search documents and embeddings are marked stale and reprocessed for the new segments, and notes on old-generation segments become Orphaned Notes surfaced in the pending-action inbox for re-anchor or delete.
 
 Verification:
 
 - Unit test validates JSON parsing/fallback.
 - Invalid LLM output logs diagnostic and keeps deterministic chunks.
-- Explicit segment regeneration stages embedding updates pending approval.
+- Explicit re-segmentation stages embedding updates pending approval.
+- Cutover integration test: approval activates the new generation, purges old screenshots, and surfaces an Orphaned Note in the inbox.
 - Integration test with local model optional.
 
 ### Task 7.4: Generate WebP screenshots
@@ -601,6 +611,7 @@ Rules:
 - Store file on mounted volume.
 - Store metadata/path in DB.
 - If segments or screenshot offset change by explicit user action, purge/recreate screenshots immediately.
+- Screenshots are never load-bearing: the serving endpoint returns a stable placeholder instead of 404 when a file is missing; the missing file is recorded as a domain event and the row becomes retryable (Enrichment Stage), with per-video rollup `unknown`/`pending`/`partial`/`succeeded`/`failed`.
 
 Verification:
 
@@ -732,11 +743,13 @@ For repo owner/name:
 - Build `https://deepwiki.com/{owner}/{repo}`.
 - Fetch page.
 - Store URL only if reachable and not placeholder text such as "Index your code".
+- DeepWiki is a host scope like any other: a 429 defers all remaining checks in the run rather than failing them. Outcome is write-once, except negative outcomes (no page/placeholder) re-check on Repository Reprocess; a stored reachable URL is never re-verified in MVP.
 
 Verification:
 
 - Placeholder page is rejected.
 - Existing fixture is accepted.
+- 429 fixture defers remaining checks; negative outcome re-checks on Reprocess.
 
 ## Phase 10: Website scraping
 
@@ -1022,7 +1035,8 @@ Verification:
 
 Requirements:
 
-- Golden dataset of vague/natural-language queries mapped to expected video clusters (from the Task 0.4 fixture corpus).
+- Golden dataset of at least 20 vague/natural-language queries mapped to expected video clusters (from the Task 0.4 fixture corpus), authored query-first — each query written before its fixture video's metadata is finalized, so queries cannot be reverse-engineered from the text.
+- The gate is 100% top-3 recall on the dataset, no partial pass; regressions are fixed in ranking/weights/document construction, never by editing the dataset to fit. The dataset grows whenever a real user query fails.
 - Automated integration test asserts each expected cluster appears in the top 3 results.
 - Harness re-runs whenever the ranking formula version, embedding provider/model/dimensions, or search-document construction changes.
 - Recall regressions are reported per query with score components to aid diagnosis.
@@ -1129,6 +1143,8 @@ Send by default for:
 
 - manual runs.
 - scheduled runs.
+
+Notifications are excerpts of the stored Digest artifact (ADR-0006) — one assembly, two renderings, so Matrix and dashboard never disagree; notification retry re-renders the same stored payload. High-signal evaluation runs once at digest assembly and is skipped for runs completing during an Embedding Transition (ADR-0008).
 
 Notification content includes:
 
@@ -1259,7 +1275,7 @@ Recommended MVP concurrency defaults:
 - Whisper jobs: `1` globally.
 - Local LLM classification/segmentation jobs: `1` globally.
 
-Normal user actions should be provided contextually where they are useful: retry video, retry repo/link, regenerate embeddings for a visible item, purge screenshots for a video/channel, test Whisper/audio-to-text, test Matrix, run ingestion now, and run backfill.
+Normal user actions should be provided contextually where they are useful: retry video, retry repo/link, reprocess a visible item, purge screenshots for a video/channel, test Whisper/audio-to-text, test Matrix, run ingestion now, and run backfill.
 
 The single Admin page owns: change model, toggle observability, backup, upgrade/maintenance, and global settings.
 
@@ -1269,8 +1285,8 @@ Implement UI/API for:
 - run channel backfill.
 - retry failed video.
 - retry failed link/repo.
-- regenerate item embeddings.
-- regenerate all embeddings after model change.
+- reprocess item (video/repo/resource — full pipeline, bypassing idempotency; embeddings regenerate as a consequence, ADR-0002).
+- reprocess all embeddings after embedding-model change (the bulk model-change flow).
 - purge screenshots for video/channel.
 - test Matrix notification.
 - test embedding service.
@@ -1376,7 +1392,7 @@ Requirements:
 - Endpoints whose behavior is explicitly MVP+ must be omitted from MVP docs or documented as MVP+ rather than implemented accidentally.
 - Mutation endpoints return stale search-document IDs, stale cluster IDs, and queued operations where relevant.
 - Errors use consistent RFC 7807-style problem details.
-- Batch retry/regenerate/delete endpoints return per-item acceptance/rejection details.
+- Batch retry/reprocess/delete endpoints return per-item acceptance/rejection details.
 
 Verification:
 

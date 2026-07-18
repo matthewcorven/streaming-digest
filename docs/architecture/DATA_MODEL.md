@@ -79,10 +79,15 @@ Important settings:
 - `search.textWeight`
 - `search.vectorWeight`
 - `search.highSignalThresholdPercent`, default `80`
+- `search.interactionBoostWindowDays`, default `90`
 - `search.recentSearchRetentionDays` if later added; MVP supports clear-all rather than granular deletion
 - `notifications.matrix.enabled`
 - `notifications.matrix.onManualRuns`
 - `notifications.matrix.onScheduledRuns`
+- `notifications.matrix.onBackfillRuns`, default `false` — Backfill runs produce a Digest but do not notify by default
+- `ingestion.scheduleLocalTime`, default `06:00` — wall-clock time in `ingestion.scheduleTimeZone`
+- `ingestion.scheduleTimeZone` — IANA zone name captured from the browser during onboarding; the daily run fires at wall-clock time in this zone (DST-aware), never UTC-fixed, never container TZ
+- `ingestion.minDurationSeconds`, default `61` — duration floor for the Long-form selection rule
 - `observability.enabled`
 - `observability.links.grafanaUrl`
 - `observability.links.hangfireUrl`
@@ -140,7 +145,13 @@ Columns:
 - `is_paused boolean not null default false`
 - `default_max_age_days integer null`
 - `default_backfill_max_videos integer null`
+- `is_degraded boolean not null default false`
+- `consecutive_failures integer not null default 0`
+- `last_probe_at timestamptz null`
+- `degraded_at timestamptz null`
 - `last_ingested_at timestamptz null`
+
+Channel-state precedence (ADR-0003): Deleted > Paused > Degraded > Active, each layer strictly narrowing what a run may do. A Paused channel gets no selection, no probing, no processing, and no failure counting; Degraded probes fire only for non-Paused channels; a Paused-Degraded channel stays Degraded until unpaused, when the next run's probe evaluates it fresh. Search never discriminates by channel state.
 - `last_ingestion_status text null`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
@@ -197,6 +208,9 @@ Suggested statuses:
 - `processed_with_warnings`
 - `failed`
 - `skipped`
+- `unavailable` — terminal state: the platform reports the video definitively gone (deleted/private). Metadata retries stop, watch links become best-effort, all stored artifacts are preserved
+
+Status semantics: Core Stage failure (metadata, transcript via captions or Whisper, search documents, embeddings) ⇒ `failed`. Enrichment Stage failure (segmentation, screenshots, links, classification, repository docs, DeepWiki, website scrape, pinned comment) ⇒ `processed_with_warnings` when all Core Stages succeeded.
 
 ### 3.7 `video_transcripts`
 
@@ -430,6 +444,8 @@ Columns:
 - `github` for MVP.
 - `gitlab` and `bitbucket` are MVP+.
 
+Metadata delegation (ADR-0009): a Repository is the single source for repository metadata and overrides. An `external_resources` row classified `code_repository` keeps only classification and scrape status; its title/description effective values delegate to the linked Repository, and its metadata override fields are ignored for display/search while the association exists. The Resource→Repository association is created eagerly at classification time; the Repository row materializes when the metadata stage first succeeds.
+
 ### 3.16 `external_resource_repositories`
 
 Many-to-many link between canonical external resources and repositories.
@@ -525,6 +541,8 @@ Columns:
 
 Notes are embedded using `markdown`.
 
+MVP allows one note per target: enforce a partial unique index on `(target_type, target_id) WHERE deleted_at IS NULL`. Multiple notes per target are MVP+.
+
 ### 3.20 `field_override_history`
 
 Version history for user overrides.
@@ -588,6 +606,10 @@ Indexes:
 - `(document_type)`.
 - Unique identity over `(source_entity_type, source_entity_id, source_field_name, chunk_index, content_hash)` where practical.
 
+ADR-0001: `is_stale` is a read-model projection, not a separately written flag — a document is stale when its stored `content_hash` no longer matches the hash of the Effective Value of its source entity. See §7 for the full derivation rules.
+
+ADR-0004: documents derived from a shared canonical resource (e.g. a repository README chunk linked from two videos) are stored once per referencing video — identical content and content hash, distinct `parent_video_id` — so every document has exactly one parent video and cluster scoring stays uniform. Identical content hashes mean the embedding for duplicated content is computed once and shared; only the document rows duplicate.
+
 ### 3.22 `embeddings`
 
 Vector embeddings for search documents. All vector comparisons for a query must use the active provider/model/dimensions.
@@ -602,7 +624,7 @@ Columns:
 - `content_hash text not null`
 - `source_text_hash text null`
 - `embedding vector not null`
-- `embedding_status text not null default 'succeeded'`
+- `embedding_status text not null default 'succeeded'` — job outcome only: `pending` / `succeeded` / `failed`. Staleness is never stored here (ADR-0001)
 - `error_summary text null`
 - `generated_by_operation_id uuid null references operations(id)`
 - `created_at timestamptz not null`
@@ -626,7 +648,7 @@ Columns:
 - `content_hash text not null`
 - `embedding vector not null`
 - `component_weights_json jsonb not null`
-- `is_stale boolean not null default false`
+- `is_stale boolean not null default false` — read-model projection per ADR-0001, not a separately written flag
 - `requires_user_approval boolean not null default false`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
@@ -718,7 +740,11 @@ Columns:
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
 
-`operation_type` examples: `ingestion_run`, `retry_stage`, `regenerate_embeddings`, `segment_regeneration`, `backup`, `migration`, `model_download`, `health_check`.
+`operation_type` examples: `ingestion_run`, `retry_stage`, `reprocess_embeddings`, `segment_regeneration`, `backup`, `migration`, `model_download`, `health_check`.
+
+Vocabulary (ADR-0002): there are exactly two user-facing re-run verbs. **Retry** re-executes failed/deferred work only and is idempotent. **Reprocess** re-executes the full pipeline for an already-succeeded entity, bypassing the idempotency guard; staleness and embedding regeneration follow as consequences. "Regenerate" survives only as internal job naming — `reprocess_embeddings` is reserved for the bulk embedding-model-change flow.
+
+Mutability contract (ADR-0005): Ingestion Runs are immutable once `completed_at` is set (run detail pages derive a live rollup from current item states), Ingestion Items are living rows mutated in place by retries (each retry also writes a domain event), and Operations are the request handle — one per user/API request, one Operation may span many items, each item links only its latest Operation.
 
 ### 3.28 `ingestion_runs`
 
@@ -774,7 +800,7 @@ Columns:
 - `status text not null`
 - `attempt integer not null default 0`
 - `retry_count integer not null default 0`
-- `max_attempts integer null`
+- `max_attempts integer not null default 7` — Retry Budget: 2 automatic backoff attempts + 5 manual Retries; reaching the cap sets `is_retryable = false`. Reprocess resets the budget (deliberate fresh start)
 - `is_retryable boolean not null default true`
 - `next_retry_at timestamptz null`
 - `deferred_until timestamptz null`
@@ -854,6 +880,8 @@ Columns:
 
 Used for deterministic domain allow/block/classification lists and few-shot examples in local LLM prompts.
 
+Lifecycle (ADR-0007): a Correction is a side effect of a classification Override, never edited directly. Creating or changing a classification override writes the correction row; retracting the override sets `is_active = false`, withdrawing the example from future prompts. Only active corrections feed the classifier's rule/few-shot source.
+
 ### 3.33 `notifications`
 
 Notification audit records. MVP sends Matrix notifications without requiring E2EE; E2EE fields become relevant in MVP+.
@@ -884,9 +912,11 @@ MVP+ Matrix E2EE additions:
 - `verification_status text null`
 - Matrix crypto/session state is stored on a mounted volume, not in this table.
 
+The Notification is the only user-visible delivery concept: it owns status, attempt count, and retry affordances. Delivery outcome writes this row's status (`pending` → `sent` / `failed`); a user Retry of a Notification enqueues a fresh `outbox_messages` row.
+
 ### 3.34 `outbox_messages`
 
-Reliable application message/outbox records for dispatching Matrix notifications and other side effects.
+Reliable application message/outbox records for dispatching Matrix notifications and other side effects. Internal plumbing only — never surfaced in UI or API.
 
 Columns:
 
@@ -927,6 +957,8 @@ Columns:
 
 High-level maintenance operation records for backup, restore validation, migrations, index rebuilds, and derived-data regeneration.
 
+Implementation detail, invisible to API and UI: a Maintenance Operation is just an Operation whose type belongs to the maintenance family (`backup`, `migration`, `derived_data_regeneration`, `screenshot_purge`, `restore_validation`). This table only adds maintenance-specific columns to the 1:1-linked Operation row; consumers read `operations` filtered to the maintenance family. The split may merge into `operations.summary_json` with no user-visible change.
+
 Columns:
 
 - `id uuid primary key`
@@ -939,6 +971,20 @@ Columns:
 - `summary_json jsonb null`
 - `error_summary text null`
 - `created_at timestamptz not null`
+
+### 3.37 `digests`
+
+Stored, run-scoped digest artifacts (ADR-0006). Assembled once when an ingestion run completes; the dashboard renders the most recent digest and the Matrix notification is an excerpt of the same stored record — one assembly, two renderings, never independently computed.
+
+Columns:
+
+- `id uuid primary key`
+- `ingestion_run_id uuid not null references ingestion_runs(id)`
+- `run_type text not null`
+- `payload_json jsonb not null` — new videos, new resources (repositories, websites), high-signal matches, failed/skipped items, active deferments
+- `created_at timestamptz not null`
+
+High-signal matching runs once, at digest assembly time, against the recent-search embeddings as of that moment; runs completing during an Embedding Transition skip high-signal evaluation. Rolling windows and "since you last looked" semantics are MVP+.
 
 ## 4. Effective values
 
@@ -964,6 +1010,8 @@ Create/update search documents for:
 
 Do not embed LICENSE by default.
 
+Transcript-driven documents are always built from the Active Transcript (ADR-0010): exactly one active transcript per video, chosen by fixed preference `youtube_caption` > `local_whisper` > `youtube_auto_caption`. A transcript cutover marks cue-level search documents stale and rebuilds them from the new cues; segments re-map by timestamp overlap within the same Segment Generation; cue overrides on the old transcript are preserved but inert.
+
 ## 6. Hybrid search implementation notes
 
 Text search:
@@ -988,12 +1036,14 @@ Hybrid ranking:
   - `base = 0.65 * max(document_score) + 0.25 * average(top 3 document_scores) + 0.10 * coverage_score`
   - `coverage_score = min(distinctMatchedDocumentTypes / 4, 1.0)`
   - `note_boost = 0.08` when the cluster has a matching note, otherwise `0`
-  - `interaction_boost = min(0.05, 0.01 * recent_open_count_for_cluster)`
+  - `interaction_boost = min(0.05, 0.01 * recent_open_count_for_cluster)`, where the count covers interaction events of any type within a rolling window (`search.interactionBoostWindowDays`, default 90), capped at five events. Interaction events are retained indefinitely for audit; only the trailing window feeds ranking
   - `cluster_score = min(1.0, base + note_boost + interaction_boost)`
 - Return score components for explainability.
 - Include matched field/snippet.
 
 ## 7. Staleness and invalidation rules
+
+Staleness is derived, never stored (ADR-0001). A search document is stale when its stored `content_hash` no longer matches the hash of the Effective Value of its source entity. An embedding or `video_cluster_embeddings` row is stale when its parent search document is stale, or when the Active Embedding Model (provider + model + dimensions) differs from the one the embedding was generated with. Embedding status columns record only job outcome (`pending` / `succeeded` / `failed`). Queries that need "all stale items" compute staleness via hash/model comparison; a computed view or function keeps this ergonomic. Changing the Active Embedding Model requires explicit confirmation, flips the pointer immediately, and puts the system into Embedding Transition until the bulk reprocess completes: vector search covers only new-model embeddings, text search is unaffected, the UI shows a coverage-rebuilding banner, and High-Signal Match evaluation is skipped for runs completing mid-transition (ADR-0008).
 
 MVP invalidation should be narrow and explicit:
 

@@ -222,8 +222,8 @@ MVP admin UI must support:
 - View last channel ingestion status.
 - Retry failed video ingestion.
 - Retry failed link/repository ingestion.
-- Regenerate embeddings for one item.
-- Regenerate all embeddings after model change.
+- Reprocess one item (full pipeline; embeddings regenerate as a consequence).
+- Reprocess all embeddings after embedding-model change.
 - Purge screenshots for video/channel.
 - Test Matrix notification.
 - Test embedding service.

@@ -220,26 +220,26 @@ Production should expose only the services intentionally reachable over Tailscal
 
 1. User edits a field in modal.
 2. API stores override and previous override value/version history.
-3. API marks affected search documents stale.
-4. Hangfire job regenerates embeddings using effective values: override if present, otherwise original scraped value.
+3. Affected search documents become stale by derivation — stored content hash no longer matches the Effective Value (ADR-0001).
+4. Hangfire job reprocesses embeddings using effective values: override if present, otherwise original scraped value.
 5. Search results use effective values.
 
 ### 4.7 Matrix notification flow
 
 1. Ingestion run completes or fails.
-2. Worker writes run summary.
+2. Worker assembles and stores the run-scoped Digest (ADR-0006) — one assembly, two renderings.
 3. Worker queues notification request.
-4. Matrix notifier formats summary.
-5. Matrix notifier sends encrypted message to configured room ID.
-6. Notification event/status is stored.
+4. Matrix notifier renders the summary as an excerpt of the stored Digest, so Matrix and dashboard never disagree.
+5. Matrix notifier sends the message to the configured room ID (unencrypted in MVP; E2EE is MVP+).
+6. Notification event/status is stored on the user-visible Notification record; outbox messages are internal plumbing only.
 
 ### 4.8 Idempotency and retry flow
 
 - Daily ingestion uses the normalized YouTube video URL without query string as the idempotency key, with YouTube video ID as canonical platform identity.
-- Already processed videos are skipped unless the user explicitly retries selected stages/items.
+- Already processed videos are skipped unless the user explicitly Reprocesses the video (full pipeline, bypassing the guard) or Retries failed stages/items. There are exactly two user-facing re-run verbs (ADR-0002): Retry for failed/deferred work, Reprocess for succeeded work.
 - Failures without an active retry may short-circuit the affected item early while allowing other items to continue.
-- Retry uses Hangfire OSS jobs plus application-owned progression/batch tracking in PostgreSQL, defaults to failed stages/items only, and supports user-selected all/one/multiple retryable operations. Do not depend on Hangfire Pro batches for MVP.
-- External adapter failures use exponential backoff for two retries, then circuit-break the affected channel/dependency and mark the channel degraded until a later daily run succeeds without failures.
+- Retry uses Hangfire OSS jobs plus application-owned progression/batch tracking in PostgreSQL, defaults to failed stages/items only, and supports user-selected all/one/multiple retryable operations. Do not depend on Hangfire Pro batches for MVP. A Retry Budget bounds attempts: 2 automatic backoff retries plus 5 manual Retries per item-stage, then the item becomes permanently failed until Reprocessed.
+- External adapter failures use exponential backoff for two retries, then circuit-break the affected channel into the stored Degraded state (ADR-0003): skipped by scheduled runs but probed once per run with a single metadata fetch, clearing on success; Paused channels are never probed, and an active Deferment pauses the failure counter.
 
 ### 4.9 Deferred rate-limit flow
 
@@ -487,7 +487,7 @@ Pinned-comment extraction is best-effort. MVP should determine during early deve
 
 Repository fetching defaults to unauthenticated public REST APIs for GitHub in MVP. GitLab and Bitbucket are MVP+. User-provided PATs are MVP+, OAuth is MVP++.
 
-DeepWiki detection is MVP-simple: store the URL only when the fetch returns HTTP 200 and the response does not contain `Index your code`.
+DeepWiki detection is MVP-simple: store the URL only when the fetch returns HTTP 200 and the response does not contain `Index your code`. DeepWiki is a host scope like any other: a 429 defers remaining checks in the run rather than failing them; negative outcomes (no page/placeholder) re-check on Repository Reprocess; a stored reachable URL is never re-verified in MVP.
 
 ### 9.1 Recommended MVP concurrency defaults
 
