@@ -61,7 +61,9 @@ Verification:
 Add packages for:
 
 - ASP.NET Core 10 LTS.
-- Blazor WASM hosted setup.
+- Blazor WASM hosted setup (no SSR — client served as static files from the API project).
+- Microsoft Fluent UI Blazor components (`Microsoft.FluentUI.AspNetCore.Components` NuGet package) — the UI design system; see `docs/architecture/ARCHITECTURE.md` §5.2 and the fluentui-blazor skill for usage guidance.
+- PWA baseline assets (web app manifest, app icons/maskable icons, service worker registration) — scaffolded in the WASM project from the start; see `docs/architecture/ARCHITECTURE.md` §5.2 PWA subsection, the pwa-development skill, and https://whatpwacando.today/. Full offline mode is MVP+.
 - Aspire orchestration.
 - Npgsql EF Core provider.
 - pgvector Npgsql support.
@@ -92,6 +94,42 @@ Verification:
 - Invalid config fails startup with actionable message.
 - UI setting changes survive container restart when persisted to the configured mutable store.
 
+### Task 0.4: Establish test fixture library
+
+Create a shared fixture library used by unit/integration/acceptance tests:
+
+- Recorded yt-dlp channel/video metadata JSON, including chapters and captions variants.
+- Caption/transcript fixtures with timestamps.
+- Bundled tiny audio clip for audio-to-text tests.
+- Short test video fixture for screenshot generation.
+- Local test HTML page and controlled `robots.txt` fixtures.
+- GitHub repository metadata/README/LICENSE fixtures, including missing-document variants.
+- DeepWiki reachable-page and `Index your code` placeholder fixtures.
+- Rate-limit (429 + `Retry-After`) fixtures for YouTube, repository hosts, DeepWiki, and website hosts.
+- URL normalization/classification corpus with tracking parameters and redirect chains.
+- Representative vague-query corpus with expected video-cluster mappings for the recall harness (Task 12.7).
+
+Verification:
+
+- Every fixture above loads in at least one test.
+- Fixture provenance/licensing notes are recorded in the fixture README.
+
+### Task 0.5: Wire baseline observability instrumentation
+
+Wire OpenTelemetry and structured logging in API and worker during initial solution setup rather than retrofitting in Phase 15.
+
+Requirements:
+
+- OTLP export to Aspire dashboard locally and to the OTel Collector endpoint when configured.
+- Baseline instrumentation for HTTP requests, EF Core/Db calls, and Hangfire jobs.
+- Correlation/trace ID propagation helpers that ingestion stages and adapters adopt as they are built.
+- Serilog or `Microsoft.Extensions.Logging` structured logging configured in both hosts.
+
+Verification:
+
+- Local Aspire dashboard shows traces/logs/metrics for a smoke API request and test job.
+- Every later phase's service code emits traces without additional plumbing work.
+
 ## Phase 1: Database foundation
 
 ### Task 1.1: Create PostgreSQL migration baseline
@@ -113,7 +151,7 @@ Then add content/search tables in later tasks.
 Verification:
 
 - Integration test applies migrations to test PostgreSQL.
-- Required extensions installed: `vector`, `pg_trgm`.
+- Required extensions installed: `vector`, `pg_trgm`, and `unaccent` when text-normalization search needs it per `docs/architecture/ARCHITECTURE.md`.
 
 ### Task 1.2: Add EF Core DbContext and repositories
 
@@ -140,6 +178,19 @@ Implement a migration pattern for:
 Verification:
 
 - Integration test confirms indexes/extensions exist.
+
+### Task 1.4: Implement app-settings default seeding
+
+Requirements:
+
+- Seed missing `app_settings` defaults on startup without overwriting existing user values, per `docs/operations/UPGRADE_PATHS.md` app-setting seed rules.
+- Seed all settings listed in `docs/architecture/DATA_MODEL.md` §3.2, including `search.highSignalThresholdPercent` (default `80`), text/vector weights, ingestion defaults, `ingestion.defaultScheduleLocalTime` (`06:00`), `ingestion.tempMedia.maxBytes` (50% of first-run free disk bytes), screenshot offset, Matrix notification toggles, observability defaults, and debug raw-HTML default.
+- Seed failures are logged and block startup only for settings required to boot.
+
+Verification:
+
+- First startup seeds all defaults; second startup preserves user-modified values.
+- Upgrade-style startup with a new setting key adds only the missing key.
 
 ## Phase 2: Authentication and app shell
 
@@ -179,12 +230,54 @@ Pages:
 - Dashboard.
 - Search.
 - Channels.
-- Ingestion Runs.
+- Ingestion Runs (list and detail).
 - Admin/Settings.
 
 Verification:
 
 - User can log in and navigate.
+
+### Task 2.3a: Implement ingestion run detail UI
+
+Build the ingestion run detail view required by `docs/product/PRD.md` §2.6:
+
+- Timeline by stage, per-video status, and failures with retry buttons.
+- Extracted links/repos/websites, transcript status, screenshot status, and embedding status per item.
+- Links to Hangfire job, logs, and traces for the run.
+- Prominent display of active rate-limit deferments for the run (Task 4.5).
+
+Verification:
+
+- Fixture ingestion run renders stage timeline, per-item statuses, and retry actions.
+- Deferment fixture renders active deferments prominently on the run detail page.
+
+### Task 2.3c: Establish PWA baseline
+
+Set up the PWA foundation declared in `docs/architecture/ARCHITECTURE.md` §5.2 so the app is installable and app-like from the first UI milestone, rather than retrofitting PWA later:
+
+- Web app manifest (name, short name, icons, `start_url`, `display: standalone`, theme/background colors).
+- Maskable icons and splash assets for desktop and mobile installs.
+- Service worker registration for install/lifecycle only — no offline data caching, offline search, or background sync (full offline mode is MVP+).
+- Responsive/mobile-first layout verification across desktop and mobile viewport sizes.
+- Consult the `pwa-development` skill as the authoritative pattern reference and https://whatpwacando.today/ for per-platform capability behavior.
+
+Verification:
+
+- App is installable and launches in standalone mode on Chrome/Edge desktop and Android.
+- Service worker registers without errors; no offline caching behavior is active yet.
+- Layout is usable at mobile viewport sizes for the app shell pages from Task 2.3.
+
+### Task 2.3b: Scaffold API contract conformance harness
+
+Scaffold the Phase 18 conformance test early so contract drift is detected per phase rather than only at the end:
+
+- Generate/enumerate the MVP endpoint catalog from `docs/api/API_SPEC.md`.
+- Each catalog entry asserts route existence and auth behavior; unimplemented routes are tracked as a known-pending list that shrinks as phases complete.
+- The known-pending list must be empty for Phase 18 to pass.
+
+Verification:
+
+- Harness runs in CI from Phase 2 onward and reports implemented-vs-pending endpoint counts.
 
 ### Task 2.4: Implement first-run onboarding state
 
@@ -241,10 +334,13 @@ UI supports:
 - Edit settings.
 - Delete with optional related data deletion.
 
+Deletion semantics follow `docs/architecture/DATA_MODEL.md` §9: canonical repositories and external resources shared by multiple videos/links lose only their associations/occurrences and are deleted only when no remaining associations exist, unless the user explicitly requests force purge.
+
 Verification:
 
 - Manual UI test with test channel.
 - Non-YouTube and logged-in-only subscription import inputs are rejected or labeled MVP+.
+- Integration test: deleting a channel whose repository is shared with another channel's video removes associations but preserves the canonical repository/resource.
 
 ## Phase 4: Hangfire and ingestion runs
 
@@ -298,10 +394,16 @@ Retryable stage names:
 
 Retry can operate at video, stage, external link occurrence, external resource, repository, search-document/embedding, and notification levels as needed.
 
+Job payload durability per `docs/operations/UPGRADE_PATHS.md`:
+
+- Use stable, versioned DTOs for all serialized Hangfire job payloads; record `job_payload_version` on ingestion items.
+- Old serialized payloads map to current DTOs or are marked cancelled/retryable from the UI instead of failing deserialization.
+
 Verification:
 
 - Retry UI can select failed stages/items without Hangfire Pro.
 - Old queued job/stage names can be mapped or cancelled/recreated safely.
+- Fixture job enqueued with a prior payload version deserializes or is surfaced as retryable rather than crashing the worker.
 
 ### Task 4.4: Add admin run/retry endpoints
 
@@ -679,6 +781,23 @@ Verification:
 - Scrapes local test page.
 - Excluded URLs create partial failure records skipped from retry unless URL changes.
 
+### Task 10.1a: Establish scraper service toolchain and orchestration
+
+If the scraper is Node/TypeScript (per Task 0.1), `dotnet build` alone does not cover it.
+
+Requirements:
+
+- Node/TypeScript build and test commands (`npm ci`, `npm run build`, `npm test`) for the scraper service.
+- Playwright browser installation as a documented, repeatable build/Docker step.
+- Aspire AppHost orchestration of the non-.NET scraper service in local development.
+- Compose service wiring for the scraper, including internal-only networking and health checks.
+
+Verification:
+
+- Scraper build/test commands pass locally and in CI.
+- Aspire AppHost starts the scraper alongside .NET services.
+- Compose stack starts the scraper with the API/worker able to reach it on the internal network.
+
 ### Task 10.2: Add robots.txt and rate limiting
 
 Requirements:
@@ -897,6 +1016,38 @@ Verification:
 - High-signal recent-search matches appear with relative-similarity percentages and links to available timestamp/repository/website artifacts.
 - Pending-action fixture renders retry/approve/test actions without requiring log inspection.
 
+### Task 12.7: Build search recall evaluation harness
+
+`docs/architecture/ARCHITECTURE.md` §4.10 sets a hard recall target: the intended recalled video cluster appears in the top 3 results for the representative vague-query corpus. Fixed-data ordering tests in 12.3/12.5 validate the formula, not recall.
+
+Requirements:
+
+- Golden dataset of vague/natural-language queries mapped to expected video clusters (from the Task 0.4 fixture corpus).
+- Automated integration test asserts each expected cluster appears in the top 3 results.
+- Harness re-runs whenever the ranking formula version, embedding provider/model/dimensions, or search-document construction changes.
+- Recall regressions are reported per query with score components to aid diagnosis.
+
+Verification:
+
+- Golden dataset meets the top-3 recall target on the representative corpus.
+- Harness fails when a ranking/model change drops an expected cluster out of the top 3.
+
+### Task 12.8: Measure search performance against latency targets
+
+Own and verify the search performance targets declared in this plan (between Phases 11 and 12).
+
+Requirements:
+
+- Generate synthetic representative datasets at approximately 500 and approximately 2,000 videos with proportional segments, transcripts, links, repositories, notes, search documents, and embeddings.
+- Measure P50/P95 search latency on both datasets against targets: <= 2s/5s at < 500 videos; <= 3s/10s at 2,000 videos.
+- UI shows a spinner or progress state after 1 second.
+- Document the measurement environment and how to re-run the benchmark.
+
+Verification:
+
+- Latency targets met on both dataset sizes or documented with a remediation plan.
+- UI progress indicator appears after 1 second for slow queries.
+
 ## Phase 13: Notes and edit modals
 
 ### Task 13.1: Implement override APIs
@@ -1013,9 +1164,11 @@ Verification:
 
 ## Phase 15: Observability
 
-### Task 15.1: Add OpenTelemetry instrumentation
+### Task 15.1: Verify and extend OpenTelemetry instrumentation
 
-Instrument:
+Baseline instrumentation (OTLP export, HTTP/DB/Hangfire instrumentation, correlation helpers, structured logging) is wired in Task 0.5. This task verifies and extends coverage to all remaining signal sources.
+
+Instrument/verify:
 
 - API requests.
 - DB calls.
@@ -1029,7 +1182,8 @@ Instrument:
 
 Verification:
 
-- Local Aspire dashboard shows traces/logs/metrics.
+- Local Aspire dashboard shows traces/logs/metrics for each signal source above.
+- No service required late retrofit of baseline plumbing to emit traces.
 
 ### Task 15.2: Add production observability Compose services
 
@@ -1140,6 +1294,7 @@ Requirements:
 Verification:
 
 - Fresh host can start stack from documented command.
+- Cross-platform dev note (per `docs/architecture/ARCHITECTURE.md` §12): documented manual verification that the Aspire AppHost and key dev flows start on macOS ARM and Windows ARM, with CPU fallback confirmed where GPU is unavailable.
 
 ### Task 17.2: Configure volumes
 
@@ -1225,13 +1380,15 @@ Requirements:
 
 Verification:
 
-- API conformance test enumerates `docs/api/API_SPEC.md` MVP endpoints and verifies route existence/auth behavior.
+- API conformance test enumerates `docs/api/API_SPEC.md` MVP endpoints and verifies route existence/auth behavior; the Task 2.3b known-pending list is empty.
 - Search response fixture matches video-cluster contract and excludes MVP+ link-classification filters.
 - Admin health/test, maintenance, backup, screenshot, repository, and external-resource endpoint smoke tests pass.
+- Channel/video deletion verifies shared-canonical-resource semantics: associations/occurrences are removed, and shared repositories/resources survive unless force-purged (Task 3.2).
+- Old Hangfire payload fixture deserializes or is surfaced as retryable per Task 4.3.
 
 ## Phase 19: End-to-end acceptance tests
 
-### Scenario 18.1: Captioned video ingestion
+### Scenario 19.1: Captioned video ingestion
 
 Given a configured channel with a recent long-form public video with captions:
 
@@ -1243,7 +1400,7 @@ Given a configured channel with a recent long-form public video with captions:
 - embeddings generated.
 - search finds transcript segment.
 
-### Scenario 18.2: No-caption video ingestion
+### Scenario 19.2: No-caption video ingestion
 
 Given a recent long-form public video without captions:
 
@@ -1253,7 +1410,7 @@ Given a recent long-form public video without captions:
 - transcript stored.
 - search finds transcript text.
 
-### Scenario 18.3: Repository link
+### Scenario 19.3: Repository link
 
 Given a video description includes a GitHub repo:
 
@@ -1263,7 +1420,7 @@ Given a video description includes a GitHub repo:
 - DeepWiki checked.
 - result card links repo and parent video.
 
-### Scenario 18.4: Website link
+### Scenario 19.4: Website link
 
 Given a video includes a non-ad website:
 
@@ -1271,7 +1428,7 @@ Given a video includes a non-ad website:
 - visible text embedded.
 - result card links website and parent video.
 
-### Scenario 18.5: Edit and notes
+### Scenario 19.5: Edit and notes
 
 - User edits transcript or title.
 - Override history records previous value.
@@ -1279,13 +1436,13 @@ Given a video includes a non-ad website:
 - User adds EasyMDE note.
 - Search finds note.
 
-### Scenario 18.6: Matrix notification
+### Scenario 19.6: Matrix notification
 
 - Manual ingestion completes.
 - Dedicated bot sends summary to configured Matrix room; E2EE is MVP+.
 - User sees message on Android Matrix client.
 
-### Scenario 18.7: Observability
+### Scenario 19.7: Observability
 
 - API request trace visible.
 - Worker ingestion trace visible.
@@ -1293,48 +1450,51 @@ Given a video includes a non-ad website:
 - Metrics in Prometheus/Grafana.
 - Domain event in Postgres.
 
-### Scenario 18.8: Killer journey
+### Scenario 19.8: Killer journey
 
 Given a user adds one public YouTube channel and leaves the default scheduled run enabled:
 
 - Scheduled ingestion runs.
-- Search for a vague project idea returns the relevant video cluster.
+- Search for a vague project idea returns the relevant video cluster in the top 3 results (asserted by the Task 12.7 recall harness).
 - The cluster exposes top-level video metadata, warning state, and whatever timestamp/repository/website/note/related-item data is available at that time.
 - Related items show visible `Relative similarity` percentages.
 - Failures are prominent and retryable without reading logs.
 
-## Implementation sequencing recommendation
+## Implementation sequencing
 
-Build in vertical slices after the foundation:
+Execution order is the vertical slices below; phase numbering is a reference grouping for requirements, not the build order. Each slice produces a testable increment.
 
-1. Auth + channel CRUD + Hangfire.
-2. Basic yt-dlp metadata ingestion.
-3. Transcript ingestion + search documents + embeddings.
-4. Basic search UI.
-5. Segmentation + screenshots.
-6. Link/repo ingestion.
-7. Website scraping.
-8. Local LLM classification/semantic segmentation.
-9. Whisper fallback.
-10. Notes/edit/re-embedding.
-11. Video-cluster aggregate embeddings, high-signal matching, and daily digest dashboard.
-12. Matrix notification audit/outbox; E2EE is MVP+.
-13. Observability, retention, deployment, backup/restore, and upgrade hardening.
-14. REST API contract conformance and end-to-end acceptance tests.
+1. Foundation: solution, config, fixtures, baseline observability (Phase 0), database foundation and settings seeding (Phase 1).
+2. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness).
+3. Basic yt-dlp metadata ingestion (Phase 5).
+4. Transcript ingestion + search documents + embeddings + basic search UI (Phases 6, 11, early 12) - first end-to-end killer-journey checkpoint: a vague query returns a video cluster.
+5. Segmentation + screenshots (Phase 7).
+6. Link/repo ingestion (Phases 8-9).
+7. Website scraping, including scraper toolchain wiring (Phase 10).
+8. Local LLM classification/semantic segmentation (8.4, 7.3).
+9. Whisper fallback (6.3-6.4).
+10. Notes/edit/re-embedding (Phase 13).
+11. Video-cluster aggregate embeddings, high-signal matching, daily digest dashboard, recall harness, and performance measurement (11.7, 12.5-12.8).
+12. Matrix notification audit/outbox; E2EE is MVP+ (Phase 14).
+13. Production observability stack, retention, deployment, backup/restore, and upgrade hardening (15.2-15.5, 16, 17).
+14. REST API contract conformance and end-to-end acceptance tests (Phases 18-19).
 
-Even though all are hard MVP, this sequence produces testable increments.
+Even though all are hard MVP, this sequence produces testable increments and validates the killer journey as early as slice 4.
 
 ## Quality gates
 
 Before declaring MVP complete:
 
 - `dotnet test` passes.
+- Scraper service build/test commands pass (if Node/TypeScript per Task 10.1a).
 - Integration tests run against PostgreSQL + pgvector.
 - Compose stack starts cleanly.
 - Local model health checks pass.
 - Audio-to-text health check passes.
 - Matrix test notification succeeds; encrypted test notification is MVP+.
-- Search latency is acceptable on representative dataset.
+- Search recall harness meets the top-3 target on the representative vague-query corpus (Task 12.7).
+- Search latency meets P50/P95 targets on the ~500 and ~2,000 video representative datasets (Task 12.8).
+- API contract conformance tests pass for all MVP endpoints and the Task 2.3b known-pending list is empty.
 - Ingestion handles partial failures and retries.
 - Backup/restore dry run documented and tested.
 - Daily digest dashboard and pending-action inbox satisfy priority/order requirements.
@@ -1342,7 +1502,6 @@ Before declaring MVP complete:
 - Video-cluster aggregate embeddings are generated, invalidated, and used for high-signal matching.
 - Rate-limit deferments are persisted, enforced, surfaced, and clearable.
 - Retention/cleanup jobs handle domain events, telemetry policy, screenshots, and raw debug captures.
-- API contract conformance tests pass for all MVP endpoints.
 
 ## Open implementation decisions
 

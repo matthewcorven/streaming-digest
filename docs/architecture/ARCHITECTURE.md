@@ -1,7 +1,7 @@
 # Streaming Digest Technical Architecture
 
 Status: MVP architecture agreed
-Target runtime: ASP.NET Core 10, Blazor WASM, Aspire, Docker Compose, PostgreSQL + pgvector
+Target runtime: ASP.NET Core 10, Blazor WASM (PWA-enabled), Microsoft Fluent UI Components, Aspire, Docker Compose, PostgreSQL + pgvector
 
 ## 1. Architecture goals
 
@@ -12,6 +12,7 @@ Streaming Digest must be:
 - Observable locally through Aspire and in deployment through Prometheus/Grafana/Loki/Tempo/OpenTelemetry Collector.
 - Private by default and suitable for Tailscale-only access.
 - Single-user authenticated.
+- PWA-enabled for an installable, app-like UX across desktop and mobile platforms from a single codebase.
 - Capable of local embeddings, local LLM inference, and local audio-to-text.
 - Robust against partial ingestion failures, explicit retries, idempotent daily ingestion, and deferred processing under rate limits.
 - Designed for hybrid text/vector search over YouTube-derived knowledge artifacts.
@@ -23,7 +24,11 @@ Streaming Digest must be:
 Responsibilities:
 
 - Hosts ASP.NET Core 10 REST API.
-- Hosts Blazor WASM static assets.
+- Hosts the Blazor WebAssembly (WASM) UI as static files served directly from the API project.
+- The UI is built with **Microsoft Fluent UI Blazor components** (`Microsoft.FluentUI.AspNetCore.Components` NuGet package).
+- The UI runs **entirely client-side** — **no server-side rendering (SSR)**. The API serves the compiled WASM static assets and the app bootstraps in the browser.
+- The WASM app is **PWA-enabled**: installable, app-like experience delivered via a web app manifest and service worker, both served as static assets from the API project alongside the WASM files.
+- All UI↔backend communication is via **HTTP API calls only**; there is no SignalR circuit or server-side rendering pipeline.
 - Handles login/session/cookie auth.
 - Serves search, admin, notes, edit, and ingestion status endpoints.
 - Hosts Hangfire dashboard at `/admin/jobs` behind authentication.
@@ -267,6 +272,45 @@ Host Blazor WASM from the API. Benefits:
 - Single public application endpoint.
 - Simpler auth/cookie handling.
 - Easier Tailscale/reverse-proxy configuration.
+
+**Component library:** Microsoft Fluent UI Blazor components via the `Microsoft.FluentUI.AspNetCore.Components` NuGet package. Fluent UI provides the design system, theming, and all standard UI controls (grids, forms, dialogs, navigation, etc.) so no additional CSS framework is needed.
+
+**Hosting model:**
+
+- **No server-side rendering (SSR).** The UI is compiled to WebAssembly and runs entirely in the browser.
+- The API project serves the WASM app as **static files** only — there is no Blazor Server circuit, no interactive server-side rendering, and no SignalR connection for UI state.
+- All backend communication is via **HTTP API calls** from the WASM client to the ASP.NET Core API endpoints.
+
+**Development reference:** The `fluentui-blazor` skill is available for Fluent UI component usage patterns, theming guidance, and integration best practices during development.
+
+**PWA:**
+
+Streaming Digest is a **Progressive Web App from the very start of UI implementation** — PWA is embraced as a first-class design input, not retrofitted later.
+
+Rationale:
+
+- **Aligned UI/UX across platforms.** One codebase delivers a consistent experience on desktop, mobile, and tablet without per-OS app builds.
+- **Installable, app-like experience.** The app installs to home screen / app shelf and launches in its own window with platform-native feel (standalone display mode, app icon, splash screen).
+- **Single codebase for all OS targets.** No separate Electron wrapper, mobile app, or store distribution pipeline.
+
+In scope for MVP:
+
+- Web app manifest (name, icons, start_url, display mode, theme/background colors).
+- Installability on supported platforms (Chrome/Edge desktop and Android; Add-to-Home-Screen on iOS).
+- App icons and splash screens, including maskable icons for Android adaptive icons.
+- Service worker registration for **lifecycle and install support** — the worker exists and is kept current from day one, but is not yet an offline engine.
+- Responsive, mobile-first layout and platform-appropriate UX, leveraging PWA capabilities (display-mode detection, share target, app shortcuts, etc.) as needed for great UX on each platform.
+
+MVP+ (explicitly deferred):
+
+- **Full offline mode**: offline data caching of search results and artifacts, offline search, and background sync of user actions (notes, edits, approvals). The service worker foundation laid in MVP makes this an incremental addition later rather than a rework.
+
+Development reference:
+
+- The `pwa-development` skill is installed and is the **authoritative reference** for PWA patterns (manifest fields, service worker registration, caching strategies) — prefer it over assumptions about PWAs.
+- https://whatpwacando.today/ is the capability reference for what PWAs can do on each platform.
+
+Compatibility: PWA fits naturally with the declared stack — Blazor WASM publishes `blazor.webassembly.js` plus `service-worker.js` and `manifest.json` as static assets from the WASM project, which the API already serves as static files under the no-SSR hosting model. HTTPS is satisfied by the Tailscale/reverse-proxy deployment path (and localhost during development).
 
 ### 5.3 Hangfire
 

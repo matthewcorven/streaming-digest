@@ -40,7 +40,7 @@ App/service-only upgrades keep the same container topology, mounted volumes, pub
 | Change type | Example | Deployment shape changes | Expected upgrade path | Edge-case handling |
 |---|---|---|---|---|
 | API/backend code change | New endpoint or retry behavior | No | Pull image, restart API/worker, run startup checks | Worker waits for DB/config compatibility before processing jobs |
-| Blazor UI change | New result-card layout | No | Pull API/Web image and restart | Hosted WASM assets should be version-aligned with API |
+| Blazor UI change | New result-card layout | No | Pull API/Web image and restart | Hosted WASM assets should be version-aligned with API; PWA service worker update flow applies (see §3.3) |
 | Worker logic change | Better yt-dlp parsing | No | Pull worker image and restart | Already processed videos are not reprocessed unless explicitly retried |
 | Matrix notifier code change | Improved message formatting | No | Pull notifier image and restart | Existing Matrix crypto store is relevant only when E2EE is enabled after MVP |
 | Scraper code change | Improved visible-text extraction | No | Pull scraper image and restart | Existing scraped pages remain as-is unless explicit retry/reprocess occurs |
@@ -81,6 +81,7 @@ App/service-only upgrades keep the same container topology, mounted volumes, pub
 | Queued Hangfire job references old stage name | Retry fails or wrong stage runs | Stable stage-name mapping missing | Map old stage names or cancel and recreate retryable item | “Old queued job converted or cancelled; retry available.” |
 | Hangfire serialized type changed | Job deserialization fails | Hangfire exception on job load | Use stable DTOs; mark old jobs cancelled/retryable | “Old background job incompatible; retry from UI.” |
 | New validation rejects old accepted config | Upgrade blocks unexpectedly | Config validation failure after migration | Normalize legacy values before final validation | “Config normalized from old format; review settings.” |
+| PWA service worker serves stale WASM assets after upgrade | Users run an old UI against a new API (version mismatch) | App version check in UI, or service worker update found event | On upgrade, activate the new service worker promptly and surface an in-app "update available, reload" prompt; WASM/API version handshake warns on mismatch | “A new version of Streaming Digest is ready — reload to update.” |
 
 ## 4. B: Docker/container changes
 
