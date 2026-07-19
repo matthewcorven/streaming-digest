@@ -306,13 +306,14 @@ Requirements:
 - First-run can trigger selected model download through an internal service HTTP API that executes configured CLI commands against a mounted model volume.
 - User may alternatively provide an existing host model path that is mounted into the container, or follow displayed CLI commands manually.
 - Provide a refresh button to detect completion after file-path, mounted-model, or command-line setup.
-- Confirm before embedding model changes after initial setup; on confirmation the Active Embedding Model pointer flips immediately, old-model embeddings become stale by derivation (ADR-0001), and the system enters Embedding Transition (ADR-0008) with a coverage-rebuilding banner until the bulk reprocess completes.
+- Confirm before embedding model changes after initial setup; on confirmation the Active Embedding Model pointer flips immediately, old-model embeddings become stale by derivation (ADR-0001), and the system enters Embedding Transition (ADR-0008) with a coverage-rebuilding banner until the bulk reprocess completes. Scheduled ingestion pauses during the transition and one catch-up scheduled run fires on completion, backfilling High-Signal evaluation for transition-era videos (ADR-0011).
 
 Verification:
 
 - Missing model shows options and command snippets.
 - Inline download records verified model state.
 - Embedding model switch asks confirmation, enters Embedding Transition, and vector search covers only new-model embeddings until the reprocess finishes.
+- A scheduled run falling inside a transition window is skipped, and exactly one catch-up run fires when the transition completes.
 
 ## Phase 3: Channel management
 
@@ -394,7 +395,7 @@ Retryable stage names:
 - `embeddings`
 - `notification`
 
-Retry can operate at video, stage, external link occurrence, external resource, repository, search-document/embedding, and notification levels as needed. Vocabulary (ADR-0002): Retry applies to failed/deferred work only and is idempotent; Reprocess re-runs the full pipeline for a succeeded entity, bypassing the idempotency guard. Retry Budget (DATA_MODEL §3.29): 2 automatic backoff attempts + 5 manual Retries per item-stage; reaching the cap sets `is_retryable = false`, and Reprocess resets the budget.
+Retry can operate at video, stage, external link occurrence, external resource, repository, search-document/embedding, and notification levels as needed. Vocabulary (ADR-0002): Retry applies to failed/deferred work only and is idempotent; Reprocess re-runs the full pipeline for any entity whose pipeline completed (any status other than Core-Stage failure, including `processed_with_warnings`), bypassing the idempotency guard, and re-evaluates scrape-exclusion policy against the live site (ADR-0014). Retry Budget (DATA_MODEL §3.29): 2 automatic backoff attempts + 5 manual Retries per item-stage; reaching the cap sets `is_retryable = false`, and Reprocess resets the budget.
 
 Job payload durability per `docs/operations/UPGRADE_PATHS.md`:
 
@@ -511,6 +512,7 @@ Verification:
 
 - Fixture transcript stored with timestamps.
 - Cutover integration test: auto-caption transcript active, then author captions arrive on Reprocess and become active with documents rebuilt.
+- Cutover records a domain event counting cue overrides that became inert (ADR-0010 amendment); no carry-forward to the new cues.
 
 ### Task 6.2: Implement audio-to-text provider abstraction
 
@@ -611,7 +613,7 @@ Rules:
 - Store file on mounted volume.
 - Store metadata/path in DB.
 - If segments or screenshot offset change by explicit user action, purge/recreate screenshots immediately.
-- Screenshots are never load-bearing: the serving endpoint returns a stable placeholder instead of 404 when a file is missing; the missing file is recorded as a domain event and the row becomes retryable (Enrichment Stage), with per-video rollup `unknown`/`pending`/`partial`/`succeeded`/`failed`.
+- Screenshots are never load-bearing: the serving endpoint returns a stable placeholder instead of 404 when a file is missing; the placeholder is visually distinct from real screenshots and broken images (branded "pending/failed, retry available" treatment), result cards prefer the platform thumbnail or no image over a wall of placeholders, the missing file is recorded as a domain event, and the row becomes retryable (Enrichment Stage), with per-video rollup `unknown`/`pending`/`partial`/`succeeded`/`failed`.
 
 Verification:
 
@@ -1020,8 +1022,10 @@ Requirements:
 
 - Dashboard priority order is daily digest, search launchpad, then pending-action inbox.
 - Daily digest shows new videos ingested, new repositories found, new websites/resources found, high-signal matches similar to recent searches, and failed/skipped items.
-- Pending-action inbox orders pending approvals, failed ingestion, degraded channels, deferred rate limits, stale embeddings, model/service warnings, new digest items, recent-search matches, and storage/retention warnings.
+- The dashboard's digest section re-derives the active-deferments subsection from live state at render time (ADR-0006 amendment); all other digest fields render the stored artifact.
+- Pending-action inbox orders pending approvals, failed ingestion, degraded channels (permanently-degraded items name their exit actions: Pause or delete, per ADR-0003 amendment), deferred rate limits, stale embeddings, model/service warnings, new digest items, recent-search matches, and storage/retention warnings.
 - Post-login routing follows the product rule: incomplete onboarding, last selected mode, dashboard summary after first daily run, then ingestion/new-videos digest.
+- Until the first run completes with at least one ingested video, the search page redirects to a pre-corpus waiting state with a run-now action; a zero-video first run keeps the waiting state with backfill guidance.
 
 Verification:
 
@@ -1036,15 +1040,17 @@ Verification:
 Requirements:
 
 - Golden dataset of at least 20 vague/natural-language queries mapped to expected video clusters (from the Task 0.4 fixture corpus), authored query-first — each query written before its fixture video's metadata is finalized, so queries cannot be reverse-engineered from the text.
-- The gate is 100% top-3 recall on the dataset, no partial pass; regressions are fixed in ranking/weights/document construction, never by editing the dataset to fit. The dataset grows whenever a real user query fails.
+- The gate runs against a corpus padded to the MVP scale assumption (~500 videos): golden fixture videos are the recall targets and synthetic, topically-adjacent distractor videos from the Task 12.8 dataset generator fill the rest (ADR-0013). The gate is 100% top-3 recall on the dataset — top 3 of ~500 — no partial pass; regressions are fixed in ranking/weights/document construction, never by editing the dataset to fit.
+- The dataset grows via a "this should have ranked" affordance in the search UI: a failed real query is captured with its expected video, score components, and ranking formula version into a review queue; promotion into the dataset is a deliberate user act.
 - Automated integration test asserts each expected cluster appears in the top 3 results.
 - Harness re-runs whenever the ranking formula version, embedding provider/model/dimensions, or search-document construction changes.
 - Recall regressions are reported per query with score components to aid diagnosis.
 
 Verification:
 
-- Golden dataset meets the top-3 recall target on the representative corpus.
+- Golden dataset meets the top-3 recall target on the ~500-video representative corpus.
 - Harness fails when a ranking/model change drops an expected cluster out of the top 3.
+- A captured real-query failure can be reviewed and promoted into the dataset.
 
 ### Task 12.8: Measure search performance against latency targets
 
@@ -1093,6 +1099,7 @@ Verification:
 
 - Note creates search document and embedding.
 - Clearing/deleting note updates the note embedding/search document and parent video-cluster aggregate so repeated searches reflect live ranking.
+- Deleting a note soft-deletes the note row but hard-deletes its search document and embedding; the stale-documents diagnostics surface never accumulates unresolvable rows from deleted notes.
 
 ### Task 13.3: Implement Blazor modals
 

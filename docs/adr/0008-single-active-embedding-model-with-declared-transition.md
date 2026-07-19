@@ -9,5 +9,5 @@ We considered dual-model querying (keep both models searchable during transition
 - During transition, vector search covers only new-model embeddings and shrinks as old ones remain stale — the UI must show a "search coverage rebuilding" banner with progress rather than silently returning sparse results. Text search is unaffected, so hybrid search degrades gracefully.
 - High-Signal Match evaluation is skipped for ingestion runs completing mid-transition (query embeddings and content fingerprints may not share a space).
 - Transition is derived, not stored: active model ≠ model of the completed embedding generation ⇒ in transition. This is consistent with ADR-0001's no-stored-staleness stance.
-- Scheduled ingestion during transition embeds with the new model — no special-casing.
+- Scheduled ingestion during transition embeds with the new model — amended by ADR-0011: scheduled runs pause during a transition, one catch-up run fires on completion, and its Digest backfills High-Signal evaluation for transition-era videos. Manual runs during transition still embed with the new model, no special-casing.
 - `API_SPEC.md` §5 (`activate-embedding-model`) and §13 (`embeddings/status`) should expose transition state and progress.

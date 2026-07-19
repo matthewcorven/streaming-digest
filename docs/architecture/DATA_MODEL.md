@@ -984,7 +984,9 @@ Columns:
 - `payload_json jsonb not null` — new videos, new resources (repositories, websites), high-signal matches, failed/skipped items, active deferments
 - `created_at timestamptz not null`
 
-High-signal matching runs once, at digest assembly time, against the recent-search embeddings as of that moment; runs completing during an Embedding Transition skip high-signal evaluation. Rolling windows and "since you last looked" semantics are MVP+.
+High-signal matching runs once, at digest assembly time, against the recent-search embeddings as of that moment, using raw cosine similarity against the global threshold (default 80%) — an absolute bar, not the rank-relative `relativeSimilarityPercent` scale used for Related Items (ADR-0012). Runs completing during an Embedding Transition skip high-signal evaluation; the catch-up run after a transition backfills evaluation for videos ingested mid-transition (ADR-0011). Rolling windows and "since you last looked" semantics are MVP+.
+
+The dashboard's Digest section re-derives the active-deferments subsection from live state at render time (ADR-0006 amendment); the stored payload is never mutated, and Matrix renderings use the stored snapshot.
 
 ## 4. Effective values
 
@@ -1049,7 +1051,7 @@ MVP invalidation should be narrow and explicit:
 
 - Editing video top-level metadata marks the video metadata search document stale and marks the corresponding `video_cluster_embeddings` row stale. It does not automatically mark all segment, link, repository, or website documents stale.
 - Editing transcript, segment, external resource, repository, or website fields marks only the directly affected search document(s) stale plus the parent video-cluster aggregate embedding.
-- Creating, editing, or clearing a note updates the note embedding/search document and the parent video-cluster aggregate embedding so repeated searches reflect live state.
+- Creating, editing, or clearing a note updates the note embedding/search document and the parent video-cluster aggregate embedding so repeated searches reflect live state. Deleting a note soft-deletes the note row but hard-deletes its search document and embedding — staleness means "source changed, regenerate," and a deleted source has nothing to regenerate to; the parent cluster aggregate is still marked stale for rebuild.
 - Classification corrections mark relevant external resource documents stale and influence future classification through rules/few-shot examples.
 - Related-item caches, if introduced later, must be invalidated when their source embeddings or cluster aggregates become stale.
 

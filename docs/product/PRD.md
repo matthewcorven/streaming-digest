@@ -263,7 +263,7 @@ Notification summary includes:
 - Transcripts found/missing.
 - Repositories found.
 - Websites/resources found.
-- High-signal matches similar to recent searches, including the matching recent search, percentage, timestamp when available, and repo/website links when available.
+- High-signal matches similar to recent searches, including the matching recent search, absolute-similarity percentage (a fixed cosine bar, distinct from the rank-relative `Relative similarity` shown in search), timestamp when available, and repo/website links when available.
 - Link to web dashboard ingestion run.
 
 The web daily digest page includes new videos ingested, new repositories found, new websites/resources found, items similar to recent searches, and failed/skipped items.
@@ -313,6 +313,8 @@ MVP first-run onboarding distinguishes core value from full operational hardenin
 - Grafana/observability endpoint verification is required for full operational readiness, but missing dashboard links should surface as warnings, not block search UI access.
 - Each setup step provides live verification, inline retry, retained previously-entered values, clear success state, and actionable failure messages.
 - Default ingestion schedule is 6 AM in the user's local time and is configurable during first run.
+- Scheduled ingestion runs pause during an Embedding Transition (ADR-0011); a single catch-up run fires on transition completion.
+- Until the first ingestion run completes with at least one video, the search page redirects to a waiting state with a run-now action — the flagship feature's first impression is never an unexplained void. A zero-video first run keeps the waiting state with backfill guidance.
 - Post-login routing precedence is: incomplete onboarding, last selected mode, dashboard summary after the first daily run, then ingestion/new-videos digest.
 
 ### 2.11 Backup/restore scope

@@ -229,14 +229,14 @@ Production should expose only the services intentionally reachable over Tailscal
 1. Ingestion run completes or fails.
 2. Worker assembles and stores the run-scoped Digest (ADR-0006) — one assembly, two renderings.
 3. Worker queues notification request.
-4. Matrix notifier renders the summary as an excerpt of the stored Digest, so Matrix and dashboard never disagree.
+4. Matrix notifier renders the summary as an excerpt of the stored Digest, so Matrix and dashboard never disagree. One narrow exception (ADR-0006 amendment): the dashboard's Digest section re-derives the active-deferments subsection from live state at render time; Matrix keeps the stored snapshot, and all other Digest fields stay stored on both surfaces.
 5. Matrix notifier sends the message to the configured room ID (unencrypted in MVP; E2EE is MVP+).
 6. Notification event/status is stored on the user-visible Notification record; outbox messages are internal plumbing only.
 
 ### 4.8 Idempotency and retry flow
 
 - Daily ingestion uses the normalized YouTube video URL without query string as the idempotency key, with YouTube video ID as canonical platform identity.
-- Already processed videos are skipped unless the user explicitly Reprocesses the video (full pipeline, bypassing the guard) or Retries failed stages/items. There are exactly two user-facing re-run verbs (ADR-0002): Retry for failed/deferred work, Reprocess for succeeded work.
+- Already processed videos are skipped unless the user explicitly Reprocesses the video (full pipeline, bypassing the guard) or Retries failed stages/items. There are exactly two user-facing re-run verbs (ADR-0002): Retry for failed/deferred work, Reprocess for succeeded work. Reprocess eligibility means the pipeline completed — any status other than Core-Stage failure, including `processed_with_warnings` — and resets Retry Budgets; it also re-evaluates scrape-exclusion policy against the live site, while Retry leaves exclusions alone (ADR-0014).
 - Failures without an active retry may short-circuit the affected item early while allowing other items to continue.
 - Retry uses Hangfire OSS jobs plus application-owned progression/batch tracking in PostgreSQL, defaults to failed stages/items only, and supports user-selected all/one/multiple retryable operations. Do not depend on Hangfire Pro batches for MVP. A Retry Budget bounds attempts: 2 automatic backoff retries plus 5 manual Retries per item-stage, then the item becomes permanently failed until Reprocessed.
 - External adapter failures use exponential backoff for two retries, then circuit-break the affected channel into the stored Degraded state (ADR-0003): skipped by scheduled runs but probed once per run with a single metadata fetch, clearing on success; Paused channels are never probed, and an active Deferment pauses the failure counter.

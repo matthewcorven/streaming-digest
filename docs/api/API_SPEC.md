@@ -770,6 +770,8 @@ During an Embedding Transition (ADR-0008), vector search covers only Active-Embe
 
 MVP search filters intentionally exclude link-classification filtering and hide/show-by-category behavior. External resource classifications are still returned on resource/link detail responses, and classification correction remains MVP because it improves future classification and ranking quality. Search request filters such as `linkClassifications` are MVP+.
 
+Until the first ingestion run completes with at least one ingested video, the search UI is blocked by a pre-corpus waiting state (PRD §2.10); the endpoint remains available but the client never offers search as a mode before the corpus exists.
+
 ### GET `/api/search/suggestions`
 
 Optional query suggestions/facets.
@@ -1037,7 +1039,7 @@ Request:
 
 ### DELETE `/api/notes/{noteId}`
 
-Soft-deletes a note by setting `deletedAt`/`deleted_at`, clearing it from normal note lists and search results, and marking the affected search document plus parent video-cluster aggregate stale.
+Soft-deletes a note by setting `deletedAt`/`deleted_at`, clearing it from normal note lists and search results. The note's derived search document and embedding are hard-deleted (staleness means "source changed, regenerate" — a deleted source has nothing to regenerate to), and the parent video-cluster aggregate is marked stale for rebuild.
 
 MVP semantics:
 

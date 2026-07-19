@@ -14,3 +14,7 @@ We decided Degraded is a stored channel-level state with explicit transitions, o
 - `channels` needs columns for degraded state, consecutive-failure count, and last-probe time (a schema addition to DATA_MODEL §3.5).
 - Degraded appears on the dashboard and pending-action inbox alongside Deferments, but the two are never merged: Deferment is host-scoped and time-bound; Degraded is channel-scoped and survives deferment expiry.
 - Probe traffic is negligible (one metadata fetch per degraded channel per run) but gives automatic recovery without user intervention for transient failures.
+
+## Amendment: permanent Degraded is a valid terminal state with named exits
+
+A genuinely dead channel (deleted on YouTube) fails every probe forever, leaving a permanently-Degraded inbox item with no automatic resolution. We considered auto-pausing after N failed probes and rejected it: silently stopping a data source is a data-availability decision the user must own. Instead, the Degraded inbox item names its exit actions — "Pause to stop probing, or delete to remove history" — because here the user is the resolution mechanism, and the inbox contract (items disappear when their condition resolves) is satisfied by making the resolution path visible.
