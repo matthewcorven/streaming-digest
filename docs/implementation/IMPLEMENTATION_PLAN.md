@@ -253,6 +253,18 @@ Verification:
 - Deferment fixture renders active deferments prominently on the run detail page.
 - A completed run with a subsequently retried-and-succeeded item renders frozen outcome and live rollup side by side.
 
+### Task 2.3b: Scaffold API contract conformance harness
+
+Scaffold the Phase 18 conformance test early so contract drift is detected per phase rather than only at the end:
+
+- Generate/enumerate the MVP endpoint catalog from `docs/api/API_SPEC.md`.
+- Each catalog entry asserts route existence and auth behavior; unimplemented routes are tracked as a known-pending list that shrinks as phases complete.
+- The known-pending list must be empty for Phase 18 to pass.
+
+Verification:
+
+- Harness runs in CI from Phase 2 onward and reports implemented-vs-pending endpoint counts.
+
 ### Task 2.3c: Establish PWA baseline
 
 Set up the PWA foundation declared in `docs/architecture/ARCHITECTURE.md` §5.2 so the app is installable and app-like from the first UI milestone, rather than retrofitting PWA later:
@@ -268,18 +280,6 @@ Verification:
 - App is installable and launches in standalone mode on Chrome/Edge desktop and Android.
 - Service worker registers without errors; no offline caching behavior is active yet.
 - Layout is usable at mobile viewport sizes for the app shell pages from Task 2.3.
-
-### Task 2.3b: Scaffold API contract conformance harness
-
-Scaffold the Phase 18 conformance test early so contract drift is detected per phase rather than only at the end:
-
-- Generate/enumerate the MVP endpoint catalog from `docs/api/API_SPEC.md`.
-- Each catalog entry asserts route existence and auth behavior; unimplemented routes are tracked as a known-pending list that shrinks as phases complete.
-- The known-pending list must be empty for Phase 18 to pass.
-
-Verification:
-
-- Harness runs in CI from Phase 2 onward and reports implemented-vs-pending endpoint counts.
 
 ### Task 2.4: Implement first-run onboarding state
 
@@ -319,6 +319,8 @@ Verification:
 
 ### Task 3.1: Implement channel CRUD API
 
+Source: `docs/api/API_SPEC.md` §6
+
 Endpoints from API spec:
 
 - list/create/get/update/delete.
@@ -349,6 +351,8 @@ Verification:
 
 ### Task 4.1: Configure Hangfire with PostgreSQL
 
+Source: `docs/architecture/ARCHITECTURE.md` §5.3
+
 Requirements:
 
 - API hosts dashboard at `/admin/jobs`.
@@ -361,6 +365,8 @@ Verification:
 - Dashboard link works.
 
 ### Task 4.2: Implement ingestion run records
+
+Source: `docs/architecture/DATA_MODEL.md` §3.28–3.29; ADR-0005
 
 Support:
 
@@ -410,6 +416,8 @@ Verification:
 
 ### Task 4.4: Add admin run/retry endpoints
 
+Source: `docs/api/API_SPEC.md` §7
+
 Endpoints:
 
 - run all.
@@ -422,6 +430,8 @@ Verification:
 - Integration tests confirm job enqueue and status updates.
 
 ### Task 4.5: Implement rate-limit deferment service
+
+Source: `docs/architecture/DATA_MODEL.md` §3.30; `docs/architecture/ARCHITECTURE.md` §4.9
 
 Requirements:
 
@@ -441,6 +451,8 @@ Verification:
 
 ### Task 5.1: Implement yt-dlp metadata adapter
 
+Source: `docs/product/PRD.md` §2.2
+
 Extract:
 
 - channel ID/name/profile URL.
@@ -454,6 +466,8 @@ Verification:
 
 ### Task 5.2: Implement optional YouTube API adapter
 
+Source: `docs/product/PRD.md` §2.2
+
 Use optional API key for:
 
 - improved channel metadata.
@@ -465,6 +479,8 @@ Verification:
 - Uses API when configured.
 
 ### Task 5.3: Implement long-form and max-age filtering
+
+Source: `docs/product/PRD.md` §2.2; `docs/architecture/DATA_MODEL.md` §3.2 (`ingestion.minDurationSeconds`)
 
 Rules:
 
@@ -479,6 +495,8 @@ Verification:
 - Backfill over previously processed videos skips them.
 
 ### Task 5.4: Implement video idempotency and degraded-channel handling
+
+Source: `docs/architecture/ARCHITECTURE.md` §4.8; ADR-0003
 
 Requirements:
 
@@ -513,8 +531,11 @@ Verification:
 - Fixture transcript stored with timestamps.
 - Cutover integration test: auto-caption transcript active, then author captions arrive on Reprocess and become active with documents rebuilt.
 - Cutover records a domain event counting cue overrides that became inert (ADR-0010 amendment); no carry-forward to the new cues.
+- Platform-deleted/private video transitions `ingestion_status` to `unavailable` (terminal; retries stop, stored artifacts preserved) per `docs/architecture/DATA_MODEL.md` §3.6.
 
 ### Task 6.2: Implement audio-to-text provider abstraction
+
+Source: `docs/architecture/ARCHITECTURE.md` §2.5, §5.5
 
 Define application interface aligned with Semantic Kernel audio-to-text abstraction.
 
@@ -528,6 +549,8 @@ Verification:
 - Fake provider test.
 
 ### Task 6.3: Implement local whisper service adapter
+
+Source: `docs/product/PRD.md` §2.4
 
 Preferred engine: whisper.cpp if compatible.
 
@@ -543,6 +566,8 @@ Verification:
 - Transcribe bundled tiny audio fixture.
 
 ### Task 6.4: Implement automatic fallback
+
+Source: `docs/architecture/ARCHITECTURE.md` §4.2; `docs/architecture/DATA_MODEL.md` §3.2 (`ingestion.tempMedia.maxBytes`)
 
 If no usable YouTube transcript:
 
@@ -567,6 +592,8 @@ Verification:
 
 ### Task 7.1: Store author chapters as segments
 
+Source: `docs/product/PRD.md` §2.2; `docs/architecture/DATA_MODEL.md` §3.10
+
 Map yt-dlp chapters to `segments`.
 
 Verification:
@@ -574,6 +601,8 @@ Verification:
 - Fixture chapters create ordered segments.
 
 ### Task 7.2: Implement deterministic transcript chunking
+
+Source: `docs/product/PRD.md` §2.2
 
 Rules:
 
@@ -625,6 +654,8 @@ Verification:
 
 ### Task 8.1: Extract description and pinned-comment links
 
+Source: `docs/product/PRD.md` §2.2
+
 Requirements:
 
 - Description links required.
@@ -639,6 +670,8 @@ Verification:
 
 ### Task 8.2: Normalize URLs
 
+Source: `docs/product/PRD.md` §2.2
+
 Implement:
 
 - tracking parameter removal.
@@ -651,6 +684,8 @@ Verification:
 - Unit tests for common tracking parameters.
 
 ### Task 8.3: Rule-based classification
+
+Source: `docs/architecture/DATA_MODEL.md` §3.13 (classification values)
 
 Classify known patterns:
 
@@ -669,6 +704,8 @@ Verification:
 
 ### Task 8.4: Local LLM classification
 
+Source: `docs/product/PRD.md` §2.4; ADR-0007 (only active corrections feed few-shot examples)
+
 Use:
 
 - local model via Semantic Kernel/Ollama.
@@ -681,6 +718,8 @@ Verification:
 - Correction history influences prompt construction.
 
 ### Task 8.5: Classification correction workflow
+
+Source: `docs/architecture/DATA_MODEL.md` §3.32; ADR-0007
 
 When user edits classification:
 
@@ -697,6 +736,8 @@ Verification:
 
 ### Task 9.1: Implement repository host detection
 
+Source: `docs/product/PRD.md` §2.2
+
 Support:
 
 - GitHub for MVP.
@@ -707,6 +748,8 @@ Verification:
 - Unit tests for canonical URLs.
 
 ### Task 9.2: Implement repository metadata adapters
+
+Source: `docs/product/PRD.md` §2.2; `docs/architecture/DATA_MODEL.md` §3.15; ADR-0009
 
 Use unauthenticated public REST APIs by default for GitHub. GitLab and Bitbucket are MVP+. PAT support is MVP+; OAuth is MVP++.
 
@@ -731,6 +774,8 @@ Verification:
 
 ### Task 9.3: Fetch README and LICENSE
 
+Source: `docs/architecture/DATA_MODEL.md` §3.17
+
 Store README and LICENSE as `repository_documents`.
 
 Verification:
@@ -739,6 +784,8 @@ Verification:
 - LICENSE present/missing cases.
 
 ### Task 9.4: Check DeepWiki URL
+
+Source: `docs/architecture/ARCHITECTURE.md` §9 (DeepWiki detection)
 
 For repo owner/name:
 
@@ -815,6 +862,8 @@ Verification:
 
 ### Task 10.2: Add robots.txt and rate limiting
 
+Source: `docs/architecture/ARCHITECTURE.md` §9
+
 Requirements:
 
 - Per-host rate limit.
@@ -829,6 +878,8 @@ Verification:
 
 ### Task 10.3: Store scraped page results
 
+Source: `docs/architecture/DATA_MODEL.md` §3.18
+
 Map output to `scraped_pages`.
 
 Verification:
@@ -839,6 +890,8 @@ Verification:
 
 ### Task 11.1: Implement effective value service
 
+Source: `docs/architecture/DATA_MODEL.md` §2.1, §4
+
 Effective value = override if present else original.
 
 Verification:
@@ -846,6 +899,8 @@ Verification:
 - Unit tests for all editable fields.
 
 ### Task 11.2: Build search document generator
+
+Source: `docs/architecture/DATA_MODEL.md` §5; ADR-0004 (shared-resource documents duplicate per parent video)
 
 Generate documents for:
 
@@ -863,6 +918,8 @@ Verification:
 
 ### Task 11.3: Implement Semantic Kernel embedding provider
 
+Source: `docs/architecture/ARCHITECTURE.md` §5.5; `docs/product/PRD.md` §2.3
+
 Provider:
 
 - Ollama endpoint.
@@ -874,6 +931,8 @@ Verification:
 - Test embedding service endpoint with sample text.
 
 ### Task 11.4: Store embeddings in pgvector
+
+Source: `docs/architecture/DATA_MODEL.md` §3.22
 
 Requirements:
 
@@ -887,6 +946,8 @@ Verification:
 
 ### Task 11.5: Implement stale embedding regeneration
 
+Source: `docs/architecture/DATA_MODEL.md` §7; ADR-0001 (staleness is derived — compute via hash/model comparison, never write a flag)
+
 Triggers:
 
 - override edit.
@@ -899,6 +960,8 @@ Verification:
 - Editing a title marks document stale and regeneration clears stale flag.
 
 ### Task 11.6: Implement recent-search storage and embeddings
+
+Source: `docs/architecture/DATA_MODEL.md` §3.24–3.26; `docs/product/PRD.md` §2.3
 
 Requirements:
 
@@ -944,6 +1007,8 @@ Latency targets:
 
 ### Task 12.1: Implement full-text/trigram search SQL
 
+Source: `docs/architecture/DATA_MODEL.md` §6
+
 Search over `search_documents`.
 
 Verification:
@@ -951,6 +1016,8 @@ Verification:
 - Partial query matches known fixture.
 
 ### Task 12.2: Implement vector search SQL
+
+Source: `docs/architecture/DATA_MODEL.md` §6
 
 Use pgvector distance with configured model.
 
@@ -983,6 +1050,8 @@ Verification:
 - Tooltip text explains `Relative similarity` semantics.
 
 ### Task 12.4: Implement search UI
+
+Source: `docs/product/PRD.md` §2.5; `docs/api/API_SPEC.md` §8
 
 Features:
 
@@ -1017,6 +1086,8 @@ Verification:
 - High-signal query fixture returns expected items over the configured threshold.
 
 ### Task 12.6: Implement dashboard daily digest and pending-action inbox
+
+Source: `docs/product/PRD.md` §2.1, §2.10; ADR-0006
 
 Requirements:
 
@@ -1072,6 +1143,8 @@ Verification:
 
 ### Task 13.1: Implement override APIs
 
+Source: `docs/api/API_SPEC.md` §11; `docs/architecture/DATA_MODEL.md` §2.1, §3.20
+
 Support all candidates:
 
 - video title/description/author.
@@ -1085,6 +1158,8 @@ Verification:
 - History stores previous value and changed_at.
 
 ### Task 13.2: Implement notes APIs
+
+Source: `docs/api/API_SPEC.md` §12; `docs/architecture/DATA_MODEL.md` §3.19 (one note per target in MVP; POST returns 409 Conflict when a live note exists)
 
 CRUD notes for:
 
@@ -1102,6 +1177,8 @@ Verification:
 - Deleting a note soft-deletes the note row but hard-deletes its search document and embedding; the stale-documents diagnostics surface never accumulates unresolvable rows from deleted notes.
 
 ### Task 13.3: Implement Blazor modals
+
+Source: `docs/product/PRD.md` §2.5
 
 - Edit modal with tabbed groups of fields.
 - Lightweight notes modal opened contextually once an item appears in search results.
@@ -1235,6 +1312,8 @@ Verification:
 
 ### Task 15.3: Store domain events and warning/error summaries
 
+Source: `docs/architecture/DATA_MODEL.md` §3.31
+
 Do not store every log line in Postgres.
 
 Verification:
@@ -1242,6 +1321,8 @@ Verification:
 - Failed scrape creates domain event and Loki log.
 
 ### Task 15.4: Add UI observability links
+
+Source: `docs/product/PRD.md` §2.8
 
 Blazor admin page links to:
 
@@ -1271,7 +1352,9 @@ Verification:
 
 ## Phase 16: Admin operations
 
-Recommended MVP concurrency defaults:
+### Task 16.1: Implement concurrency configuration defaults
+
+Recommended MVP concurrency defaults (source: `docs/architecture/ARCHITECTURE.md` §9.1):
 
 - Channels processed concurrently: `1`.
 - Videos per channel concurrently: `1`.
@@ -1282,11 +1365,15 @@ Recommended MVP concurrency defaults:
 - Whisper jobs: `1` globally.
 - Local LLM classification/segmentation jobs: `1` globally.
 
-Normal user actions should be provided contextually where they are useful: retry video, retry repo/link, reprocess a visible item, purge screenshots for a video/channel, test Whisper/audio-to-text, test Matrix, run ingestion now, and run backfill.
+These defaults prioritize reliability over throughput and should be configurable after the MVP works.
 
-The single Admin page owns: change model, toggle observability, backup, upgrade/maintenance, and global settings.
+Verification:
 
-Implement UI/API for:
+- Each default is seeded as an app setting and respected by the relevant worker.
+
+### Task 16.2: Implement contextual admin actions (UI/API)
+
+Normal user actions should be provided contextually where they are useful (source: `docs/product/PRD.md` §2.6; `docs/api/API_SPEC.md` §7, §14, §17):
 
 - run ingestion now.
 - run channel backfill.
@@ -1301,7 +1388,15 @@ Implement UI/API for:
 
 Verification:
 
-- Each action enqueues job or returns clear health result.
+- Each action enqueues a job or returns a clear health result.
+
+### Task 16.3: Implement Admin page (settings, models, observability, backup, maintenance)
+
+The single Admin page owns: change model, toggle observability, backup, upgrade/maintenance, and global settings.
+
+Verification:
+
+- Admin page renders each owned area and routes to the corresponding backend actions.
 
 ## Phase 17: Deployment and backup
 
@@ -1400,6 +1495,7 @@ Requirements:
 - Mutation endpoints return stale search-document IDs, stale cluster IDs, and queued operations where relevant.
 - Errors use consistent RFC 7807-style problem details.
 - Batch retry/reprocess/delete endpoints return per-item acceptance/rejection details.
+- Includes `GET /api/search/suggestions` (API_SPEC §8) and `DELETE /api/videos/{videoId}` semantics (`deleteScreenshots` default true, `confirm` required) per `docs/api/API_SPEC.md` §8, §10.
 
 Verification:
 
@@ -1504,6 +1600,24 @@ Execution order is the vertical slices below; phase numbering is a reference gro
 
 Even though all are hard MVP, this sequence produces testable increments and validates the killer journey as early as slice 4.
 
+### Convergence milestones
+
+Mid-plan checkpoints that validate multiple converging workstreams together, so integration failures surface before the end-to-end phase. Each milestone names its required slices and a pass/fail scenario.
+
+**M1 — Killer journey smoke (after slice 4).** Requires slices 1–4 green.
+Given a configured channel with one captioned long-form fixture video, when a manual ingestion run completes and the user submits a vague natural-language query, then the video appears as one cluster in the top results with metadata and a transcript match, and the search page is reachable post-onboarding.
+
+**M2 — Enriched video cluster (after slice 8).** Requires slices 5–8 green on top of M1.
+Given one fixture video whose description links a GitHub repository and a non-ad website, when the full pipeline runs, then a single search result cluster surfaces the repository, the scraped website, segment timestamps, and screenshot thumbnails together, with no duplicate clusters for the video.
+
+**M3 — Digest and signal pipeline (after slice 11).** Requires slices 9–11 green on top of M2.
+Given a completed ingestion run and a stored recent search, when the digest dashboard renders, then new videos/resources, high-signal matches with absolute-similarity percentages, and the pending-action inbox appear in the required priority order, and the recall harness gate passes on the ~500-video corpus.
+
+**M4 — Notification and transition parity (after slice 13).** Requires slices 12–13 green on top of M3.
+Given a completed run with a stored Digest, when the Matrix notification is sent, then the notification is an excerpt of the same stored Digest as the dashboard (ADR-0006); and given an embedding-model change, when the transition completes, then the scheduled-run pause, the single catch-up run, and high-signal backfill behave per ADR-0008/ADR-0011.
+
+Phase 19 end-to-end scenarios remain the final acceptance gate; milestones M1–M4 exist to catch cross-workstream regressions earlier.
+
 ## Quality gates
 
 Before declaring MVP complete:
@@ -1525,6 +1639,8 @@ Before declaring MVP complete:
 - Video-cluster aggregate embeddings are generated, invalidated, and used for high-signal matching.
 - Rate-limit deferments are persisted, enforced, surfaced, and clearable.
 - Retention/cleanup jobs handle domain events, telemetry policy, screenshots, and raw debug captures.
+- Convergence milestones M1–M4 pass at their declared slices.
+- Known gaps under discussion with the user are resolved or explicitly reclassified before MVP-complete declaration (digest assembly ownership, video-delete/unavailable-status semantics, 12.7 capture affordance scope, 7.3 split, 17.5 split, 2.4+2.5 split, 0.4 fixture timing, Phase 16 placement).
 
 ## Open implementation decisions
 
