@@ -515,6 +515,22 @@ Verification:
 - Two consecutive adapter failures mark the channel Degraded; a successful probe on the next scheduled run clears it.
 - A Paused-Degraded channel is never probed and stays Degraded until unpaused.
 
+### Task 5.5: Implement unavailable-video terminal state
+
+Source: `docs/architecture/DATA_MODEL.md` §3.6 (`unavailable`)
+
+Requirements:
+
+- When the platform definitively reports a video deleted or private during metadata fetch, transition `ingestion_status` to `unavailable` (terminal).
+- Stop metadata retries for unavailable videos; watch links become best-effort.
+- Preserve all stored artifacts (transcripts, segments, screenshots, search documents, embeddings).
+- Scheduled runs skip unavailable videos without counting them as failures; unavailable videos remain searchable with warning state.
+
+Verification:
+
+- Fixture: metadata fetch reports a deleted video → status becomes `unavailable`, no further retries are scheduled, and stored artifacts are preserved.
+- Scheduled run skips unavailable videos without failing the run.
+
 ## Phase 6: Transcript and audio-to-text
 
 ### Task 6.1: Implement caption/transcript ingestion
@@ -531,7 +547,6 @@ Verification:
 - Fixture transcript stored with timestamps.
 - Cutover integration test: auto-caption transcript active, then author captions arrive on Reprocess and become active with documents rebuilt.
 - Cutover records a domain event counting cue overrides that became inert (ADR-0010 amendment); no carry-forward to the new cues.
-- Platform-deleted/private video transitions `ingestion_status` to `unavailable` (terminal; retries stop, stored artifacts preserved) per `docs/architecture/DATA_MODEL.md` §3.6.
 
 ### Task 6.2: Implement audio-to-text provider abstraction
 
@@ -622,15 +637,25 @@ Using Semantic Kernel + Ollama:
 - Output JSON segment boundaries/titles/summaries.
 - Validate output against schema.
 - Schema validation is the only MVP repair mechanism; invalid output is logged and written to stdout for development diagnostics, then deterministic chunks are used.
-- Never re-segment during normal daily ingestion. Re-segmentation is explicit user action only, producing a new Segment Generation; approval performs the cutover (ADR-0001..0002 vocabulary): the new generation becomes Active, old-generation screenshots are purged, search documents and embeddings are marked stale and reprocessed for the new segments, and notes on old-generation segments become Orphaned Notes surfaced in the pending-action inbox for re-anchor or delete.
 
 Verification:
 
 - Unit test validates JSON parsing/fallback.
 - Invalid LLM output logs diagnostic and keeps deterministic chunks.
+- Integration test with local model optional.
+
+### Task 7.3a: Implement segment regeneration cutover
+
+Source: `docs/architecture/DATA_MODEL.md` §3.9 (`segment_generations`); ADR-0001, ADR-0002
+
+Requirements:
+
+- Never re-segment during normal daily ingestion. Re-segmentation is explicit user action only, producing a new Segment Generation; approval performs the cutover: the new generation becomes Active, old-generation screenshots are purged, search documents and embeddings become stale by derivation and are reprocessed for the new segments, and notes on old-generation segments become Orphaned Notes surfaced in the pending-action inbox for re-anchor or delete.
+
+Verification:
+
 - Explicit re-segmentation stages embedding updates pending approval.
 - Cutover integration test: approval activates the new generation, purges old screenshots, and surfaces an Orphaned Note in the inbox.
-- Integration test with local model optional.
 
 ### Task 7.4: Generate WebP screenshots
 
@@ -1085,6 +1110,24 @@ Verification:
 - Integration test confirms multiple segment matches from one video produce one cluster.
 - High-signal query fixture returns expected items over the configured threshold.
 
+### Task 12.5a: Implement digest assembly and storage
+
+Source: `docs/architecture/DATA_MODEL.md` §3.37; ADR-0006; ADR-0012
+
+Requirements:
+
+- Assemble the run-scoped Digest once when an ingestion run completes; store `payload_json` with new videos, new resources (repositories, websites), high-signal matches, failed/skipped items, and active deferments.
+- One assembly, two renderings: the dashboard (Task 12.6) and Matrix notification (Task 14.3) render from the stored artifact and never independently compute. Sole exception: the dashboard's active-deferments subsection re-derives from live state at render time (ADR-0006 amendment).
+- High-signal evaluation runs once at assembly time against recent-search embeddings using raw cosine similarity against the global threshold (`search.highSignalThresholdPercent`, default 80) — an absolute scale, not the rank-relative `relativeSimilarityPercent` (ADR-0012).
+- Runs completing during an Embedding Transition skip high-signal evaluation; the single catch-up run after the transition backfills evaluation for transition-era videos (ADR-0008, ADR-0011).
+- Backfill runs produce a Digest marked `run_type: backfill`.
+
+Verification:
+
+- A completed run stores exactly one digest row containing all payload sections.
+- Dashboard and Matrix renderings of the same run agree, except the live-deferments subsection.
+- A run completing inside a transition window omits high-signal matches; the catch-up run backfills them.
+
 ### Task 12.6: Implement dashboard daily digest and pending-action inbox
 
 Source: `docs/product/PRD.md` §2.1, §2.10; ADR-0006
@@ -1112,7 +1155,7 @@ Requirements:
 
 - Golden dataset of at least 20 vague/natural-language queries mapped to expected video clusters (from the Task 0.4 fixture corpus), authored query-first — each query written before its fixture video's metadata is finalized, so queries cannot be reverse-engineered from the text.
 - The gate runs against a corpus padded to the MVP scale assumption (~500 videos): golden fixture videos are the recall targets and synthetic, topically-adjacent distractor videos from the Task 12.8 dataset generator fill the rest (ADR-0013). The gate is 100% top-3 recall on the dataset — top 3 of ~500 — no partial pass; regressions are fixed in ranking/weights/document construction, never by editing the dataset to fit.
-- The dataset grows via a "this should have ranked" affordance in the search UI: a failed real query is captured with its expected video, score components, and ranking formula version into a review queue; promotion into the dataset is a deliberate user act.
+- Dataset growth in MVP is file-based: failed real queries are added to the golden dataset by editing the dataset file with the query, expected video, and provenance notes. An in-UI "this should have ranked" capture/review queue is MVP+.
 - Automated integration test asserts each expected cluster appears in the top 3 results.
 - Harness re-runs whenever the ranking formula version, embedding provider/model/dimensions, or search-document construction changes.
 - Recall regressions are reported per query with score components to aid diagnosis.
@@ -1121,7 +1164,6 @@ Verification:
 
 - Golden dataset meets the top-3 recall target on the ~500-video representative corpus.
 - Harness fails when a ranking/model change drops an expected cluster out of the top 3.
-- A captured real-query failure can be reviewed and promoted into the dataset.
 
 ### Task 12.8: Measure search performance against latency targets
 
@@ -1386,6 +1428,8 @@ Normal user actions should be provided contextually where they are useful (sourc
 - test embedding service.
 - test audio-to-text service.
 
+Placement: each action surfaces with its owning slice rather than waiting for slice 13 — run/retry actions with slice 2 (Phase 4), link/repo retry and reprocess with slice 6 (Phases 8–9), screenshot purge with slice 5 (Phase 7), embedding test with slice 4 (Phase 11), audio-to-text test with slice 9 (Phase 6), bulk embedding reprocess with slice 11, and Matrix test with slice 12 (Phase 14).
+
 Verification:
 
 - Each action enqueues a job or returns a clear health result.
@@ -1477,13 +1521,23 @@ Requirements:
 - EF migrations run on startup, with workers blocked until schema compatibility is confirmed.
 - UI/docs recommend backup before migration and require backup for high-risk infrastructure migrations.
 - Migration failure is surfaced clearly and does not silently corrupt state.
-- Add an Admin UI Upgrade & Maintenance panel showing versions, upgrade status, backup status, migration preview, service compatibility, derived-data status, risk level, and post-upgrade checklist.
 
 Verification:
 
 - Startup applies migration in integration test.
 - Pre-migration backup recommendation appears in upgrade docs/UI.
 - Worker refuses to process jobs when DB/config/deployment versions are incompatible.
+
+### Task 17.5a: Implement Upgrade & Maintenance admin panel
+
+Source: `docs/operations/UPGRADE_PATHS.md`; `docs/api/API_SPEC.md` §18
+
+Requirements:
+
+- Admin UI Upgrade & Maintenance panel showing versions, upgrade status, backup status, migration preview, service compatibility, derived-data status, risk level, and post-upgrade checklist.
+
+Verification:
+
 - Upgrade & Maintenance panel renders risk level and required next action.
 
 ## Phase 18: REST API contract conformance
@@ -1595,7 +1649,7 @@ Execution order is the vertical slices below; phase numbering is a reference gro
 10. Notes/edit/re-embedding (Phase 13).
 11. Video-cluster aggregate embeddings, high-signal matching, daily digest dashboard, recall harness, and performance measurement (11.7, 12.5-12.8).
 12. Matrix notification audit/outbox; E2EE is MVP+ (Phase 14).
-13. Production observability stack, retention, deployment, backup/restore, and upgrade hardening (15.2-15.5, 16, 17).
+13. Production observability stack, retention, deployment, backup/restore, and upgrade hardening (15.2-15.5, 16.1, 16.3, 17). Task 16.2 contextual actions land with their owning slices per the placement map.
 14. REST API contract conformance and end-to-end acceptance tests (Phases 18-19).
 
 Even though all are hard MVP, this sequence produces testable increments and validates the killer journey as early as slice 4.
@@ -1640,7 +1694,6 @@ Before declaring MVP complete:
 - Rate-limit deferments are persisted, enforced, surfaced, and clearable.
 - Retention/cleanup jobs handle domain events, telemetry policy, screenshots, and raw debug captures.
 - Convergence milestones M1–M4 pass at their declared slices.
-- Known gaps under discussion with the user are resolved or explicitly reclassified before MVP-complete declaration (digest assembly ownership, video-delete/unavailable-status semantics, 12.7 capture affordance scope, 7.3 split, 17.5 split, 2.4+2.5 split, 0.4 fixture timing, Phase 16 placement).
 
 ## Open implementation decisions
 
