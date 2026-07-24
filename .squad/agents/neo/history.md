@@ -21,3 +21,4 @@ Streaming Digest search quality depends on hybrid retrieval, embeddings, similar
 ## Learnings
 
 Neo owns ranking, vector search, embeddings, and search relevance decisions.
+📌 2026-07-24 (via Coordinator, user directive — prototypes-first sequencing): Your prototype tasks **11.3a and 11.3b now run in slice 2 "Prototypes first"**, immediately after slice 1 foundation — no longer slice 4. They run before Tasks 11.3/12.3, which now explicitly revalidate against your slice-2 prototype findings. Task 11.3a's real-embedding validation subset is now optional-when-provider-exists so the prototype runs standalone without an embedding provider. Ranking weight findings still feed 12.3; corpus generator still seeds 12.8.

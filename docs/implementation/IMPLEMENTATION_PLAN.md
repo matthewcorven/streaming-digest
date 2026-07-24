@@ -14,7 +14,7 @@ MVP explicitly supports public YouTube channel URL/handle/channel ID input only.
 
 ## MVP scope conformance checklist
 
-Prototype policy (user directive, 2026-07-24): prototypes must use programmatically-created synthetic data so high volume can be generated locally without AI — no embedding/LLM latency, no token cost, and full control over content profile (topic distributions, vocabularies, link/note mixes).
+Prototype policy (user directive, 2026-07-24): prototypes must use programmatically-created synthetic data so high volume can be generated locally without AI — no embedding/LLM latency, no token cost, and full control over content profile (topic distributions, vocabularies, link/note mixes). Prototypes run as early as possible (user directive, 2026-07-24) — ideally before the implementation they inform — so costly pivots surface while they are still cheap.
 
 Before implementation work is considered MVP-complete, every hard-MVP requirement from `docs/product/PRD.md`, `docs/architecture/ARCHITECTURE.md`, `docs/architecture/DATA_MODEL.md`, `docs/api/API_SPEC.md`, and `docs/operations/UPGRADE_PATHS.md` must be either implemented and verified or explicitly reclassified in the product docs. The implementation plan must not silently pull MVP+ work into MVP. In particular:
 
@@ -1028,7 +1028,7 @@ Throwaway prototype validating the embedding-side knowledge-base approach before
 Requirements:
 
 - Programmatic synthetic corpus generator (template/topic/vocabulary driven, seedable, no AI) producing controlled-proportion documents: video metadata, segment titles/summaries, transcript chunks, external resource metadata, scraped page text, repository README chunks, and notes, with tunable topic distributions.
-- Synthetic embedding strategy for bulk generation (e.g. deterministic hashing vectors or a tiny local bag-of-words model) so thousands of vectors are created locally with no provider calls; real embeddings via Task 11.3 are used only for a small validation subset.
+- Synthetic embedding strategy for bulk generation (e.g. deterministic hashing vectors or a tiny local bag-of-words model) so thousands of vectors are created locally with no provider calls; when the Task 11.3 provider exists, a small real-embedding validation subset calibrates the synthetic approach — the prototype runs standalone before that, per the early-prototype directive.
 - Validates: document construction rules (DATA_MODEL §5), content-hash/staleness derivation (ADR-0001), ADR-0004 duplicate-per-parent-video cardinality with shared embeddings, video-cluster aggregate (centroid) construction from normalized child embeddings, and pgvector storage/index behavior at MVP-scale volume (HNSW vs IVFFlat trade-off evidence).
 - Output: comparison findings and any model/construction corrections; if the outcome changes storage or index decisions, record an ADR (`docs/adr/`, next available number).
 
@@ -1531,7 +1531,7 @@ Normal user actions should be provided contextually where they are useful (sourc
 - test embedding service.
 - test audio-to-text service.
 
-Placement: each action surfaces with its owning slice rather than waiting for slice 13 — run/retry actions with slice 2 (Phase 4), link/repo retry and reprocess with slice 6 (Phases 8–9), screenshot purge with slice 5 (Phase 7), embedding test with slice 4 (Phase 11), audio-to-text test with slice 9 (Phase 6), bulk embedding reprocess with slice 11, and Matrix test with slice 12 (Phase 14).
+Placement: each action surfaces with its owning slice rather than waiting for slice 13 — run/retry actions with slice 3 (Phase 4), link/repo retry and reprocess with slice 7 (Phases 8–9), screenshot purge with slice 6 (Phase 7), embedding test with slice 5 (Phase 11), audio-to-text test with slice 10 (Phase 6), bulk embedding reprocess with slice 12, and Matrix test with slice 13 (Phase 14).
 
 Verification:
 
@@ -1740,12 +1740,13 @@ Given a user adds one public YouTube channel and leaves the default scheduled ru
 
 ## Implementation sequencing
 
-Execution order is the vertical slices below; phase numbering is a reference grouping for requirements, not the build order. Each slice produces a testable increment.
+Execution order is the vertical slices below; phase numbering is a reference grouping for requirements, not the build order. Each slice produces a testable increment. Prototypes run as early as possible (ideally first, per user directive) so their findings — and any costly pivots — land before the implementation they inform, not after.
 
 1. Foundation: solution, config, fixtures, baseline observability (Phase 0), database foundation and settings seeding (Phase 1).
-2. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness, the Task 2.6 security conformance harness, and the Task 4.6 concurrency harness).
-3. Basic yt-dlp metadata ingestion (Phase 5).
-4. Transcript ingestion + search documents + embeddings + basic search UI (Phases 6, 11, early 12) - first end-to-end killer-journey checkpoint: a vague query returns a video cluster. Tasks 11.3a/11.3b prototypes run in this slice after Task 11.3: their synthetic corpus generator becomes the seed of the Task 12.8 dataset generator, and their ranking findings feed Task 12.3.
+2. Prototypes first: Task 7.4 (screenshot extraction, needs only the Task 0.4 fixture), Task 11.3a (vector knowledge base, needs only Postgres + pgvector from slice 1), Task 11.3b (vector user search, needs 11.3a's corpus) — minimal-dependency order. The 11.3a corpus generator becomes the seed of the Task 12.8 dataset generator; 11.3b's ranking findings feed Task 12.3. ADRs land where outcomes change decisions.
+3. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness, the Task 2.6 security conformance harness, and the Task 4.6 concurrency harness).
+4. Basic yt-dlp metadata ingestion (Phase 5).
+5. Transcript ingestion + search documents + embeddings + basic search UI (Phases 6, 11, early 12) - first end-to-end killer-journey checkpoint: a vague query returns a video cluster. Tasks 11.3 and 12.3 revalidate against the prototype findings from slice 2 rather than starting from untested assumptions.
 5. Segmentation + screenshots (Phase 7).
 6. Link/repo ingestion (Phases 8-9).
 7. Website scraping, including scraper toolchain wiring (Phase 10).
@@ -1757,22 +1758,22 @@ Execution order is the vertical slices below; phase numbering is a reference gro
 13. Production observability stack, retention, deployment, backup/restore, and upgrade hardening (15.2-15.5, 16.1, 16.3, 17). Task 16.2 contextual actions land with their owning slices per the placement map.
 14. REST API contract conformance and end-to-end acceptance tests (Phases 18-19).
 
-Even though all are hard MVP, this sequence produces testable increments and validates the killer journey as early as slice 4.
+Even though all are hard MVP, this sequence produces testable increments and validates the killer journey as early as slice 5.
 
 ### Convergence milestones
 
 Mid-plan checkpoints that validate multiple converging workstreams together, so integration failures surface before the end-to-end phase. Each milestone names its required slices and a pass/fail scenario.
 
-**M1 — Killer journey smoke (after slice 4).** Requires slices 1–4 green.
+**M1 — Killer journey smoke (after slice 5).** Requires slices 1–5 green.
 Given a configured channel with one captioned long-form fixture video, when a manual ingestion run completes and the user submits a vague natural-language query, then the video appears as one cluster in the top results with metadata and a transcript match, and the search page is reachable post-onboarding.
 
-**M2 — Enriched video cluster (after slice 8).** Requires slices 5–8 green on top of M1.
+**M2 — Enriched video cluster (after slice 9).** Requires slices 6–9 green on top of M1.
 Given one fixture video whose description links a GitHub repository and a non-ad website, when the full pipeline runs, then a single search result cluster surfaces the repository, the scraped website, segment timestamps, and screenshot thumbnails together, with no duplicate clusters for the video.
 
-**M3 — Digest and signal pipeline (after slice 11).** Requires slices 9–11 green on top of M2.
+**M3 — Digest and signal pipeline (after slice 12).** Requires slices 10–12 green on top of M2.
 Given a completed ingestion run and a stored recent search, when the digest dashboard renders, then new videos/resources, high-signal matches with absolute-similarity percentages, and the pending-action inbox appear in the required priority order, and the recall harness gate passes on the ~500-video corpus.
 
-**M4 — Notification and transition parity (after slice 13).** Requires slices 12–13 green on top of M3.
+**M4 — Notification and transition parity (after slice 14).** Requires slices 13–14 green on top of M3.
 Given a completed run with a stored Digest, when the Matrix notification is sent, then the notification is an excerpt of the same stored Digest as the dashboard (ADR-0006); and given an embedding-model change, when the transition completes, then the scheduled-run pause, the single catch-up run, and high-signal backfill behave per ADR-0008/ADR-0011.
 
 Phase 19 end-to-end scenarios remain the final acceptance gate; milestones M1–M4 exist to catch cross-workstream regressions earlier.

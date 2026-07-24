@@ -20,3 +20,4 @@ Streaming Digest relies on Aspire orchestration and Docker Compose creation for 
 ## Learnings
 
 Dozer owns orchestration, environment wiring, and container topology.
+📌 2026-07-24 (via Coordinator, user directive — prototypes-first sequencing): **Task 7.4** (screenshot toolchain prototype: ffmpeg vs yt-dlp) now runs in slice 2 "Prototypes first", immediately after slice 1 foundation — alongside 11.3a/11.3b. Its HNSW vs IVFFlat evidence (via 11.3a, also slice 2) arrives before embedding infrastructure is built; the ADR and renumbered Task 7.5 follow as before.
