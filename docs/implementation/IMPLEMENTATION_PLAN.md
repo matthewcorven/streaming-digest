@@ -329,6 +329,20 @@ Verification:
 - Embedding model switch asks confirmation, enters Embedding Transition, and vector search covers only new-model embeddings until the reprocess finishes.
 - A scheduled run falling inside a transition window is skipped, and exactly one catch-up run fires when the transition completes.
 
+### Task 2.6: Implement security conformance tests
+
+Source: `docs/product/PRD.md` §2.9; `docs/architecture/ARCHITECTURE.md` §7; `docs/api/API_SPEC.md` §1, §14, §19–21
+
+Requirements:
+
+- Automated security conformance tests covering: Hangfire dashboard at `/admin/jobs` rejects unauthenticated requests (Task 4.1); the screenshot serving endpoint (`/api/screenshots/{id}`) requires authentication; path traversal on screenshot/media `file_path` serving is rejected (e.g. `../` escapes, absolute paths outside the mounted volume); internal service endpoints (`/internal/matrix/*`, `/internal/scrape/*`, `/internal/audio-to-text/*`) are not reachable through the public API surface; `GET /api/config/runtime` and other diagnostics endpoints never return secret values (bootstrap credentials, DB password, API keys, Matrix tokens); CSRF protection rejects token-less mutations beyond the login flow (extending Task 2.2).
+- Scenarios that depend on later-phase endpoints land alongside those phases; this task delivers the harness and the auth/CSRF/secret-leak scenarios available from Phase 2 onward.
+
+Verification:
+
+- Each scenario above has an automated test; harness runs in CI from Phase 2 onward.
+- A deliberately introduced secret value in runtime config is asserted absent from all diagnostics responses.
+
 ## Phase 3: Channel management
 
 ### Task 3.1: Implement channel CRUD API
@@ -1691,7 +1705,7 @@ Given a user adds one public YouTube channel and leaves the default scheduled ru
 Execution order is the vertical slices below; phase numbering is a reference grouping for requirements, not the build order. Each slice produces a testable increment.
 
 1. Foundation: solution, config, fixtures, baseline observability (Phase 0), database foundation and settings seeding (Phase 1).
-2. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness and the Task 4.6 concurrency harness).
+2. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness, the Task 2.6 security conformance harness, and the Task 4.6 concurrency harness).
 3. Basic yt-dlp metadata ingestion (Phase 5).
 4. Transcript ingestion + search documents + embeddings + basic search UI (Phases 6, 11, early 12) - first end-to-end killer-journey checkpoint: a vague query returns a video cluster.
 5. Segmentation + screenshots (Phase 7).
