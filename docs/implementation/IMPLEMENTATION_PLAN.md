@@ -14,6 +14,8 @@ MVP explicitly supports public YouTube channel URL/handle/channel ID input only.
 
 ## MVP scope conformance checklist
 
+Prototype policy (user directive, 2026-07-24): prototypes must use programmatically-created synthetic data so high volume can be generated locally without AI — no embedding/LLM latency, no token cost, and full control over content profile (topic distributions, vocabularies, link/note mixes).
+
 Before implementation work is considered MVP-complete, every hard-MVP requirement from `docs/product/PRD.md`, `docs/architecture/ARCHITECTURE.md`, `docs/architecture/DATA_MODEL.md`, `docs/api/API_SPEC.md`, and `docs/operations/UPGRADE_PATHS.md` must be either implemented and verified or explicitly reclassified in the product docs. The implementation plan must not silently pull MVP+ work into MVP. In particular:
 
 - Matrix MVP means unencrypted bot notifications to a configured room. Matrix E2EE, Android/device verification, and E2EE crypto-store readiness are MVP+.
@@ -1017,6 +1019,42 @@ Verification:
 
 - Test embedding service endpoint with sample text.
 
+### Task 11.3a: Prototype vector knowledge-base approach
+
+Source: `docs/architecture/DATA_MODEL.md` §5–7; ADR-0001, ADR-0004; `.agents/skills/prototype/SKILL.md` (logic branch)
+
+Throwaway prototype validating the embedding-side knowledge-base approach before production implementation, using synthetic data per the prototype policy in the MVP scope conformance checklist.
+
+Requirements:
+
+- Programmatic synthetic corpus generator (template/topic/vocabulary driven, seedable, no AI) producing controlled-proportion documents: video metadata, segment titles/summaries, transcript chunks, external resource metadata, scraped page text, repository README chunks, and notes, with tunable topic distributions.
+- Synthetic embedding strategy for bulk generation (e.g. deterministic hashing vectors or a tiny local bag-of-words model) so thousands of vectors are created locally with no provider calls; real embeddings via Task 11.3 are used only for a small validation subset.
+- Validates: document construction rules (DATA_MODEL §5), content-hash/staleness derivation (ADR-0001), ADR-0004 duplicate-per-parent-video cardinality with shared embeddings, video-cluster aggregate (centroid) construction from normalized child embeddings, and pgvector storage/index behavior at MVP-scale volume (HNSW vs IVFFlat trade-off evidence).
+- Output: comparison findings and any model/construction corrections; if the outcome changes storage or index decisions, record an ADR (`docs/adr/`, next available number).
+
+Verification:
+
+- Prototype builds the synthetic corpus and embeddings with zero external AI calls.
+- Comparison report committed per the Verification evidence convention; any resulting ADR recorded.
+
+### Task 11.3b: Prototype vector user-search approach
+
+Source: `docs/architecture/DATA_MODEL.md` §6; `docs/architecture/ARCHITECTURE.md` §4.5; ADR-0012, ADR-0013; `.agents/skills/prototype/SKILL.md` (logic branch)
+
+Throwaway prototype validating the query-side vector search and ranking approach before production implementation, using synthetic data per the prototype policy in the MVP scope conformance checklist.
+
+Requirements:
+
+- Programmatic synthetic query generator (paraphrase templates, vague-query patterns, topic sampling from the corpus vocabulary, no AI) producing natural-language-style queries with known expected video-cluster mappings.
+- Validates against the Task 11.3a corpus/embeddings: hybrid document scoring (`textWeight`/`vectorWeight` blend), cluster-score aggregation formula, `relativeSimilarityPercent` normalization over the pre-pagination candidate set, recent-search embedding storage and high-signal absolute-cosine matching against the threshold (ADR-0012), and coarse related-item discovery via cluster aggregates.
+- Explores ranking weight ranges and coverage/note/interaction boost behavior to give Task 12.3 an evidence-based starting point rather than untested constants.
+- Output: findings on scoring/ranking behavior, recommended default weight ranges, and any formula corrections; if the outcome changes the ranking formula, record an ADR (`docs/adr/`, next available number).
+
+Verification:
+
+- Synthetic queries execute against the prototype corpus with zero external AI calls.
+- Comparison report committed per the Verification evidence convention; any resulting ADR recorded.
+
 ### Task 11.4: Store embeddings in pgvector
 
 Source: `docs/architecture/DATA_MODEL.md` §3.22
@@ -1707,7 +1745,7 @@ Execution order is the vertical slices below; phase numbering is a reference gro
 1. Foundation: solution, config, fixtures, baseline observability (Phase 0), database foundation and settings seeding (Phase 1).
 2. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness, the Task 2.6 security conformance harness, and the Task 4.6 concurrency harness).
 3. Basic yt-dlp metadata ingestion (Phase 5).
-4. Transcript ingestion + search documents + embeddings + basic search UI (Phases 6, 11, early 12) - first end-to-end killer-journey checkpoint: a vague query returns a video cluster.
+4. Transcript ingestion + search documents + embeddings + basic search UI (Phases 6, 11, early 12) - first end-to-end killer-journey checkpoint: a vague query returns a video cluster. Tasks 11.3a/11.3b prototypes run in this slice after Task 11.3: their synthetic corpus generator becomes the seed of the Task 12.8 dataset generator, and their ranking findings feed Task 12.3.
 5. Segmentation + screenshots (Phase 7).
 6. Link/repo ingestion (Phases 8-9).
 7. Website scraping, including scraper toolchain wiring (Phase 10).
@@ -1778,6 +1816,7 @@ These are implementation-time choices, not product-scope blockers:
 - Exact Matrix SDK/service technology.
 - Exact whisper engine behind the HTTP audio-to-text service contract (whisper.cpp preferred); the service shape itself is decided (`docs/api/API_SPEC.md` §21).
 - Exact Ollama LLM model default per hardware.
-- HNSW vs IVFFlat pgvector index based on installed pgvector version and expected dataset size.
+- HNSW vs IVFFlat pgvector index based on installed pgvector version and expected dataset size (informed by Task 11.3a prototype evidence).
 - Whether Crawlee/Playwright runs in worker container or separate scraper container.
 - Screenshot extraction approach (ffmpeg vs yt-dlp frame extraction) — resolved by the Task 7.4 prototype and recorded in an ADR.
+- Ranking weight defaults — informed by Task 11.3b prototype evidence.
