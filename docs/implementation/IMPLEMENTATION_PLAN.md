@@ -192,6 +192,20 @@ Verification:
 - First startup seeds all defaults; second startup preserves user-modified values.
 - Upgrade-style startup with a new setting key adds only the missing key.
 
+### Task 1.5: Define domain event type vocabulary
+
+Source: `docs/architecture/DATA_MODEL.md` §3.31
+
+Requirements:
+
+- Establish a single catalog of `event_type` values for `domain_events` (code-level enum/constants plus a docs listing), seeded with the event types implied by this plan: screenshot file missing (Task 7.5), transcript cutover override-inert count (6.1), scrape excluded/failed (10.3), rate-limit deferment created/expired/cleared (4.5), degraded channel entered/probe succeeded/probe failed (5.4), orphaned note surfaced (7.3a), temp-media orphan cleanup (6.4), embedding reprocess queued/completed/failed (11.5), notification dispatch outcome (14.4), digest assembled (12.5a).
+- Convention: any task that writes a new kind of domain event must add its `event_type` to the catalog in the same change.
+
+Verification:
+
+- Catalog exists, is referenced by the domain-event writer, and contains at least the seeded types above.
+- A convention test fails when code writes an `event_type` not present in the catalog.
+
 ## Phase 2: Authentication and app shell
 
 ### Task 2.1: Implement bootstrap admin user
@@ -447,6 +461,19 @@ Verification:
 - Repository, DeepWiki, website, and YouTube rate-limit fixtures create deferments and prevent new host-scoped work until expiry/clear.
 - Dashboard/API exposes active, expired, and cleared deferments.
 
+### Task 4.6: Implement concurrency and race conformance tests
+
+Source: `docs/architecture/DATA_MODEL.md` §3.9, §3.21, §3.29, §3.34; ADR-0005
+
+Requirements:
+
+- Concurrency tests for the race-prone invariants: parallel retries of the same ingestion item; concurrent segment-generation approvals against the single-active-generation partial unique index; the one-active-transcript invariant under concurrent cutovers (Task 6.1); digest assembly when two runs complete near-simultaneously (Task 12.5a); outbox double-dispatch under concurrent workers (Task 14.4).
+- This task delivers the test harness plus the retry and unique-index scenarios; scenario tests for later features land alongside those features.
+
+Verification:
+
+- Each scenario above has a failing-before/passing-after test demonstrating the invariant holds under concurrency.
+
 ## Phase 5: YouTube ingestion adapter
 
 ### Task 5.1: Implement yt-dlp metadata adapter
@@ -574,15 +601,17 @@ Requirements:
 - CPU fallback.
 - GPU configurable where available.
 - Model configurable.
-- Internal API or CLI wrapper.
+- Internal HTTP service matching `docs/api/API_SPEC.md` §21; a CLI engine (e.g. whisper.cpp) is wrapped inside the service as an implementation detail, not exposed as the contract.
 
 Verification:
 
 - Transcribe bundled tiny audio fixture.
 
-### Task 6.4: Implement automatic fallback
+### Task 6.4: Implement temporary media lifecycle and transcription fallback
 
 Source: `docs/architecture/ARCHITECTURE.md` §4.2; `docs/architecture/DATA_MODEL.md` §3.2 (`ingestion.tempMedia.maxBytes`)
+
+Owns the shared temp-media lifecycle for every pipeline stage that downloads temporary media — transcription audio/video (below), screenshot frame extraction (Task 7.5), and any future stage.
 
 If no usable YouTube transcript:
 
@@ -602,6 +631,7 @@ Verification:
 - Test confirms temp file deletion after success and failure.
 - Startup cleanup removes orphan temp files.
 - Lost temp media causes the stage to repeat rather than corrupting state.
+- The same quota, filename scheme, and cleanup jobs apply to screenshot frame-extraction media and any other temporary pipeline media.
 
 ## Phase 7: Segmentation and screenshots
 
@@ -657,7 +687,23 @@ Verification:
 - Explicit re-segmentation stages embedding updates pending approval.
 - Cutover integration test: approval activates the new generation, purges old screenshots, and surfaces an Orphaned Note in the inbox.
 
-### Task 7.4: Generate WebP screenshots
+### Task 7.4: Prototype screenshot extraction approaches
+
+Source: `docs/product/PRD.md` §2.2 (screenshot extraction); `.agents/skills/prototype/SKILL.md`
+
+Requirements:
+
+- Throwaway prototype comparing two candidate extraction approaches against the short test video fixture: (a) ffmpeg extracting frames from the downloaded video, reusing the Task 6.4 temp-media lifecycle; and (b) yt-dlp frame extraction.
+- Evaluate from multiple angles: frame quality and timestamp accuracy, output file size and WebP encode cost, wall-clock speed, dependency/toolchain footprint on macOS ARM, Windows ARM, and Linux, fit with the temp-media lifecycle and quota, failure modes (missing stream, seek inaccuracy, partial download), and operational complexity in containers.
+- Record the comparison and the chosen approach in an ADR (`docs/adr/`, next available number); the ADR closes the "screenshot extraction approach" open implementation decision.
+
+Verification:
+
+- Both approaches produce a WebP frame at a target timestamp from the same fixture.
+- Comparison report committed per the Verification evidence convention.
+- ADR records the decision with the evaluation matrix.
+
+### Task 7.5: Generate WebP screenshots
 
 Rules:
 
@@ -666,6 +712,7 @@ Rules:
 - Configurable offset.
 - Store file on mounted volume.
 - Store metadata/path in DB.
+- Extraction approach (ffmpeg vs yt-dlp) follows the ADR recorded by the Task 7.4 prototype.
 - If segments or screenshot offset change by explicit user action, purge/recreate screenshots immediately.
 - Screenshots are never load-bearing: the serving endpoint returns a stable placeholder instead of 404 when a file is missing; the placeholder is visually distinct from real screenshots and broken images (branded "pending/failed, retry available" treatment), result cards prefer the platform thumbnail or no image over a wall of placeholders, the missing file is recorded as a domain event, and the row becomes retryable (Enrichment Stage), with per-video rollup `unknown`/`pending`/`partial`/`succeeded`/`failed`.
 
@@ -878,6 +925,7 @@ Requirements:
 - Playwright browser installation as a documented, repeatable build/Docker step.
 - Aspire AppHost orchestration of the non-.NET scraper service in local development.
 - Compose service wiring for the scraper, including internal-only networking and health checks.
+- Typed worker scraper client matching the internal scraper API contract (`docs/api/API_SPEC.md` §20), including health-check integration.
 
 Verification:
 
@@ -1164,6 +1212,7 @@ Verification:
 
 - Golden dataset meets the top-3 recall target on the ~500-video representative corpus.
 - Harness fails when a ranking/model change drops an expected cluster out of the top 3.
+- Recall harness run reports (per-query score components) committed per the Verification evidence convention.
 
 ### Task 12.8: Measure search performance against latency targets
 
@@ -1180,6 +1229,7 @@ Verification:
 
 - Latency targets met on both dataset sizes or documented with a remediation plan.
 - UI progress indicator appears after 1 second for slow queries.
+- Latency measurement results for both dataset sizes committed as a baseline per the Verification evidence convention (not only the method).
 
 ## Phase 13: Notes and edit modals
 
@@ -1326,6 +1376,7 @@ Verification:
 
 - Local Aspire dashboard shows traces/logs/metrics for each signal source above.
 - No service required late retrofit of baseline plumbing to emit traces.
+- Automated smoke assertions: an integration test emitting an API request and a test Hangfire job asserts trace spans and structured log fields (including correlation ID) are produced through the OTLP pipeline — not only manual dashboard checks.
 
 ### Task 15.2: Add production observability Compose services
 
@@ -1457,6 +1508,7 @@ Verification:
 
 - Fresh host can start stack from documented command.
 - Cross-platform dev note (per `docs/architecture/ARCHITECTURE.md` §12): documented manual verification that the Aspire AppHost and key dev flows start on macOS ARM and Windows ARM, with CPU fallback confirmed where GPU is unavailable.
+- Cross-platform startup checklist results (macOS ARM, Windows ARM, CPU fallback) committed per the Verification evidence convention.
 
 ### Task 17.2: Configure volumes
 
@@ -1509,6 +1561,7 @@ Verification:
 
 - Restore dry run validates login, search, screenshots, Matrix test send, and embedding test.
 - Restore docs clearly distinguish MVP Matrix bot session/config from MVP+ E2EE crypto-store restore verification.
+- Restore dry-run evidence (what was restored, validations run, outcome) committed per the Verification evidence convention.
 
 ### Task 17.5: Implement upgrade and migration policy
 
@@ -1638,7 +1691,7 @@ Given a user adds one public YouTube channel and leaves the default scheduled ru
 Execution order is the vertical slices below; phase numbering is a reference grouping for requirements, not the build order. Each slice produces a testable increment.
 
 1. Foundation: solution, config, fixtures, baseline observability (Phase 0), database foundation and settings seeding (Phase 1).
-2. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness).
+2. Auth + channel CRUD + Hangfire (Phases 2-4, including the Task 2.3b conformance harness and the Task 4.6 concurrency harness).
 3. Basic yt-dlp metadata ingestion (Phase 5).
 4. Transcript ingestion + search documents + embeddings + basic search UI (Phases 6, 11, early 12) - first end-to-end killer-journey checkpoint: a vague query returns a video cluster.
 5. Segmentation + screenshots (Phase 7).
@@ -1672,6 +1725,14 @@ Given a completed run with a stored Digest, when the Matrix notification is sent
 
 Phase 19 end-to-end scenarios remain the final acceptance gate; milestones M1–M4 exist to catch cross-workstream regressions earlier.
 
+## Verification evidence
+
+Verification that produces durable results — benchmarks, recall reports, cross-platform checks, restore dry-runs, prototype comparisons — must commit the evidence, not just the method. Convention:
+
+- Committed under `docs/verification/` named `{task-id}-{slug}.md` (prose summary, environment, date, outcome), with machine-readable JSON alongside where the result is numeric (recall, latency).
+- Evidence is append-only: re-runs add new dated files rather than overwriting, so regressions are visible across runs.
+- Quality gates that cite measured targets (Task 12.7 recall, Task 12.8 latency) are not met until the corresponding evidence artifact is committed.
+
 ## Quality gates
 
 Before declaring MVP complete:
@@ -1694,13 +1755,15 @@ Before declaring MVP complete:
 - Rate-limit deferments are persisted, enforced, surfaced, and clearable.
 - Retention/cleanup jobs handle domain events, telemetry policy, screenshots, and raw debug captures.
 - Convergence milestones M1–M4 pass at their declared slices.
+- Durable verification evidence is committed per the Verification evidence convention (recall, latency, cross-platform, restore dry-run, prototype comparisons).
 
 ## Open implementation decisions
 
 These are implementation-time choices, not product-scope blockers:
 
 - Exact Matrix SDK/service technology.
-- Exact whisper.cpp/Semantic Kernel adapter strategy.
+- Exact whisper engine behind the HTTP audio-to-text service contract (whisper.cpp preferred); the service shape itself is decided (`docs/api/API_SPEC.md` §21).
 - Exact Ollama LLM model default per hardware.
 - HNSW vs IVFFlat pgvector index based on installed pgvector version and expected dataset size.
 - Whether Crawlee/Playwright runs in worker container or separate scraper container.
+- Screenshot extraction approach (ffmpeg vs yt-dlp frame extraction) — resolved by the Task 7.4 prototype and recorded in an ADR.
