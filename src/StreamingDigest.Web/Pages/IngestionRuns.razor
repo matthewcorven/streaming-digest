@@ -1,0 +1,27 @@
+@page "/ingestion"
+@inject IIngestionRunDetailFixtureService FixtureService
+
+<PageTitle>Ingestion runs</PageTitle>
+
+<div class="ingestion-list-page">
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">Operations</p>
+            <h1>Ingestion runs</h1>
+        </div>
+        <p class="page-description">These fixtures exercise the new ingestion run detail experience, including deferments, retries, and completed-run immutability messaging.</p>
+    </div>
+
+    <div class="fixture-grid">
+        @foreach (var fixture in FixtureService.GetFixtures())
+        {
+            <a class="fixture-card" href="@($"/ingestion/runs/{fixture.Id}")">
+                <div class="fixture-card-header">
+                    <h2>@fixture.Title</h2>
+                    <span class="status-pill">@fixture.StatusText</span>
+                </div>
+                <p>@fixture.Subtitle</p>
+            </a>
+        }
+    </div>
+</div>

@@ -105,6 +105,256 @@ code {
     color: #c02d76;
 }
 
+.ingestion-list-page,
+.ingestion-detail-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.page-heading,
+.section-heading,
+.item-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.eyebrow {
+    margin: 0 0 0.25rem;
+    color: #50708f;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.page-description,
+.muted,
+.fixture-card p,
+.item-summary p,
+.timeline-step p,
+.failure-summary,
+.detail-block p,
+.detail-block li {
+    color: #54657a;
+    line-height: 1.5;
+}
+
+.back-link,
+.action-link,
+.secondary-button,
+.action-button {
+    text-decoration: none;
+}
+
+.fixture-grid,
+.outcome-grid,
+.detail-grid {
+    display: grid;
+    gap: 1rem;
+}
+
+.fixture-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.fixture-card,
+.section-card,
+.outcome-card,
+.item-card,
+.deferment-banner {
+    border: 1px solid #dce5f0;
+    border-radius: 1rem;
+    background: #fff;
+    box-shadow: 0 10px 30px rgba(15, 30, 44, 0.05);
+}
+
+.fixture-card,
+.section-card,
+.outcome-card,
+.item-card {
+    padding: 1.25rem;
+}
+
+.fixture-card {
+    display: block;
+    color: inherit;
+}
+
+.fixture-card-header,
+.item-title-row,
+.timeline-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+    background: #e7f1ff;
+    color: #18448a;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.status-warning {
+    background: #fff3e2;
+    color: #8b4910;
+}
+
+.status-deferred {
+    background: #fbe8db;
+    color: #975114;
+}
+
+.status-ready {
+    background: #e8f6eb;
+    color: #176b33;
+}
+
+.status-neutral {
+    background: #eef2f7;
+    color: #4f5e70;
+}
+
+.header-actions,
+.item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.action-button,
+.secondary-button {
+    border: none;
+    border-radius: 999px;
+    padding: 0.55rem 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.action-button {
+    background: #1b6ec2;
+    color: #fff;
+}
+
+.secondary-button {
+    background: #edf3fb;
+    color: #18448a;
+}
+
+.deferment-banner {
+    padding: 1.25rem;
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 1rem;
+    background: linear-gradient(90deg, #fff4e8, #fffaf3);
+}
+
+.deferment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.deferment-card {
+    border-radius: 0.75rem;
+    border: 1px solid #f0d9b8;
+    padding: 0.8rem 0.95rem;
+    background: rgba(255,255,255,0.8);
+}
+
+.outcome-grid {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.outcome-card {
+    background: linear-gradient(180deg, #f7fbff, #ffffff);
+}
+
+.live-card {
+    border-color: #a7cde8;
+}
+
+.timeline-list,
+.item-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+
+.timeline-step {
+    border-left: 4px solid #1b6ec2;
+    padding-left: 0.9rem;
+}
+
+.progress-track {
+    width: 100%;
+    height: 0.6rem;
+    background: #e7edf5;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 0.4rem 0;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #1b6ec2, #4ea4ff);
+    border-radius: inherit;
+}
+
+.item-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.95rem;
+}
+
+.item-details {
+    border-top: 1px solid #e6ebf2;
+    padding-top: 0.9rem;
+}
+
+.detail-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.detail-block {
+    background: #f7fafd;
+    border-radius: 0.8rem;
+    padding: 0.9rem 1rem;
+}
+
+.detail-block h4 {
+    margin-top: 0;
+    margin-bottom: 0.6rem;
+}
+
+.detail-block ul {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+.failure-summary {
+    margin: 0 0 0.85rem;
+    font-weight: 600;
+    color: #8a3b0d;
+}
+
+.empty-state {
+    border: 1px dashed #d8e3ee;
+    border-radius: 1rem;
+    padding: 2rem;
+    background: #fafcff;
+}
+
 .form-floating > .form-control-plaintext::placeholder, .form-floating > .form-control::placeholder {
     color: var(--bs-secondary-color);
     text-align: end;
