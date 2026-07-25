@@ -1,0 +1,46 @@
+{
+  "task": "101-issue-queue-readiness",
+  "date": "2026-07-25",
+  "repo": "matthewcorven/streaming-digest",
+  "fix": {
+    "state_default": {"before": "open", "after": "all"},
+    "missing_marker_added": true,
+    "closed_issues_leak_into_output": false
+  },
+  "flip_proof": {
+    "before_default": {"next_available": 12, "blocked_includes": [2, 85]},
+    "before_state_all": {"next_available": 2, "available_includes": [2, 85]},
+    "after_default": {"next_available": 2, "available_includes": [2, 85]}
+  },
+  "closed_referents_used_not_listed": {"1": "satisfies 0.1", "84": "satisfies 7.4"},
+  "status_mode_counts": {
+    "available": 10,
+    "blocked": 82,
+    "untriaged": 0,
+    "member_assigned": 92,
+    "open_pr": 0,
+    "draft_pr": 0,
+    "matches_pre_fix_state_all_baseline": true
+  },
+  "phase_gate_rewrites": [
+    {"issue": 6,  "old": "1.0",  "new": "0.5",  "referent": 5},
+    {"issue": 54, "old": "2.0",  "new": "1.5",  "referent": 10},
+    {"issue": 63, "old": "3.0",  "new": "2.6",  "referent": 62},
+    {"issue": 65, "old": "4.0",  "new": "4.6",  "referent": 70},
+    {"issue": 71, "old": "5.0",  "new": "5.5",  "referent": 75},
+    {"issue": 76, "old": "6.0",  "new": "6.4",  "referent": 79},
+    {"issue": 80, "old": "7.0",  "new": "7.5",  "referent": 85},
+    {"issue": 86, "old": "8.0",  "new": "8.5",  "referent": 90},
+    {"issue": 91, "old": "9.0",  "new": "9.4",  "referent": 94},
+    {"issue": 11, "old": "10.0", "new": "10.3", "referent": 14},
+    {"issue": 15, "old": "11.0", "new": "11.7", "referent": 23},
+    {"issue": 24, "old": "12.0", "new": "12.8", "referent": 32},
+    {"issue": 33, "old": "13.0", "new": "13.3", "referent": 35},
+    {"issue": 36, "old": "14.0", "new": "14.4", "referent": 39},
+    {"issue": 40, "old": "15.0", "new": "15.5", "referent": 44},
+    {"issue": 45, "old": "16.0", "new": "16.3", "referent": 47},
+    {"issue": 48, "old": "17.0", "new": "16.3", "referent": 47}
+  ],
+  "missing_referents_after_rewrite": 0,
+  "test_convention": "none-for-scripts; reproduction commands recorded instead of new tooling"
+}
