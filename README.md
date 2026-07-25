@@ -384,7 +384,7 @@ Detailed project documents are available in `docs/`:
 - `docs/architecture/ARCHITECTURE.md`
 - `docs/architecture/DATA_MODEL.md`
 - `docs/api/API_SPEC.md`
-- `docs/implementation/IMPLEMENTATION_PLAN.md`
+- Implementation work is tracked as GitHub issues (migrated from the retired implementation plan)
 - `docs/operations/UPGRADE_PATHS.md`
 
 ## Legal and privacy notes

@@ -8,7 +8,7 @@ Source documents:
 - `docs/product/PRD.md` — product scope, user journeys, acceptance criteria
 - `docs/architecture/ARCHITECTURE.md` — hosting model, PWA declaration, search UX conventions (§2.1, §4.10, §5.2)
 - `docs/api/API_SPEC.md` — all endpoint contracts referenced below
-- `docs/implementation/IMPLEMENTATION_PLAN.md` — Task 2.3 (app shell), Task 2.3a (run detail UI), Task 2.3b (conformance harness), Task 2.3c (PWA baseline)
+- GitHub issues #56 (app shell), #57 (run detail UI), #58 (conformance harness), #59 (PWA baseline) — migrated from the retired implementation plan
 
 This document is the definitive, implementable specification for the Streaming Digest UI. Every page, component, interaction pattern, and state is specified concretely. Where a behavior is not specified here, the source documents above win.
 
@@ -720,7 +720,7 @@ MOBILE
 
 ### 4.7 Ingestion Run Detail
 
-**Purpose:** Deep operational view of one run (PRD §2.6; IMPLEMENTATION_PLAN Task 2.3a): stage timeline, per-video items with retry, deferments, operational links.
+**Purpose:** Deep operational view of one run (PRD §2.6; issue #57): stage timeline, per-video items with retry, deferments, operational links.
 
 **Route:** `/ingestion/runs/{runId}`
 
@@ -1361,4 +1361,4 @@ Capability checks at runtime gate each enhancement; every PWA feature degrades g
 
 ---
 
-*End of presentation layer specification. Implementation tasks: IMPLEMENTATION_PLAN.md Task 2.3 (app shell), 2.3a (run detail), 2.3b (API conformance), 2.3c (PWA baseline).*
+*End of presentation layer specification. Implementation tracked in GitHub issues #56 (app shell), #57 (run detail), #58 (API conformance), #59 (PWA baseline).*
