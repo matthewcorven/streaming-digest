@@ -1,0 +1,47 @@
+{
+  "task": "11.3a-vector-knowledge-base",
+  "date": "2026-07-25T15:28:45.3301090Z",
+  "seed": 42,
+  "dimensions": 384,
+  "video_count": 500,
+  "docs_per_video": 24,
+  "model": "synthetic-topic-embedder-v1",
+  "provider": "synthetic-local",
+  "pgvector_version": "0.8.5",
+  "postgres_version": "17.10 (Debian 17.10-1.pgdg12\u002B1)",
+  "results": {
+    "document_rows": 12120,
+    "distinct_content_hashes": 11958,
+    "adr0004_embedding_savings_pct": 1.34,
+    "embedding_rows": 11958,
+    "adr0004_shared_doc_rows": 3,
+    "adr0004_shared_distinct_parents": 3,
+    "adr0004_shared_embedding_rows": 1,
+    "cluster_centroid_rows": 500,
+    "staleness_derivation_mismatches": 0,
+    "index_comparison": [
+      {
+        "index": "hnsw",
+        "build_ms": 979,
+        "avg_query_ms": 0.522,
+        "recall_at_10": 0.99,
+        "size_kb": 23928
+      },
+      {
+        "index": "ivfflat(lists=100)",
+        "build_ms": 422,
+        "avg_query_ms": 0.509,
+        "recall_at_10": 0.98,
+        "size_kb": 19640
+      }
+    ],
+    "exact_seqscan_avg_ms": 3.223
+  },
+  "verdicts": {
+    "staleness": "PROVEN",
+    "document_construction": "PROVEN",
+    "adr0004_cardinality": "PROVEN",
+    "cluster_centroid": "PROVEN",
+    "pgvector_index": "PROVEN"
+  }
+}

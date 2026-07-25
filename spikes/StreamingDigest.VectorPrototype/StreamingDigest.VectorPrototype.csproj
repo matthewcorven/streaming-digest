@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ============================================================
+    THROWAWAY PROTOTYPE — Task 11.3a (GitHub issue #18)
+    Validates the vector knowledge-base approach against REAL
+    Aspire-managed Postgres + pgvector. NOT production code.
+    Do not reference from the solution. Do not merge to main.
+    ============================================================
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>vector-prototype</AssemblyName>
+    <!-- Standalone: not part of StreamingDigest.slnx -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+</Project>
