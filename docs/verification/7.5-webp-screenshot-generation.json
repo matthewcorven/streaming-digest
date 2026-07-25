@@ -1,7 +1,7 @@
 {
   "issue": "85",
   "task": "7.5",
-  "summary": "Implemented ffmpeg-backed WebP screenshot generation in the worker with regression tests and worker build verification.",
+  "summary": "Implemented ffmpeg-backed WebP screenshot generation in the worker with regression tests, worker build verification, and Docker-based ffmpeg validation.",
   "verification": {
     "screenshot_tests": {
       "command": "dotnet test tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj --filter ScreenshotGenerationServiceTests",
@@ -12,6 +12,13 @@
     "worker_build": {
       "command": "dotnet build src/StreamingDigest.Worker/StreamingDigest.Worker.csproj --no-restore",
       "passed": true
+    },
+    "docker_ffmpeg_validation": {
+      "build_command": "docker build -t streaming-digest-worker-test -f src/StreamingDigest.Worker/Dockerfile .",
+      "encoder_check_command": "docker run --rm --entrypoint ffmpeg streaming-digest-worker-test -encoders 2>/dev/null | grep -i webp",
+      "generation_command": "docker run --rm -v \"$PWD/tests/Fixtures/video/test-screenshot.mp4:/tmp/input.mp4:ro\" -v \"/tmp/streaming-digest-docker-validate:/tmp/out\" --entrypoint ffmpeg streaming-digest-worker-test -y -loglevel error -ss 1 -i /tmp/input.mp4 -frames:v 1 -c:v libwebp -quality 80 /tmp/out/screenshot.webp",
+      "passed": true,
+      "generated_output": "/tmp/streaming-digest-docker-validate/screenshot.webp"
     }
   }
 }
