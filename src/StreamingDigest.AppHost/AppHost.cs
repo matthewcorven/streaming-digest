@@ -18,4 +18,6 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WithReference(postgres)
     .WaitFor(postgres);
 
+builder.AddNpmApp("scraper", "../StreamingDigest.Scraper");
+
 builder.Build().Run();

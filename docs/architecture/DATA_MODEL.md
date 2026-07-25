@@ -841,6 +841,28 @@ Repository/API rate limits defer remaining work instead of failing the entire ru
 
 Important application/domain events and warning/error summaries.
 
+Canonical `event_type` values (the code-level catalog lives in `src/StreamingDigest.Domain/DomainEventTypeCatalog.cs`):
+
+- `screenshot_file_missing`
+- `transcript_cutover_override_inert`
+- `scrape_excluded`
+- `scrape_failed`
+- `rate_limit_deferment_created`
+- `rate_limit_deferment_expired`
+- `rate_limit_deferment_cleared`
+- `channel_degraded_entered`
+- `channel_probe_succeeded`
+- `channel_probe_failed`
+- `orphaned_note_surfaced`
+- `temp_media_orphan_cleanup`
+- `embedding_reprocess_queued`
+- `embedding_reprocess_completed`
+- `embedding_reprocess_failed`
+- `notification_dispatch_outcome`
+- `digest_assembled`
+
+Any change that writes a new domain-event kind must add its `event_type` to this catalog and to the code-level catalog in the same change.
+
 Columns:
 
 - `id uuid primary key`

@@ -1,0 +1,6 @@
+{
+  "host": "youtube",
+  "status": 429,
+  "retry_after": 60,
+  "body": "Rate limit exceeded"
+}

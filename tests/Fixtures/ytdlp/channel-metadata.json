@@ -1,0 +1,11 @@
+{
+  "id": "UC_fixture_channel",
+  "title": "Fixture Channel",
+  "description": "Synthetic channel metadata used by scraper tests.",
+  "uploader": "Fixture Team",
+  "availability": "public",
+  "chapters": [
+    {"title": "Intro", "start_time": 0, "end_time": 15},
+    {"title": "Main topic", "start_time": 15, "end_time": 60}
+  ]
+}

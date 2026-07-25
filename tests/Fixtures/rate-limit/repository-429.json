@@ -1,0 +1,6 @@
+{
+  "host": "github",
+  "status": 429,
+  "retry_after": 120,
+  "body": "Repository host rate limit"
+}

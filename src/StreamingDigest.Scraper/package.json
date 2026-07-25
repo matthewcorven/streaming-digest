@@ -3,9 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import tsx src/index.ts"
+    "start": "node --import tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/**/*.test.js",
+    "install:playwright": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.54.0"
   },
   "devDependencies": {
+    "@types/node": "^22.10.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.3"
   }

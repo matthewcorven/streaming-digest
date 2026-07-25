@@ -1,0 +1,12 @@
+{
+  "queries": [
+    {
+      "query": "news about ai",
+      "expected_clusters": ["ai", "technology"]
+    },
+    {
+      "query": "video about cats",
+      "expected_clusters": ["animals", "pets"]
+    }
+  ]
+}

@@ -1,1 +1,3 @@
-console.log('StreamingDigest scraper placeholder ready.');
+import { startScraperServer } from './server.js';
+
+startScraperServer();

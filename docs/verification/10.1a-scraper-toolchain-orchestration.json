@@ -1,0 +1,16 @@
+{
+  "task": "10.1a-scraper-toolchain-orchestration",
+  "status": "passed",
+  "commands": {
+    "scraper": ["npm ci", "npm run build", "npm test"],
+    "apphost": ["dotnet build src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj"],
+    "compose": ["docker compose config"]
+  },
+  "results": {
+    "scraperTests": 2,
+    "scraperHealth": "ok",
+    "appHostBuild": "succeeded",
+    "composeConfig": "succeeded"
+  },
+  "date": "2026-07-25"
+}

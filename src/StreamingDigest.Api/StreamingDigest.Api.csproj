@@ -24,4 +24,10 @@
   <ProjectReference Include="..\StreamingDigest.Web\StreamingDigest.Web.csproj" />
 </ItemGroup>
 
+  <ItemGroup>
+    <None Update="appsettings.schema.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
