@@ -69,3 +69,8 @@ Dozer owns orchestration, environment wiring, and container topology.
 - Measured queue impact explicitly: missing referents stayed **0**; Available **9 -> 10** and Blocked **82 -> 81** because **only `#36`** moved from Blocked to Available when its invented dependency was cleared. `#15`, `#24`, `#33`, and `#80` all remained Blocked behind real OPEN issues. No silent mass-unblock.
 - Recount under the final rule: **12 of 17** heads still coincide with the previous numeric phase's last task; the five divergences are `#15`, `#24`, `#33`, `#36`, and `#80`.
 - New finding flagged, not silently expanded into this correction: if the Matrix notification path needs an explicit stored-Digest dependency, it belongs on implementation issues `#37` / `#38`, not on SDK-selection issue `#36`.
+
+## 2026-07-25 — Cross-agent update (via Scribe): prototype series outcomes + Morpheus rulings affecting you
+
+- Your Task 7.4 prototype (ADR-0015, PR #98 — merged) was fully CONFIRMED in Morpheus's synthesis review. Rulings touching your lane: **+543 MB ffmpeg in the worker is acceptable**; **+1-frame (~30 ms) non-keyframe offset does not matter** because screenshots are never load-bearing; coordinator owes an ARCHITECTURE §12 note on Homebrew-vs-Debian ffmpeg build skew; spike code stays on main as evidence under the `spikes/README.md` convention.
+- Series context: Neo's 11.3a (PR #96) proved the vector knowledge-base stack and pinned the pgvector AppHost image as production-needed; Neo's 11.3b (PR #97) proved the DATA_MODEL §6 search mechanics and surfaced the 447 ms hybrid-latency finding that Task 12.3 must design around. Synthesis evidence: `docs/verification/prototype-synthesis-11.3a-11.3b-7.4.md` (PR #99).
