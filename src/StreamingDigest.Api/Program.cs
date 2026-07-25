@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Hangfire;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Logs;
@@ -67,7 +68,13 @@ builder.Services.AddSingleton(sp =>
     };
 });
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
-builder.Services.AddSingleton<INotificationDispatchService, NotificationDispatchService>();
+
+var connectionString = builder.Configuration.GetConnectionString("streamingdigest")
+    ?? builder.Configuration.GetConnectionString("postgres")
+    ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
+
+builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 
 var app = builder.Build();
 
@@ -76,10 +83,6 @@ using var startupScope = CorrelationContext.BeginLoggingScope(app.Logger, new Di
     ["startup"] = "api",
     ["environment"] = app.Environment.EnvironmentName
 });
-
-var connectionString = builder.Configuration.GetConnectionString("streamingdigest")
-    ?? builder.Configuration.GetConnectionString("postgres")
-    ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
 
 var databaseStatus = await EnsureDatabaseConnectivityAsync(app.Logger, connectionString);
 
@@ -121,6 +124,31 @@ app.MapPost("/api/internal/notifications/matrix/test", async (IMatrixNotificatio
 {
     var result = await service.SendTestNotificationAsync(cancellationToken);
     return Results.Ok(new { success = result.Success, message = result.Message, responseBody = result.ResponseBody });
+});
+app.MapGet("/api/internal/ingestion-runs/{ingestionRunId:guid}/notifications", async (Guid ingestionRunId, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var notifications = await context.Notifications
+        .Where(notification => notification.IngestionRunId == ingestionRunId)
+        .OrderByDescending(notification => notification.CreatedAt)
+        .Select(notification => new
+        {
+            notification.Id,
+            notification.OperationId,
+            notification.Provider,
+            notification.Target,
+            notification.Status,
+            notification.AttemptCount,
+            notification.NextRetryAt,
+            notification.ProviderMessageId,
+            notification.ErrorSummary,
+            notification.SentAt,
+            notification.CreatedAt,
+            notification.UpdatedAt,
+            Retryable = notification.Status == "pending" || notification.Status == "failed"
+        })
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(notifications);
 });
 app.MapFallbackToFile("index.html");
 
