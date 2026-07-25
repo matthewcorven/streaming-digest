@@ -8,6 +8,7 @@ using OpenTelemetry.Trace;
 using Npgsql;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
+using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
@@ -46,6 +47,7 @@ builder.Services.AddOpenTelemetry()
     });
 
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {

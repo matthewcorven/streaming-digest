@@ -1,0 +1,17 @@
+{
+  "issue": "85",
+  "task": "7.5",
+  "summary": "Implemented ffmpeg-backed WebP screenshot generation in the worker with regression tests and worker build verification.",
+  "verification": {
+    "screenshot_tests": {
+      "command": "dotnet test tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj --filter ScreenshotGenerationServiceTests",
+      "passed": true,
+      "tests_run": 2,
+      "failed": 0
+    },
+    "worker_build": {
+      "command": "dotnet build src/StreamingDigest.Worker/StreamingDigest.Worker.csproj --no-restore",
+      "passed": true
+    }
+  }
+}
