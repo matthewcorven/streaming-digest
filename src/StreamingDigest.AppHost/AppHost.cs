@@ -2,12 +2,16 @@ using Aspire.Hosting;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-var postgres = builder.AddPostgres("postgres")
+var postgresUsername = builder.AddParameter("postgres-username");
+var postgresPassword = builder.AddParameter("postgres-password", secret: true);
+
+var postgres = builder.AddPostgres("postgres", postgresUsername, postgresPassword)
     // pgvector is required (ARCHITECTURE.md target runtime: "PostgreSQL + pgvector").
     // The pgvector image bundles the `vector` extension on top of stock postgres.
-    .WithImage("pgvector/pgvector", "pg17")
+    .WithImage("pgvector/pgvector")
+    .WithImageTag("0.8.5-pg18-trixie")
     .WithImageRegistry("docker.io")
-    .WithDataVolume("streamingdigest-postgres-data")
+    .WithVolume("streamingdigest-postgres18-data", "/var/lib/postgresql")
     .AddDatabase("streamingdigest");
 
 builder.AddProject<Projects.StreamingDigest_Api>("api")
@@ -18,6 +22,7 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WithReference(postgres)
     .WaitFor(postgres);
 
-builder.AddNpmApp("scraper", "../StreamingDigest.Scraper");
+builder.AddJavaScriptApp("scraper", "../StreamingDigest.Scraper")
+    .WithRunScript("start");
 
 builder.Build().Run();
