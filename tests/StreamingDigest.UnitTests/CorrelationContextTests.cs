@@ -26,4 +26,34 @@ public class CorrelationContextTests
         Assert.Equal(Activity.Current.SpanId.ToString(), CorrelationContext.CurrentSpanId);
         Assert.Contains(Activity.Current.Tags, tag => tag.Key == "test.key" && tag.Value == "value");
     }
+
+    [Fact]
+    public async Task RunWithActivityAsync_ExposesCurrentActivityAndReturnsResult()
+    {
+        var listener = new ActivityListener
+        {
+            ShouldListenTo = _ => true,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded
+        };
+
+        ActivitySource.AddActivityListener(listener);
+
+        var result = await CorrelationContext.RunWithActivityAsync(
+            "unit-test-async",
+            async activity =>
+            {
+                Assert.NotNull(activity);
+                Assert.Equal(Activity.Current?.TraceId, activity!.TraceId);
+                activity.SetTag("async.key", "value");
+                await Task.Yield();
+                return Activity.Current!.SpanId.ToString();
+            },
+            new Dictionary<string, object?>
+            {
+                ["async.key"] = "value"
+            });
+
+        Assert.NotNull(result);
+        Assert.Null(Activity.Current);
+    }
 }

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using StreamingDigest.Application.Observability;
 using StreamingDigest.Domain;
 
 namespace StreamingDigest.Application.Screenshots;
@@ -28,104 +29,123 @@ public sealed class ScreenshotGenerationService : IScreenshotGenerationService
     private const double DefaultOffsetSeconds = 5;
     private const int DefaultQuality = 80;
 
-    public Task<ScreenshotGenerationResult> GenerateAsync(ScreenshotGenerationRequest request, CancellationToken cancellationToken = default)
+    public async Task<ScreenshotGenerationResult> GenerateAsync(ScreenshotGenerationRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (string.IsNullOrWhiteSpace(request.InputFilePath))
-        {
-            return Task.FromResult(Failure("An input media file path is required.", DomainEventTypeCatalog.ScreenshotFileMissing));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.OutputFilePath))
-        {
-            return Task.FromResult(Failure("An output screenshot path is required.", DomainEventTypeCatalog.ScreenshotFileMissing));
-        }
-
-        if (!File.Exists(request.InputFilePath))
-        {
-            return Task.FromResult(Failure($"The input media file '{request.InputFilePath}' does not exist.", DomainEventTypeCatalog.ScreenshotFileMissing));
-        }
-
-        var outputDirectory = Path.GetDirectoryName(request.OutputFilePath);
-        if (!string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            Directory.CreateDirectory(outputDirectory);
-        }
-
-        var ffmpegPath = string.IsNullOrWhiteSpace(request.FfmpegPath) ? "ffmpeg" : request.FfmpegPath;
-        var offsetSeconds = request.OffsetSeconds ?? DefaultOffsetSeconds;
-        var quality = request.Quality ?? DefaultQuality;
-        var outputFilePath = Path.GetFullPath(request.OutputFilePath);
-
-        if (File.Exists(outputFilePath))
-        {
-            File.Delete(outputFilePath);
-        }
-
-        try
-        {
-            var startInfo = new ProcessStartInfo
+        return await CorrelationContext.RunWithActivityAsync(
+            "screenshot.generate",
+            async activity =>
             {
-                FileName = ffmpegPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                activity?.SetTag("screenshot.input.path", request.InputFilePath);
+                activity?.SetTag("screenshot.output.path", request.OutputFilePath);
 
-            startInfo.ArgumentList.Add("-y");
-            startInfo.ArgumentList.Add("-loglevel");
-            startInfo.ArgumentList.Add("error");
-            startInfo.ArgumentList.Add("-ss");
-            startInfo.ArgumentList.Add(offsetSeconds.ToString(CultureInfo.InvariantCulture));
-            startInfo.ArgumentList.Add("-i");
-            startInfo.ArgumentList.Add(request.InputFilePath);
-            startInfo.ArgumentList.Add("-frames:v");
-            startInfo.ArgumentList.Add("1");
-            startInfo.ArgumentList.Add("-c:v");
-            startInfo.ArgumentList.Add("libwebp");
-            startInfo.ArgumentList.Add("-quality");
-            startInfo.ArgumentList.Add(quality.ToString(CultureInfo.InvariantCulture));
-            startInfo.ArgumentList.Add(outputFilePath);
+                if (string.IsNullOrWhiteSpace(request.InputFilePath))
+                {
+                    return Failure("An input media file path is required.", DomainEventTypeCatalog.ScreenshotFileMissing);
+                }
 
-            using var process = Process.Start(startInfo);
-            if (process is null)
-            {
-                return Task.FromResult(Failure("Unable to start ffmpeg.", DomainEventTypeCatalog.ScreenshotFileMissing));
-            }
+                if (string.IsNullOrWhiteSpace(request.OutputFilePath))
+                {
+                    return Failure("An output screenshot path is required.", DomainEventTypeCatalog.ScreenshotFileMissing);
+                }
 
-            var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            process.WaitForExit();
+                if (!File.Exists(request.InputFilePath))
+                {
+                    return Failure($"The input media file '{request.InputFilePath}' does not exist.", DomainEventTypeCatalog.ScreenshotFileMissing);
+                }
 
-            var standardOutput = standardOutputTask.GetAwaiter().GetResult();
-            var standardError = standardErrorTask.GetAwaiter().GetResult();
-            if (process.ExitCode != 0)
-            {
+                var outputDirectory = Path.GetDirectoryName(request.OutputFilePath);
+                if (!string.IsNullOrWhiteSpace(outputDirectory))
+                {
+                    Directory.CreateDirectory(outputDirectory);
+                }
+
+                var ffmpegPath = string.IsNullOrWhiteSpace(request.FfmpegPath) ? "ffmpeg" : request.FfmpegPath;
+                var offsetSeconds = request.OffsetSeconds ?? DefaultOffsetSeconds;
+                var quality = request.Quality ?? DefaultQuality;
+                var outputFilePath = Path.GetFullPath(request.OutputFilePath);
+
+                activity?.SetTag("screenshot.offset.seconds", offsetSeconds.ToString(CultureInfo.InvariantCulture));
+                activity?.SetTag("screenshot.quality", quality.ToString(CultureInfo.InvariantCulture));
+                activity?.SetTag("screenshot.ffmpeg.path", ffmpegPath);
+
                 if (File.Exists(outputFilePath))
                 {
                     File.Delete(outputFilePath);
                 }
 
-                var details = string.IsNullOrWhiteSpace(standardError) ? standardOutput : standardError;
-                var message = string.IsNullOrWhiteSpace(details)
-                    ? $"ffmpeg exited with code {process.ExitCode}."
-                    : $"ffmpeg exited with code {process.ExitCode}: {details}";
-                return Task.FromResult(Failure(message, DomainEventTypeCatalog.ScreenshotFileMissing));
-            }
+                try
+                {
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = ffmpegPath,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
 
-            if (!File.Exists(outputFilePath))
+                    startInfo.ArgumentList.Add("-y");
+                    startInfo.ArgumentList.Add("-loglevel");
+                    startInfo.ArgumentList.Add("error");
+                    startInfo.ArgumentList.Add("-ss");
+                    startInfo.ArgumentList.Add(offsetSeconds.ToString(CultureInfo.InvariantCulture));
+                    startInfo.ArgumentList.Add("-i");
+                    startInfo.ArgumentList.Add(request.InputFilePath);
+                    startInfo.ArgumentList.Add("-frames:v");
+                    startInfo.ArgumentList.Add("1");
+                    startInfo.ArgumentList.Add("-c:v");
+                    startInfo.ArgumentList.Add("libwebp");
+                    startInfo.ArgumentList.Add("-quality");
+                    startInfo.ArgumentList.Add(quality.ToString(CultureInfo.InvariantCulture));
+                    startInfo.ArgumentList.Add(outputFilePath);
+
+                    using var process = Process.Start(startInfo);
+                    if (process is null)
+                    {
+                        return Failure("Unable to start ffmpeg.", DomainEventTypeCatalog.ScreenshotFileMissing);
+                    }
+
+                    var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+                    var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+                    process.WaitForExit();
+
+                    var standardOutput = standardOutputTask.GetAwaiter().GetResult();
+                    var standardError = standardErrorTask.GetAwaiter().GetResult();
+                    if (process.ExitCode != 0)
+                    {
+                        if (File.Exists(outputFilePath))
+                        {
+                            File.Delete(outputFilePath);
+                        }
+
+                        var details = string.IsNullOrWhiteSpace(standardError) ? standardOutput : standardError;
+                        var message = string.IsNullOrWhiteSpace(details)
+                            ? $"ffmpeg exited with code {process.ExitCode}."
+                            : $"ffmpeg exited with code {process.ExitCode}: {details}";
+                        return Failure(message, DomainEventTypeCatalog.ScreenshotFileMissing);
+                    }
+
+                    if (!File.Exists(outputFilePath))
+                    {
+                        return Failure("ffmpeg completed without producing a screenshot.", DomainEventTypeCatalog.ScreenshotFileMissing);
+                    }
+
+                    return Success(outputFilePath);
+                }
+                catch (Exception ex) when (ex is Win32Exception or FileNotFoundException or InvalidOperationException)
+                {
+                    return Failure($"Unable to invoke ffmpeg: {ex.Message}", DomainEventTypeCatalog.ScreenshotFileMissing);
+                }
+            },
+            new Dictionary<string, object?>
             {
-                return Task.FromResult(Failure("ffmpeg completed without producing a screenshot.", DomainEventTypeCatalog.ScreenshotFileMissing));
-            }
-
-            return Task.FromResult(Success(outputFilePath));
-        }
-        catch (Exception ex) when (ex is Win32Exception or FileNotFoundException or InvalidOperationException)
-        {
-            return Task.FromResult(Failure($"Unable to invoke ffmpeg: {ex.Message}", DomainEventTypeCatalog.ScreenshotFileMissing));
-        }
+                ["screenshot.input.path"] = request.InputFilePath,
+                ["screenshot.output.path"] = request.OutputFilePath,
+                ["screenshot.offset.seconds"] = request.OffsetSeconds ?? DefaultOffsetSeconds,
+                ["screenshot.quality"] = request.Quality ?? DefaultQuality
+            });
     }
 
     private static ScreenshotGenerationResult Success(string outputFilePath)

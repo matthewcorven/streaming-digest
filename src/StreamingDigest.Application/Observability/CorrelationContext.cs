@@ -58,6 +58,26 @@ public static class CorrelationContext
         return logger.BeginScope(state);
     }
 
+    public static async Task<TResult> RunWithActivityAsync<TResult>(
+        string operationName,
+        Func<Activity?, Task<TResult>> callback,
+        IEnumerable<KeyValuePair<string, object?>>? tags = null,
+        ActivityKind kind = ActivityKind.Internal)
+    {
+        using var scope = BeginOperation(operationName, kind, tags);
+        return await callback(Activity.Current);
+    }
+
+    public static async Task RunWithActivityAsync(
+        string operationName,
+        Func<Activity?, Task> callback,
+        IEnumerable<KeyValuePair<string, object?>>? tags = null,
+        ActivityKind kind = ActivityKind.Internal)
+    {
+        using var scope = BeginOperation(operationName, kind, tags);
+        await callback(Activity.Current);
+    }
+
     private sealed class ActivityScope : IDisposable
     {
         private readonly Activity? _activity;
