@@ -1,0 +1,14 @@
+[
+  {
+    "source": "https://example.test/watch?v=abc123&utm_source=test",
+    "expected": "https://example.test/watch?v=abc123"
+  },
+  {
+    "source": "https://example.test/path?utm_medium=test&feature=1",
+    "expected": "https://example.test/path?feature=1"
+  },
+  {
+    "source": "https://example.test/redirected",
+    "expected": "https://example.test/redirected"
+  }
+]

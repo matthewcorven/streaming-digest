@@ -1,0 +1,6 @@
+{
+  "host": "website",
+  "status": 429,
+  "retry_after": 30,
+  "body": "Website host rate limit"
+}

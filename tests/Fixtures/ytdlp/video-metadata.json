@@ -1,0 +1,14 @@
+{
+  "id": "fixture-video-id",
+  "title": "Fixture video",
+  "description": "Synthetic video metadata including chapters and captions variants.",
+  "duration": 84,
+  "chapters": [
+    {"title": "Opening", "start_time": 0, "end_time": 12},
+    {"title": "Summary", "start_time": 12, "end_time": 84}
+  ],
+  "captions": {
+    "en": {"url": "https://example.test/captions/en.vtt", "language": "en"},
+    "fr": {"url": "https://example.test/captions/fr.vtt", "language": "fr"}
+  }
+}

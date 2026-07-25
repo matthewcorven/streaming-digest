@@ -1,0 +1,6 @@
+{
+  "host": "deepwiki",
+  "status": 429,
+  "retry_after": 45,
+  "body": "DeepWiki rate limit"
+}
