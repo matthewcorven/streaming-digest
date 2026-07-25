@@ -599,7 +599,7 @@ Columns:
 
 Indexes:
 
-- Full-text GIN on weighted `title_effective` + `body_effective`.
+- Full-text GIN on a materialized `tsvector` generated column over weighted `title_effective` + `body_effective` (implementation requirement — see §6 "Hybrid search implementation notes"; per-query `to_tsvector` construction is the measured dominant hybrid cost, `docs/verification/11.3b-vector-user-search.md`).
 - Trigram indexes on key text columns for partial matches.
 - `(source_entity_type, source_entity_id)`.
 - `(parent_video_id)`.
@@ -631,7 +631,7 @@ Columns:
 
 Indexes:
 
-- HNSW or IVFFlat vector index depending pgvector version and dataset size.
+- HNSW vector index with pgvector defaults (no `lists`/`probes` tuning) — pgvector 0.8.5 builds HNSW incrementally; measured at MVP scale (500 videos / 11,958 vectors: 0.522 ms avg query, recall@10 0.99, 23.9 MB) in `docs/verification/11.3a-vector-knowledge-base.md`. Decision: ADR-0016. IVFFlat is the documented fallback if the ~2,000-video re-measurement (Task 12.8) reverses the trade-off.
 - Unique `(search_document_id, provider, model, dimensions, content_hash)`.
 
 ### 3.23 `video_cluster_embeddings`
@@ -1021,6 +1021,7 @@ Text search:
 - Use PostgreSQL full-text search for tokenized ranking.
 - Use trigram similarity for partial matches.
 - Weight title higher than body.
+- **Implementation requirement (Task 12.3):** text scoring must use a materialized `tsvector` generated column over the weighted `title_effective`/`body_effective` fields (with the GIN index built on it — §3.21), not per-query `to_tsvector` construction. The 11.3b prototype measured per-query tsvector + `ts_rank_cd` + `GROUP BY` over a 12k-document synthetic corpus at ~447 ms/query, dominated by that construction (`docs/verification/11.3b-vector-user-search.md`). This constrains the implementation only — the ranking formula below is unchanged — and even unoptimized, 447 ms fits Task 12.8's ≤ 2 s P50 target at < 500 videos; materialization is the headroom that keeps the 2,000-video target reachable.
 
 Vector search:
 
