@@ -1,0 +1,1132 @@
+{
+  "task": "11.3b-vector-user-search",
+  "date": "2026-07-25T16:54:50.5819900Z",
+  "query_seed": 7,
+  "corpus_seed": 42,
+  "dimensions": 384,
+  "queries": 200,
+  "videos": 500,
+  "docs": 12120,
+  "model": "synthetic-topic-embedder-v1",
+  "provider": "synthetic-local",
+  "note": "Synthetic embedder jitters from raw query text -\u003E paraphrase/vague SEMANTIC recall is INCONCLUSIVE by construction. Verdicts mark mechanically-provable targets only.",
+  "results": {
+    "blend_sweep": [
+      {
+        "text": 1,
+        "vector": 0,
+        "recall_at_1": 0.02,
+        "recall_at_3": 0.08,
+        "recall_at_10": 0.215,
+        "mrr": 0.0912,
+        "avg_latency_ms": 423.27
+      },
+      {
+        "text": 0.8,
+        "vector": 0.2,
+        "recall_at_1": 0.03,
+        "recall_at_3": 0.08,
+        "recall_at_10": 0.205,
+        "mrr": 0.0957,
+        "avg_latency_ms": 425.28
+      },
+      {
+        "text": 0.65,
+        "vector": 0.35,
+        "recall_at_1": 0.025,
+        "recall_at_3": 0.075,
+        "recall_at_10": 0.195,
+        "mrr": 0.0911,
+        "avg_latency_ms": 427.82
+      },
+      {
+        "text": 0.5,
+        "vector": 0.5,
+        "recall_at_1": 0.025,
+        "recall_at_3": 0.08,
+        "recall_at_10": 0.205,
+        "mrr": 0.0897,
+        "avg_latency_ms": 425.79
+      },
+      {
+        "text": 0.35,
+        "vector": 0.65,
+        "recall_at_1": 0.01,
+        "recall_at_3": 0.085,
+        "recall_at_10": 0.21,
+        "mrr": 0.0843,
+        "avg_latency_ms": 425.65
+      },
+      {
+        "text": 0.2,
+        "vector": 0.8,
+        "recall_at_1": 0.005,
+        "recall_at_3": 0.085,
+        "recall_at_10": 0.225,
+        "mrr": 0.0827,
+        "avg_latency_ms": 425.56
+      },
+      {
+        "text": 0,
+        "vector": 1,
+        "recall_at_1": 0.015,
+        "recall_at_3": 0.055,
+        "recall_at_10": 0.225,
+        "mrr": 0.0858,
+        "avg_latency_ms": 427.93
+      }
+    ],
+    "aggregation_sweep": [
+      {
+        "config": "data_model_default",
+        "recall_at_1": 0.01,
+        "recall_at_10": 0.21,
+        "mrr": 0.0843
+      },
+      {
+        "config": "max_only",
+        "recall_at_1": 0.01,
+        "recall_at_10": 0.205,
+        "mrr": 0.0813
+      },
+      {
+        "config": "flat_mean",
+        "recall_at_1": 0.01,
+        "recall_at_10": 0.205,
+        "mrr": 0.0833
+      },
+      {
+        "config": "no_boosts",
+        "recall_at_1": 0.01,
+        "recall_at_10": 0.21,
+        "mrr": 0.0842
+      },
+      {
+        "config": "interacted_videos",
+        "recall_at_1": 0.01,
+        "recall_at_10": 0.21,
+        "mrr": 0.0843
+      }
+    ],
+    "relsimpt_probe": [
+      {
+        "query": "securing latency and gc explained simply",
+        "kind": "Paraphrase",
+        "top": [
+          {
+            "rank": 1,
+            "topic": "dotnet-performance",
+            "VectorScore": 0.3119,
+            "RelSimPct": 31.26
+          },
+          {
+            "rank": 2,
+            "topic": "dotnet-performance",
+            "VectorScore": 0.0546,
+            "RelSimPct": 5.55
+          },
+          {
+            "rank": 3,
+            "topic": "dotnet-performance",
+            "VectorScore": 0.4154,
+            "RelSimPct": 41.6
+          },
+          {
+            "rank": 4,
+            "topic": "dotnet-performance",
+            "VectorScore": 0.7517,
+            "RelSimPct": 75.19
+          },
+          {
+            "rank": 5,
+            "topic": "dotnet-performance",
+            "VectorScore": 0.1504,
+            "RelSimPct": 15.12
+          }
+        ]
+      },
+      {
+        "query": "how to interop and css for beginners",
+        "kind": "Paraphrase",
+        "top": [
+          {
+            "rank": 1,
+            "topic": "blazor-ui",
+            "VectorScore": 0.9342,
+            "RelSimPct": 93.57
+          },
+          {
+            "rank": 2,
+            "topic": "blazor-ui",
+            "VectorScore": 1,
+            "RelSimPct": 100
+          },
+          {
+            "rank": 3,
+            "topic": "blazor-ui",
+            "VectorScore": 0.3697,
+            "RelSimPct": 38.47
+          },
+          {
+            "rank": 4,
+            "topic": "blazor-ui",
+            "VectorScore": 0.5471,
+            "RelSimPct": 55.79
+          },
+          {
+            "rank": 5,
+            "topic": "blazor-ui",
+            "VectorScore": 0.4696,
+            "RelSimPct": 48.22
+          }
+        ]
+      },
+      {
+        "query": "debugging buffer and query for beginners",
+        "kind": "Paraphrase",
+        "top": [
+          {
+            "rank": 1,
+            "topic": "postgres-internals",
+            "VectorScore": 0.3782,
+            "RelSimPct": 37.97
+          },
+          {
+            "rank": 2,
+            "topic": "postgres-internals",
+            "VectorScore": 0.2228,
+            "RelSimPct": 22.46
+          },
+          {
+            "rank": 3,
+            "topic": "postgres-internals",
+            "VectorScore": 0.5329,
+            "RelSimPct": 53.4
+          },
+          {
+            "rank": 4,
+            "topic": "postgres-internals",
+            "VectorScore": 0.2447,
+            "RelSimPct": 24.65
+          },
+          {
+            "rank": 5,
+            "topic": "postgres-internals",
+            "VectorScore": 0,
+            "RelSimPct": 0.24
+          }
+        ]
+      },
+      {
+        "query": "scaling hnsw and dimension explained simply",
+        "kind": "Paraphrase",
+        "top": [
+          {
+            "rank": 1,
+            "topic": "vector-search",
+            "VectorScore": 0.3701,
+            "RelSimPct": 37.27
+          },
+          {
+            "rank": 2,
+            "topic": "vector-search",
+            "VectorScore": 0.8997,
+            "RelSimPct": 90.01
+          },
+          {
+            "rank": 3,
+            "topic": "vector-search",
+            "VectorScore": 0.4787,
+            "RelSimPct": 48.09
+          },
+          {
+            "rank": 4,
+            "topic": "vector-search",
+            "VectorScore": 0,
+            "RelSimPct": 0.42
+          },
+          {
+            "rank": 5,
+            "topic": "vector-search",
+            "VectorScore": 0.9587,
+            "RelSimPct": 95.89
+          }
+        ]
+      },
+      {
+        "query": "walkthrough of service and node explained simply",
+        "kind": "Paraphrase",
+        "top": [
+          {
+            "rank": 1,
+            "topic": "kubernetes-ops",
+            "VectorScore": 0.831,
+            "RelSimPct": 83.1
+          },
+          {
+            "rank": 2,
+            "topic": "kubernetes-ops",
+            "VectorScore": 1,
+            "RelSimPct": 100
+          },
+          {
+            "rank": 3,
+            "topic": "kubernetes-ops",
+            "VectorScore": 0.507,
+            "RelSimPct": 50.7
+          },
+          {
+            "rank": 4,
+            "topic": "kubernetes-ops",
+            "VectorScore": 0.8713,
+            "RelSimPct": 87.13
+          },
+          {
+            "rank": 5,
+            "topic": "kubernetes-ops",
+            "VectorScore": 0.0224,
+            "RelSimPct": 2.24
+          }
+        ]
+      },
+      {
+        "query": "comparing ownership and unsafe for beginners",
+        "kind": "Paraphrase",
+        "top": [
+          {
+            "rank": 1,
+            "topic": "rust-systems",
+            "VectorScore": 0.3373,
+            "RelSimPct": 34.27
+          },
+          {
+            "rank": 2,
+            "topic": "rust-systems",
+            "VectorScore": 0.2912,
+            "RelSimPct": 29.69
+          },
+          {
+            "rank": 3,
+            "topic": "rust-systems",
+            "VectorScore": 0.0766,
+            "RelSimPct": 8.4
+          },
+          {
+            "rank": 4,
+            "topic": "rust-systems",
+            "VectorScore": 0.1342,
+            "RelSimPct": 14.11
+          },
+          {
+            "rank": 5,
+            "topic": "rust-systems",
+            "VectorScore": 0.427,
+            "RelSimPct": 43.16
+          }
+        ]
+      }
+    ],
+    "adr0012_threshold_sweep": [
+      {
+        "threshold": 0.7,
+        "own_pass": 0.005,
+        "best_other_pass": 0.015
+      },
+      {
+        "threshold": 0.75,
+        "own_pass": 0,
+        "best_other_pass": 0.005
+      },
+      {
+        "threshold": 0.8,
+        "own_pass": 0,
+        "best_other_pass": 0
+      },
+      {
+        "threshold": 0.85,
+        "own_pass": 0,
+        "best_other_pass": 0
+      },
+      {
+        "threshold": 0.9,
+        "own_pass": 0,
+        "best_other_pass": 0
+      },
+      {
+        "threshold": 0.95,
+        "own_pass": 0,
+        "best_other_pass": 0
+      },
+      {
+        "threshold": 0.98,
+        "own_pass": 0,
+        "best_other_pass": 0
+      }
+    ],
+    "adr0012_abs_own_mean": 0.4801,
+    "adr0012_abs_best_other_mean": 0.5931,
+    "related_items_probe": [
+      {
+        "seed_topic": "rust-systems",
+        "related": [
+          {
+            "topic": "rust-systems",
+            "AbsCosine": 0.924,
+            "RelPct": 100
+          },
+          {
+            "topic": "rust-systems",
+            "AbsCosine": 0.9121,
+            "RelPct": 47.54
+          },
+          {
+            "topic": "rust-systems",
+            "AbsCosine": 0.9093,
+            "RelPct": 35.15
+          },
+          {
+            "topic": "rust-systems",
+            "AbsCosine": 0.9045,
+            "RelPct": 13.92
+          },
+          {
+            "topic": "rust-systems",
+            "AbsCosine": 0.9014,
+            "RelPct": 0
+          }
+        ]
+      },
+      {
+        "seed_topic": "blazor-ui",
+        "related": [
+          {
+            "topic": "blazor-ui",
+            "AbsCosine": 0.9101,
+            "RelPct": 100
+          },
+          {
+            "topic": "blazor-ui",
+            "AbsCosine": 0.9068,
+            "RelPct": 73.88
+          },
+          {
+            "topic": "blazor-ui",
+            "AbsCosine": 0.9028,
+            "RelPct": 42.9
+          },
+          {
+            "topic": "blazor-ui",
+            "AbsCosine": 0.8977,
+            "RelPct": 3.07
+          },
+          {
+            "topic": "blazor-ui",
+            "AbsCosine": 0.8974,
+            "RelPct": 0
+          }
+        ]
+      },
+      {
+        "seed_topic": "distributed-systems",
+        "related": [
+          {
+            "topic": "distributed-systems",
+            "AbsCosine": 0.9398,
+            "RelPct": 100
+          },
+          {
+            "topic": "distributed-systems",
+            "AbsCosine": 0.9324,
+            "RelPct": 71.02
+          },
+          {
+            "topic": "distributed-systems",
+            "AbsCosine": 0.9291,
+            "RelPct": 57.95
+          },
+          {
+            "topic": "distributed-systems",
+            "AbsCosine": 0.9265,
+            "RelPct": 47.74
+          },
+          {
+            "topic": "distributed-systems",
+            "AbsCosine": 0.9143,
+            "RelPct": 0
+          }
+        ]
+      },
+      {
+        "seed_topic": "dotnet-performance",
+        "related": [
+          {
+            "topic": "dotnet-performance",
+            "AbsCosine": 0.9334,
+            "RelPct": 100
+          },
+          {
+            "topic": "dotnet-performance",
+            "AbsCosine": 0.9234,
+            "RelPct": 27.69
+          },
+          {
+            "topic": "dotnet-performance",
+            "AbsCosine": 0.923,
+            "RelPct": 25.07
+          },
+          {
+            "topic": "dotnet-performance",
+            "AbsCosine": 0.9202,
+            "RelPct": 4.75
+          },
+          {
+            "topic": "dotnet-performance",
+            "AbsCosine": 0.9196,
+            "RelPct": 0
+          }
+        ]
+      },
+      {
+        "seed_topic": "devops-ci",
+        "related": [
+          {
+            "topic": "devops-ci",
+            "AbsCosine": 0.918,
+            "RelPct": 100
+          },
+          {
+            "topic": "devops-ci",
+            "AbsCosine": 0.913,
+            "RelPct": 80
+          },
+          {
+            "topic": "devops-ci",
+            "AbsCosine": 0.9083,
+            "RelPct": 61.17
+          },
+          {
+            "topic": "devops-ci",
+            "AbsCosine": 0.9075,
+            "RelPct": 58.09
+          },
+          {
+            "topic": "devops-ci",
+            "AbsCosine": 0.893,
+            "RelPct": 0
+          }
+        ]
+      }
+    ],
+    "score_component_audit": [
+      {
+        "kind": "Paraphrase",
+        "query": "securing latency and gc explained simply",
+        "expected_rank": 231,
+        "Mrr": 0.004329004329004329,
+        "expected": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.7913,
+          "VectorScore": 0,
+          "DocScore": 0.277,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.9017,
+          "VectorScore": 0.3119,
+          "ClusterScore": 0.7483
+        }
+      },
+      {
+        "kind": "Paraphrase",
+        "query": "how to interop and css for beginners",
+        "expected_rank": 173,
+        "Mrr": 0.005780346820809248,
+        "expected": {
+          "topic": "blazor-ui",
+          "TextScore": 0.5128,
+          "VectorScore": 0,
+          "DocScore": 0.1795,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "blazor-ui",
+          "TextScore": 0.6694,
+          "VectorScore": 0.9342,
+          "ClusterScore": 0.7066
+        }
+      },
+      {
+        "kind": "Paraphrase",
+        "query": "debugging buffer and query for beginners",
+        "expected_rank": 194,
+        "Mrr": 0.005154639175257732,
+        "expected": {
+          "topic": "postgres-internals",
+          "TextScore": 0.5867,
+          "VectorScore": 0,
+          "DocScore": 0.2053,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "postgres-internals",
+          "TextScore": 1,
+          "VectorScore": 0.3782,
+          "ClusterScore": 0.7368
+        }
+      },
+      {
+        "kind": "Paraphrase",
+        "query": "scaling hnsw and dimension explained simply",
+        "expected_rank": 168,
+        "Mrr": 0.005952380952380952,
+        "expected": {
+          "topic": "vector-search",
+          "TextScore": 0.6057,
+          "VectorScore": 0,
+          "DocScore": 0.212,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "vector-search",
+          "TextScore": 1,
+          "VectorScore": 0.3701,
+          "ClusterScore": 0.7236
+        }
+      },
+      {
+        "kind": "Paraphrase",
+        "query": "walkthrough of service and node explained simply",
+        "expected_rank": 278,
+        "Mrr": 0.0035971223021582736,
+        "expected": {
+          "topic": "kubernetes-ops",
+          "TextScore": 0.4359,
+          "VectorScore": 0,
+          "DocScore": 0.1525,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "kubernetes-ops",
+          "TextScore": 1,
+          "VectorScore": 0.831,
+          "ClusterScore": 0.7969
+        }
+      },
+      {
+        "kind": "Paraphrase",
+        "query": "comparing ownership and unsafe for beginners",
+        "expected_rank": 2,
+        "Mrr": 0.5,
+        "expected": {
+          "topic": "rust-systems",
+          "TextScore": 1,
+          "VectorScore": 0.2912,
+          "DocScore": 0.5393,
+          "ClusterScore": 0.7348,
+          "RelSimPct": 29.69
+        },
+        "top1": {
+          "topic": "rust-systems",
+          "TextScore": 1,
+          "VectorScore": 0.3373,
+          "ClusterScore": 0.742
+        }
+      },
+      {
+        "kind": "VagueIntent",
+        "query": "something about memory problems",
+        "expected_rank": 82,
+        "Mrr": 0.012195121951219513,
+        "expected": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.7494,
+          "VectorScore": 0,
+          "DocScore": 0.2623,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.8519,
+          "VectorScore": 1,
+          "ClusterScore": 0.7768
+        }
+      },
+      {
+        "kind": "VagueIntent",
+        "query": "something about wasm problems",
+        "expected_rank": 159,
+        "Mrr": 0.006289308176100629,
+        "expected": {
+          "topic": "blazor-ui",
+          "TextScore": 0.6527,
+          "VectorScore": 0,
+          "DocScore": 0.2285,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "blazor-ui",
+          "TextScore": 1,
+          "VectorScore": 0.5227,
+          "ClusterScore": 0.7826
+        }
+      },
+      {
+        "kind": "VagueIntent",
+        "query": "something about buffer problems",
+        "expected_rank": 15,
+        "Mrr": 0.06666666666666667,
+        "expected": {
+          "topic": "postgres-internals",
+          "TextScore": 0.6886,
+          "VectorScore": 0,
+          "DocScore": 0.241,
+          "ClusterScore": 0.6143,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "postgres-internals",
+          "TextScore": 0.9109,
+          "VectorScore": 0.7297,
+          "ClusterScore": 0.7391
+        }
+      },
+      {
+        "kind": "VagueIntent",
+        "query": "that talk about making embedding work better",
+        "expected_rank": 235,
+        "Mrr": 0.00425531914893617,
+        "expected": {
+          "topic": "vector-search",
+          "TextScore": 0.9475,
+          "VectorScore": 0,
+          "DocScore": 0.3316,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "vector-search",
+          "TextScore": 0.9085,
+          "VectorScore": 0.7778,
+          "ClusterScore": 0.7238
+        }
+      },
+      {
+        "kind": "VagueIntent",
+        "query": "how people handle pod in practice",
+        "expected_rank": 15,
+        "Mrr": 0.06666666666666667,
+        "expected": {
+          "topic": "kubernetes-ops",
+          "TextScore": 0.5715,
+          "VectorScore": 0.2094,
+          "DocScore": 0.3362,
+          "ClusterScore": 0.5979,
+          "RelSimPct": 20.94
+        },
+        "top1": {
+          "topic": "kubernetes-ops",
+          "TextScore": 0.9113,
+          "VectorScore": 0.4544,
+          "ClusterScore": 0.7322
+        }
+      },
+      {
+        "kind": "VagueIntent",
+        "query": "that talk about making lifetime work better",
+        "expected_rank": 269,
+        "Mrr": 0.0037174721189591076,
+        "expected": {
+          "topic": "rust-systems",
+          "TextScore": 1,
+          "VectorScore": 0,
+          "DocScore": 0.35,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "rust-systems",
+          "TextScore": 1,
+          "VectorScore": 0.4281,
+          "ClusterScore": 0.7526
+        }
+      },
+      {
+        "kind": "Keyword",
+        "query": "allocation span benchmark",
+        "expected_rank": 97,
+        "Mrr": 0.010309278350515464,
+        "expected": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.3457,
+          "VectorScore": 0,
+          "DocScore": 0.121,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.3966,
+          "VectorScore": 0.7134,
+          "ClusterScore": 0.6294
+        }
+      },
+      {
+        "kind": "Keyword",
+        "query": "wasm state render",
+        "expected_rank": 67,
+        "Mrr": 0.014925373134328358,
+        "expected": {
+          "topic": "blazor-ui",
+          "TextScore": 0.2575,
+          "VectorScore": 0,
+          "DocScore": 0.0901,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "blazor-ui",
+          "TextScore": 1,
+          "VectorScore": 0.5374,
+          "ClusterScore": 0.7739
+        }
+      },
+      {
+        "kind": "Keyword",
+        "query": "table replication lock",
+        "expected_rank": 21,
+        "Mrr": 0.047619047619047616,
+        "expected": {
+          "topic": "postgres-internals",
+          "TextScore": 0.318,
+          "VectorScore": 0.2725,
+          "DocScore": 0.2884,
+          "ClusterScore": 0.5067,
+          "RelSimPct": 27.82
+        },
+        "top1": {
+          "topic": "postgres-internals",
+          "TextScore": 1,
+          "VectorScore": 0.3208,
+          "ClusterScore": 0.7218
+        }
+      },
+      {
+        "kind": "Keyword",
+        "query": "hnsw ann similarity",
+        "expected_rank": 17,
+        "Mrr": 0.058823529411764705,
+        "expected": {
+          "topic": "vector-search",
+          "TextScore": 0.4937,
+          "VectorScore": 0.2249,
+          "DocScore": 0.319,
+          "ClusterScore": 0.5641,
+          "RelSimPct": 22.72
+        },
+        "top1": {
+          "topic": "vector-search",
+          "TextScore": 0.9356,
+          "VectorScore": 0.4514,
+          "ClusterScore": 0.7208
+        }
+      },
+      {
+        "kind": "Keyword",
+        "query": "deployment cluster service",
+        "expected_rank": 31,
+        "Mrr": 0.03225806451612903,
+        "expected": {
+          "topic": "kubernetes-ops",
+          "TextScore": 0.3746,
+          "VectorScore": 0,
+          "DocScore": 0.1311,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "kubernetes-ops",
+          "TextScore": 1,
+          "VectorScore": 0.2507,
+          "ClusterScore": 0.735
+        }
+      },
+      {
+        "kind": "Keyword",
+        "query": "lifetime cargo borrow",
+        "expected_rank": 18,
+        "Mrr": 0.05555555555555555,
+        "expected": {
+          "topic": "rust-systems",
+          "TextScore": 0.3493,
+          "VectorScore": 0.2271,
+          "DocScore": 0.2699,
+          "ClusterScore": 0.5136,
+          "RelSimPct": 23.18
+        },
+        "top1": {
+          "topic": "rust-systems",
+          "TextScore": 1,
+          "VectorScore": 0.1016,
+          "ClusterScore": 0.7062
+        }
+      },
+      {
+        "kind": "NoteMatch",
+        "query": "note: revisit simd and compare simd",
+        "expected_rank": 134,
+        "Mrr": 0.007462686567164179,
+        "expected": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.269,
+          "VectorScore": 0,
+          "DocScore": 0.0941,
+          "ClusterScore": 0.18,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.9663,
+          "VectorScore": 0.5447,
+          "ClusterScore": 0.8426
+        }
+      },
+      {
+        "kind": "NoteMatch",
+        "query": "note: revisit render and compare lifecycle",
+        "expected_rank": 181,
+        "Mrr": 0.0055248618784530384,
+        "expected": {
+          "topic": "blazor-ui",
+          "TextScore": 0.2524,
+          "VectorScore": 0,
+          "DocScore": 0.0884,
+          "ClusterScore": 0.18,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "blazor-ui",
+          "TextScore": 0.2958,
+          "VectorScore": 0.4796,
+          "ClusterScore": 0.6417
+        }
+      },
+      {
+        "kind": "NoteMatch",
+        "query": "note: revisit query and compare partition",
+        "expected_rank": 3,
+        "Mrr": 0.3333333333333333,
+        "expected": {
+          "topic": "postgres-internals",
+          "TextScore": 0.3361,
+          "VectorScore": 0.8877,
+          "DocScore": 0.6947,
+          "ClusterScore": 0.6459,
+          "RelSimPct": 88.84
+        },
+        "top1": {
+          "topic": "postgres-internals",
+          "TextScore": 1,
+          "VectorScore": 0.0648,
+          "ClusterScore": 0.7913
+        }
+      },
+      {
+        "kind": "NoteMatch",
+        "query": "note: revisit ivfflat and compare ann",
+        "expected_rank": 442,
+        "Mrr": 0.0022624434389140274,
+        "expected": {
+          "topic": "vector-search",
+          "TextScore": 0.1359,
+          "VectorScore": 0,
+          "DocScore": 0.0476,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "vector-search",
+          "TextScore": 1,
+          "VectorScore": 0.2615,
+          "ClusterScore": 0.8237
+        }
+      },
+      {
+        "kind": "NoteMatch",
+        "query": "note: revisit namespace and compare service",
+        "expected_rank": 120,
+        "Mrr": 0.008333333333333333,
+        "expected": {
+          "topic": "kubernetes-ops",
+          "TextScore": 0.287,
+          "VectorScore": 0,
+          "DocScore": 0.1005,
+          "ClusterScore": 0.18,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "kubernetes-ops",
+          "TextScore": 1,
+          "VectorScore": 0.109,
+          "ClusterScore": 0.7873
+        }
+      },
+      {
+        "kind": "NoteMatch",
+        "query": "note: revisit ownership and compare lifetime",
+        "expected_rank": 3,
+        "Mrr": 0.3333333333333333,
+        "expected": {
+          "topic": "rust-systems",
+          "TextScore": 0.3866,
+          "VectorScore": 0.6521,
+          "DocScore": 0.5592,
+          "ClusterScore": 0.6309,
+          "RelSimPct": 65.21
+        },
+        "top1": {
+          "topic": "rust-systems",
+          "TextScore": 0.3594,
+          "VectorScore": 1,
+          "ClusterScore": 0.6504
+        }
+      },
+      {
+        "kind": "CrossTopic",
+        "query": "span versus pipeline",
+        "expected_rank": 78,
+        "Mrr": 0.01282051282051282,
+        "expected": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.3465,
+          "VectorScore": 0,
+          "DocScore": 0.1213,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "dotnet-performance",
+          "TextScore": 0.423,
+          "VectorScore": 0.9735,
+          "ClusterScore": 0.6546
+        }
+      },
+      {
+        "kind": "CrossTopic",
+        "query": "component versus unsafe",
+        "expected_rank": 18,
+        "Mrr": 0.05555555555555555,
+        "expected": {
+          "topic": "blazor-ui",
+          "TextScore": 0.6983,
+          "VectorScore": 0.1356,
+          "DocScore": 0.3326,
+          "ClusterScore": 0.6606,
+          "RelSimPct": 14.48
+        },
+        "top1": {
+          "topic": "blazor-ui",
+          "TextScore": 1,
+          "VectorScore": 0.6818,
+          "ClusterScore": 0.7948
+        }
+      },
+      {
+        "kind": "CrossTopic",
+        "query": "replication versus jit",
+        "expected_rank": 11,
+        "Mrr": 0.09090909090909091,
+        "expected": {
+          "topic": "postgres-internals",
+          "TextScore": 0.6373,
+          "VectorScore": 0.1438,
+          "DocScore": 0.3165,
+          "ClusterScore": 0.5898,
+          "RelSimPct": 14.38
+        },
+        "top1": {
+          "topic": "postgres-internals",
+          "TextScore": 1,
+          "VectorScore": 0.5792,
+          "ClusterScore": 0.7477
+        }
+      },
+      {
+        "kind": "CrossTopic",
+        "query": "ann versus shard",
+        "expected_rank": 79,
+        "Mrr": 0.012658227848101266,
+        "expected": {
+          "topic": "vector-search",
+          "TextScore": 0.4074,
+          "VectorScore": 0,
+          "DocScore": 0.1426,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "vector-search",
+          "TextScore": 0.4074,
+          "VectorScore": 0.9236,
+          "ClusterScore": 0.6141
+        }
+      },
+      {
+        "kind": "CrossTopic",
+        "query": "configmap versus benchmark",
+        "expected_rank": 192,
+        "Mrr": 0.005208333333333333,
+        "expected": {
+          "topic": "kubernetes-ops",
+          "TextScore": 0.7277,
+          "VectorScore": 0,
+          "DocScore": 0.2547,
+          "ClusterScore": 0.075,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "kubernetes-ops",
+          "TextScore": 1,
+          "VectorScore": 0.8745,
+          "ClusterScore": 0.7911
+        }
+      },
+      {
+        "kind": "CrossTopic",
+        "query": "macro versus gossip",
+        "expected_rank": 35,
+        "Mrr": 0.02857142857142857,
+        "expected": {
+          "topic": "rust-systems",
+          "TextScore": 0.6679,
+          "VectorScore": 0,
+          "DocScore": 0.2338,
+          "ClusterScore": 0.1,
+          "RelSimPct": 0
+        },
+        "top1": {
+          "topic": "rust-systems",
+          "TextScore": 0.8435,
+          "VectorScore": 0.2559,
+          "ClusterScore": 0.6645
+        }
+      }
+    ]
+  },
+  "verdicts": {
+    "relsimpt": "PROVEN",
+    "adr0012": "INCONCLUSIVE",
+    "related_items": "PROVEN",
+    "hybrid_blend": "PROVEN",
+    "cluster_aggregation": "PROVEN",
+    "note_interaction_boost": "PROVEN",
+    "paraphrase_vague_semantic_recall": "INCONCLUSIVE"
+  }
+}
