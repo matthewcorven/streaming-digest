@@ -101,7 +101,6 @@ Search results are ranked using hybrid keyword + semantic vector search and link
   - channel
   - date range
   - result type
-  - link classification
   - transcript availability
   - repository availability
   - notes availability
@@ -144,7 +143,9 @@ Search results are ranked using hybrid keyword + semantic vector search and link
   - transcripts found or missing
   - repositories found
   - dashboard link to the ingestion run
-
+high-signal matches similar to recent searches
+  - active rate-limit deferments
+  - 
 ### Observability
 
 Streaming Digest is observable locally and in production.
@@ -168,7 +169,7 @@ Telemetry policy:
 - domain events and warning/error summaries are stored in PostgreSQL
 - full logs are stored in Loki
 - metrics are stored in Prometheus
-- traces are stored in Tempo
+- telemetry retention follows the first-run disk policy: 90 days when free space is above 5 GB, 30 days above 1 GB, disabled with a warning otherwise
 - logs, metrics, and traces retain 90 days by default
 
 ### Admin operations
@@ -384,8 +385,16 @@ Detailed project documents are available in `docs/`:
 - `docs/architecture/ARCHITECTURE.md`
 - `docs/architecture/DATA_MODEL.md`
 - `docs/api/API_SPEC.md`
+- `docs/presentation/PRESENTATION.md`
+- `docs/adr/` — architectural decision records
 - Implementation work is tracked as GitHub issues (migrated from the retired implementation plan)
 - `docs/operations/UPGRADE_PATHS.md`
+
+## Development
+
+- **Issue-driven tracking** — implementation work lives in GitHub issues labeled `slice-*` (build order, prototypes first), `phase-*` (requirement grouping), and `squad:{member}` (owning agent).
+- **Squad** — this repo is developed by a Squad AI team (`.squad/`): roster and routing in `.squad/team.md` / `.squad/routing.md`, agent charters and histories in `.squad/agents/`, and team decisions indexed in `.squad/decisions.md`. Architectural decisions get full ADRs in `docs/adr/`; team/process/scope decisions live in the decisions index.
+- **Verification evidence** — durable verification results (benchmarks, recall reports, cross-platform checks, restore dry-runs, prototype comparisons) are committed append-only under `docs/verification/` as `{task-id}-{slug}.md`, with machine-readable JSON alongside for numeric results. Quality gates citing measured targets are not met until the evidence artifact is committed.
 
 ## Legal and privacy notes
 
@@ -402,18 +411,7 @@ You are responsible for complying with:
 Do not expose the application publicly without reviewing authentication, transport security, rate limits, and secret handling.
 
 ## Project status
+is pre-implementation: product, architecture, data model, API, presentation, and operations docs are agreed, and the hard-MVP scope is decomposed into GitHub issues ready to build. Progress and current state are visible on the issue tracker.
 
-Streaming Digest has reached MVP completeness for the agreed hard-MVP scope:
-
-- ingestion
-- local transcript fallback
-- semantic segmentation
-- screenshots
-- link/repository/website processing
-- hybrid search
-- curation and notes
-- Matrix notifications; E2EE is MVP+
-- observability
-- on-prem Compose deployment
-
+Future work beyond MVP
 Future work can expand the product with YouTube OAuth subscription import, Shorts support, multi-user collaboration, recursive website crawling, repository source-code indexing, public sharing/export workflows, and mobile-native clients.
