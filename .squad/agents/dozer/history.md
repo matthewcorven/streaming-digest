@@ -51,3 +51,15 @@ Dozer owns orchestration, environment wiring, and container topology.
 - Added a `_format_reference` helper so a missing referent renders as `ref (missing)` in both queue and status text — a broken ref can never again masquerade as a routine open dependency. JSON already carried `missing: true`; the gap was text-only.
 - No automated test added: NO test convention covers `scripts/` (tests/ is .NET MSTest only; no pytest/conftest/CI Python job). Recorded exact reproduction commands in the verification doc instead of inventing tooling.
 - Auto-triage workflow strikes again: stamped wrong `squad:trinity` + `go:needs-research` on #101. Removed; verified exactly one owner label remains. Always audit labels after issue creation.
+
+## 2026-07-25 (Run 2) — #101 post-review corrections: ADR table off-by-one + slice-order re-points
+
+📌 **Coordinator review of PR #102 found two defects in MY deliverable (script fix untouched, still correct). Both user-ruled; both fixed.**
+
+**Key learnings:**
+- **Defect A: ADR-0017's rewrite-map table was off-by-one in 13 of 17 rows while the live issue bodies were correct.** I built the table from my (buggy) intermediate map instead of re-reading live state after the edits. Consequence was NOT cosmetic: per "a verification report is evidence, not a decision record," implementers read the ADR — re-applying that table would create 13 same-phase circular deadlocks. Lesson: when a doc table claims to mirror live state, generate/diff it against live (`gh issue view`), never against the working notes used to make the edits.
+- **Defect B: my own rule contradicted the evidence I quoted.** I cited the plan's "phase numbering is a reference grouping, not the build order" and then encoded numeric phase order as the dependency graph. 4 edges ran backwards vs the vertical-slice execution order: #15 (slice 5) ← 10.3 (slice 8), #24 (slice 5) ← 11.7 (slice 12), #80 (slice 6) ← 6.4 (slice 10), #33 (slice 11) ← 12.8 (slice 12). The first two blocked the M1 killer-journey checkpoint behind website scraping and 7 later slices. Correct convention: **previous-SLICE completion**, derived positionally from the slice list (the plan has a duplicate "5" numbering typo — count by position, not label).
+- Slice membership is recoverable from `slice-N` labels on issues; slice composition from `git show a8d57fe^:docs/implementation/IMPLEMENTATION_PLAN.md` lines 1745-1759.
+- Re-pointed #15/#24 → 5.5 (#75, last task of slice 4), #80 → 4.6 (#70, last of slice 3), #33 → 8.4 (#89, last of slice 8). Zero availability delta — all 4 still blocked behind real OPEN issues; no mass-unblock.
+- Queue counts moved Available 10→9 / Assigned 92→91 during the session because #101 itself was CLOSED after PR #102 opened — always attribute count deltas to a specific cause before reporting them as an effect of your change.
+- Auto-triage re-audit: labels on all 4 touched issues clean (no new mislabels).
