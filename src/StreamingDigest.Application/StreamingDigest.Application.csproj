@@ -10,4 +10,9 @@
   <ProjectReference Include="..\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
 </ItemGroup>
 
+<ItemGroup>
+  <PackageReference Include="JsonSchema.Net" Version="5.0.0" />
+  <PackageReference Include="Microsoft.SemanticKernel" Version="1.55.0" />
+</ItemGroup>
+
 </Project>

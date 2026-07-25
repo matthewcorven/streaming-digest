@@ -9,7 +9,10 @@
 
 <ItemGroup>
   <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+  <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
   <PackageReference Include="Npgsql" Version="10.0.3" />
+  <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
+  <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
 </ItemGroup>
 
 <ItemGroup>
@@ -17,5 +20,11 @@
   <ProjectReference Include="..\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" />
   <ProjectReference Include="..\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
 </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.schema.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
 </Project>

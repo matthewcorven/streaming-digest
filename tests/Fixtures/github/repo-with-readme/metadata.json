@@ -1,0 +1,6 @@
+{
+  "owner": "fixture",
+  "name": "repo-with-readme",
+  "readme": "README.md",
+  "license": "LICENSE"
+}

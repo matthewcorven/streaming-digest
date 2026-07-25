@@ -1,0 +1,7 @@
+{
+  "owner": "fixture",
+  "name": "repo",
+  "default_branch": "main",
+  "readme": "README.md",
+  "license": "LICENSE"
+}

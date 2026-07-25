@@ -1,0 +1,10 @@
+{
+  "task": "1.5-domain-event-type-catalog",
+  "status": "passed",
+  "tests": {
+    "run": "dotnet test tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj --filter DomainEventTypeCatalogTests",
+    "passed": 3,
+    "failed": 0
+  },
+  "date": "2026-07-25"
+}
