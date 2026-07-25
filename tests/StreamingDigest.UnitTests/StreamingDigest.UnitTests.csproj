@@ -21,6 +21,11 @@
   <ProjectReference Include="..\..\src\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
+  <ProjectReference Include="..\..\src\StreamingDigest.Web\StreamingDigest.Web.csproj" />
+</ItemGroup>
+
+<ItemGroup>
+  <Compile Remove="UpgradeMaintenanceUiMapperTests.cs" />
 </ItemGroup>
 
 <ItemGroup>
