@@ -1,0 +1,173 @@
+@page "/admin/upgrade-maintenance"
+
+@using StreamingDigest.Web.Models
+@using StreamingDigest.Web.Services
+
+@inject UpgradeMaintenanceSnapshotService SnapshotService
+
+<PageTitle>Upgrade & Maintenance</PageTitle>
+
+@if (_snapshot is null)
+{
+    <div class="upgrade-maintenance-panel">
+        <div class="loading-state">Loading upgrade diagnostics…</div>
+    </div>
+}
+else
+{
+    var uiState = UpgradeMaintenanceUiMapper.Create(_snapshot);
+
+    <div class="upgrade-maintenance-panel">
+        <section class="hero-card">
+            <div>
+                <p class="eyebrow">Admin operations</p>
+                <h1>@_snapshot.Title</h1>
+                <p class="summary">@_snapshot.Summary</p>
+            </div>
+            <div class="hero-side">
+                <span class="risk-pill @uiState.RiskBadgeClass">@_snapshot.Risk.Level</span>
+                <div class="next-action">
+                    <span class="label">Required next action</span>
+                    <strong>@uiState.RequiredNextAction</strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel-grid">
+            <article class="card">
+                <div class="card-header">
+                    <h2>Current versions</h2>
+                    <span class="status-pill status-success">Aligned</span>
+                </div>
+                <dl class="kv-list">
+                    <div class="kv-row"><dt>App</dt><dd>@_snapshot.Versions.AppVersion</dd></div>
+                    <div class="kv-row"><dt>DB schema</dt><dd>@_snapshot.Versions.DbSchemaVersion</dd></div>
+                    <div class="kv-row"><dt>Config schema</dt><dd>@_snapshot.Versions.ConfigSchemaVersion</dd></div>
+                    <div class="kv-row"><dt>Deployment schema</dt><dd>@_snapshot.Versions.DeploymentSchemaVersion</dd></div>
+                </dl>
+                <p class="card-footnote">@_snapshot.Versions.CompatibilitySummary</p>
+            </article>
+
+            <article class="card">
+                <div class="card-header">
+                    <h2>Upgrade status</h2>
+                    <span class="status-pill status-warning">@_snapshot.Upgrade.Status</span>
+                </div>
+                <p class="card-body">@_snapshot.Upgrade.Summary</p>
+            </article>
+
+            <article class="card">
+                <div class="card-header">
+                    <h2>Backup status</h2>
+                    <span class="status-pill status-success">@_snapshot.Backup.Health</span>
+                </div>
+                <dl class="kv-list">
+                    <div class="kv-row"><dt>Last backup</dt><dd>@FormatTimestamp(_snapshot.Backup.LastBackupAt)</dd></div>
+                    <div class="kv-row"><dt>Location</dt><dd>@_snapshot.Backup.Location</dd></div>
+                </dl>
+                <p class="card-body">@_snapshot.Backup.Summary</p>
+            </article>
+
+            <article class="card">
+                <div class="card-header">
+                    <h2>Migration preview</h2>
+                    <span class="status-pill status-neutral">@_snapshot.MigrationPreview.Count item(s)</span>
+                </div>
+                <ul class="stack-list">
+                    @foreach (var item in _snapshot.MigrationPreview)
+                    {
+                        <li>
+                            <div class="list-title-row">
+                                <strong>@item.Label</strong>
+                                <span class="status-pill status-neutral">@item.Status</span>
+                            </div>
+                            <div class="meta-row"><span>@item.Kind</span><span>@item.Details</span></div>
+                        </li>
+                    }
+                </ul>
+            </article>
+
+            <article class="card">
+                <div class="card-header">
+                    <h2>Service compatibility</h2>
+                    <span class="status-pill status-neutral">Health checks</span>
+                </div>
+                <ul class="stack-list">
+                    @foreach (var service in _snapshot.Services)
+                    {
+                        <li>
+                            <div class="list-title-row">
+                                <strong>@service.Name</strong>
+                                <span class="status-pill @GetServiceStatusClass(service.Status)">@service.Status</span>
+                            </div>
+                            <div class="meta-row"><span>@(service.IsRequired ? "Required" : "Optional")</span><span>@service.Summary</span></div>
+                        </li>
+                    }
+                </ul>
+            </article>
+
+            <article class="card">
+                <div class="card-header">
+                    <h2>Derived-data status</h2>
+                    <span class="status-pill status-warning">Needs attention</span>
+                </div>
+                <dl class="kv-list">
+                    <div class="kv-row"><dt>Stale embeddings</dt><dd>@_snapshot.DerivedData.StaleEmbeddings</dd></div>
+                    <div class="kv-row"><dt>Stale search docs</dt><dd>@_snapshot.DerivedData.StaleSearchDocuments</dd></div>
+                    <div class="kv-row"><dt>Pending approvals</dt><dd>@_snapshot.DerivedData.PendingSegmentApprovals</dd></div>
+                    <div class="kv-row"><dt>Index rebuilds</dt><dd>@_snapshot.DerivedData.IndexRebuilds</dd></div>
+                </dl>
+                <p class="card-body">@_snapshot.DerivedData.Summary</p>
+            </article>
+
+            <article class="card checklist-card">
+                <div class="card-header">
+                    <h2>Post-upgrade checklist</h2>
+                    <span class="status-pill status-neutral">@_snapshot.Checklist.Count checks</span>
+                </div>
+                <ul class="stack-list">
+                    @foreach (var item in _snapshot.Checklist)
+                    {
+                        <li>
+                            <div class="list-title-row">
+                                <strong>@item.Label</strong>
+                                <span class="status-pill @GetChecklistStatusClass(item.Status)">@item.Status</span>
+                            </div>
+                            <div class="meta-row"><span>@item.Details</span></div>
+                        </li>
+                    }
+                </ul>
+            </article>
+        </section>
+    </div>
+}
+
+@code {
+    private UpgradeMaintenanceSnapshot? _snapshot;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _snapshot = await SnapshotService.GetSnapshotAsync();
+    }
+
+    private static string FormatTimestamp(string value)
+        => DateTimeOffset.TryParse(value, out var parsed) ? parsed.ToString("yyyy-MM-dd HH:mm") : value;
+
+    private static string GetServiceStatusClass(string status)
+        => status.ToLowerInvariant() switch
+        {
+            "healthy" or "ready" or "up-to-date" => "status-success",
+            "warning" or "degraded" or "backup recommended" => "status-warning",
+            "blocked" or "critical" or "failed" => "status-danger",
+            _ => "status-neutral"
+        };
+
+    private static string GetChecklistStatusClass(string status)
+        => status.ToLowerInvariant() switch
+        {
+            "ready" or "done" or "complete" => "status-success",
+            "pending" or "in progress" => "status-warning",
+            "blocked" or "failed" => "status-danger",
+            _ => "status-neutral"
+        };
+}
