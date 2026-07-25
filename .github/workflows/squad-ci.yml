@@ -19,10 +19,4 @@ jobs:
 
       - name: Build and test
         run: |
-          # TODO: Project type was not detected — add your build/test commands here
-          # Go:            go test ./...
-          # Python:        pip install -r requirements.txt && pytest
-          # .NET:          dotnet test
-          # Java (Maven):  mvn test
-          # Java (Gradle): ./gradlew test
-          echo "No build commands configured — update squad-ci.yml"
+          dotnet test StreamingDigest.slnx --logger "console;verbosity=minimal"
