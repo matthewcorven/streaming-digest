@@ -211,6 +211,7 @@ Production should expose only the services intentionally reachable over Tailscal
 3. API generates query embedding through Semantic Kernel/Ollama.
 4. API runs hybrid search using PostgreSQL text indexes and pgvector.
 5. Ranking combines text score and vector score using configurable weights, then aggregates document matches into video cluster search results.
+   - Implementation note (Task 12.3): text scoring uses a materialized `tsvector` generated column, not per-query `to_tsvector` construction — per-query construction + ranking over 12k documents measured ~447 ms/query and is the dominant hybrid cost (DATA_MODEL §6, `docs/verification/11.3b-vector-user-search.md`).
 6. Video cluster scores use weighted aggregate submatch scores, note boosts, interaction boosts, and coverage signals.
 7. UI `Relative similarity` percentage is a normalized vector rank score within the current result set and includes a tooltip explaining that it is relative to the query/model/result set and not confidence.
 8. API includes match explanations, score components, snippets, and related-item percentages.
@@ -552,3 +553,5 @@ Target development hosts:
 - Linux deployment.
 
 Local models must support CPU and, where possible, GPU acceleration. Because GPU support differs per OS/architecture, configuration must allow CPU fallback.
+
+ffmpeg toolchain skew (measured, Task 7.4 / ADR-0015): Homebrew ffmpeg 8.1.2 (macOS dev host) is built without libwebp and without libfreetype/drawtext; the Debian/Ubuntu container ffmpeg 6.1.1 has both. WebP encoding — and any burned-timestamp diagnostics — therefore work in the Linux container where production runs, but not necessarily on a macOS dev host. Windows ARM screenshot extraction was analyzed, not measured (BtbN winarm64 ffmpeg builds exist).
