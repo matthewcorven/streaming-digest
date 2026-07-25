@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using StreamingDigest.Application.Observability;
 using StreamingDigest.Domain;
 using StreamingDigest.MatrixNotifier;
 
@@ -13,149 +14,178 @@ public sealed class NotificationDispatchService(
     {
         ArgumentNullException.ThrowIfNull(digest);
 
-        var renderedBody = BuildRenderedBody(digest);
-        var payload = new
-        {
-            digest.IngestionRunId,
-            digest.RunType,
-            digest.PayloadJson,
-            renderedBody,
-            notificationType = "ingestion_summary"
-        };
-
-        var notification = new Notification
-        {
-            OperationId = operationId,
-            IngestionRunId = digest.IngestionRunId,
-            NotificationType = "ingestion_summary",
-            Provider = "matrix",
-            Target = string.IsNullOrWhiteSpace(target) ? "matrix" : target,
-            Status = "pending",
-            PayloadJson = JsonSerializer.Serialize(payload),
-            RenderedBody = renderedBody,
-            MessageSummary = renderedBody.Length > 512 ? renderedBody[..512] : renderedBody,
-            AttemptCount = 0,
-            NextRetryAt = DateTimeOffset.UtcNow,
-            ErrorSummary = null
-        };
-
-        context.Notifications.Add(notification);
-        await context.SaveChangesAsync(cancellationToken);
-
-        var outbox = new OutboxMessage
-        {
-            MessageType = "matrix_notification",
-            AggregateType = nameof(Notification),
-            AggregateId = notification.Id,
-            PayloadJson = JsonSerializer.Serialize(new
+        return await CorrelationContext.RunWithActivityAsync(
+            "notification.queue",
+            async activity =>
             {
-                notification.Id,
-                notification.Provider,
-                notification.Target,
-                digestId = digest.Id,
-                ingestionRunId = digest.IngestionRunId,
-                payloadJson = digest.PayloadJson,
-                renderedBody,
-                notificationType = notification.NotificationType
-            }),
-            Status = "pending",
-            AttemptCount = 0,
-            NextAttemptAt = DateTimeOffset.UtcNow,
-            LastErrorSummary = null
-        };
+                activity?.SetTag("notification.type", "ingestion_summary");
+                activity?.SetTag("notification.provider", "matrix");
+                activity?.SetTag("digest.run_type", digest.RunType);
+                activity?.SetTag("digest.ingestion_run_id", digest.IngestionRunId.ToString());
 
-        context.OutboxMessages.Add(outbox);
-        await context.SaveChangesAsync(cancellationToken);
+                var renderedBody = BuildRenderedBody(digest);
+                var payload = new
+                {
+                    digest.IngestionRunId,
+                    digest.RunType,
+                    digest.PayloadJson,
+                    renderedBody,
+                    notificationType = "ingestion_summary"
+                };
 
-        await DispatchPendingAsync(cancellationToken);
+                var notification = new Notification
+                {
+                    OperationId = operationId,
+                    IngestionRunId = digest.IngestionRunId,
+                    NotificationType = "ingestion_summary",
+                    Provider = "matrix",
+                    Target = string.IsNullOrWhiteSpace(target) ? "matrix" : target,
+                    Status = "pending",
+                    PayloadJson = JsonSerializer.Serialize(payload),
+                    RenderedBody = renderedBody,
+                    MessageSummary = renderedBody.Length > 512 ? renderedBody[..512] : renderedBody,
+                    AttemptCount = 0,
+                    NextRetryAt = DateTimeOffset.UtcNow,
+                    ErrorSummary = null
+                };
 
-        return notification;
+                context.Notifications.Add(notification);
+                await context.SaveChangesAsync(cancellationToken);
+
+                var outbox = new OutboxMessage
+                {
+                    MessageType = "matrix_notification",
+                    AggregateType = nameof(Notification),
+                    AggregateId = notification.Id,
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        notification.Id,
+                        notification.Provider,
+                        notification.Target,
+                        digestId = digest.Id,
+                        ingestionRunId = digest.IngestionRunId,
+                        payloadJson = digest.PayloadJson,
+                        renderedBody,
+                        notificationType = notification.NotificationType
+                    }),
+                    Status = "pending",
+                    AttemptCount = 0,
+                    NextAttemptAt = DateTimeOffset.UtcNow,
+                    LastErrorSummary = null
+                };
+
+                context.OutboxMessages.Add(outbox);
+                await context.SaveChangesAsync(cancellationToken);
+
+                await DispatchPendingAsync(cancellationToken);
+
+                return notification;
+            },
+            new Dictionary<string, object?>
+            {
+                ["notification.type"] = "ingestion_summary",
+                ["notification.provider"] = "matrix",
+                ["digest.run_type"] = digest.RunType,
+                ["digest.ingestion_run_id"] = digest.IngestionRunId
+            });
     }
 
     public async Task<IReadOnlyCollection<OutboxMessage>> DispatchPendingAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTimeOffset.UtcNow;
-        var pendingMessages = await context.OutboxMessages
-            .Where(message => message.Status == "pending")
-            .ToListAsync(cancellationToken);
-
-        var dueMessages = pendingMessages
-            .Where(message => message.NextAttemptAt is null || message.NextAttemptAt <= now || message.AttemptCount > 0)
-            .OrderBy(message => message.CreatedAt)
-            .ToList();
-
-        foreach (var message in dueMessages)
-        {
-            var notification = await context.Notifications.SingleOrDefaultAsync(item => item.Id == message.AggregateId, cancellationToken);
-            if (notification is null)
+        return await CorrelationContext.RunWithActivityAsync(
+            "notification.dispatch_pending",
+            async activity =>
             {
-                message.Status = "failed";
-                message.LastErrorSummary = "Notification row not found.";
-                message.UpdatedAt = now;
-                continue;
-            }
+                var now = DateTimeOffset.UtcNow;
+                var pendingMessages = await context.OutboxMessages
+                    .Where(message => message.Status == "pending")
+                    .ToListAsync(cancellationToken);
 
-            notification.AttemptCount += 1;
-            notification.UpdatedAt = now;
-            message.AttemptCount += 1;
-            message.UpdatedAt = now;
-            message.Status = "processing";
-            message.LastErrorSummary = null;
+                var dueMessages = pendingMessages
+                    .Where(message => message.NextAttemptAt is null || message.NextAttemptAt <= now || message.AttemptCount > 0)
+                    .OrderBy(message => message.CreatedAt)
+                    .ToList();
 
-            if (matrixNotificationService is null)
-            {
-                notification.Status = "pending";
-                notification.ErrorSummary = "No notification provider is configured.";
-                notification.NextRetryAt = now.AddMinutes(5);
-                message.Status = "pending";
-                message.NextAttemptAt = now.AddMinutes(5);
-                message.LastErrorSummary = notification.ErrorSummary;
-                continue;
-            }
+                activity?.SetTag("notification.pending_count", pendingMessages.Count.ToString());
+                activity?.SetTag("notification.due_count", dueMessages.Count.ToString());
 
-            try
-            {
-                var sendResult = await matrixNotificationService.SendDigestSummaryAsync(new Digest(notification.IngestionRunId ?? Guid.Empty, "standard")
+                foreach (var message in dueMessages)
                 {
-                    Id = digestIdFromPayload(message.PayloadJson) ?? Guid.Empty,
-                    PayloadJson = payloadJsonFromPayload(message.PayloadJson)
-                }, cancellationToken);
+                    var notification = await context.Notifications.SingleOrDefaultAsync(item => item.Id == message.AggregateId, cancellationToken);
+                    if (notification is null)
+                    {
+                        message.Status = "failed";
+                        message.LastErrorSummary = "Notification row not found.";
+                        message.UpdatedAt = now;
+                        continue;
+                    }
 
-                if (sendResult.Success)
-                {
-                    notification.Status = "sent";
-                    notification.ProviderMessageId = sendResult.ProviderMessageId ?? sendResult.ResponseBody;
-                    notification.ErrorSummary = null;
-                    notification.SentAt = now;
-                    notification.NextRetryAt = null;
-                    message.Status = "sent";
-                    message.SentAt = now;
-                    message.NextAttemptAt = null;
+                    notification.AttemptCount += 1;
+                    notification.UpdatedAt = now;
+                    message.AttemptCount += 1;
+                    message.UpdatedAt = now;
+                    message.Status = "processing";
                     message.LastErrorSummary = null;
-                }
-                else
-                {
-                    notification.Status = "pending";
-                    notification.ErrorSummary = sendResult.Message;
-                    notification.NextRetryAt = now.AddMinutes(5);
-                    message.Status = "pending";
-                    message.NextAttemptAt = now.AddMinutes(5);
-                    message.LastErrorSummary = sendResult.Message;
-                }
-            }
-            catch (Exception ex)
-            {
-                notification.Status = "pending";
-                notification.ErrorSummary = ex.Message;
-                notification.NextRetryAt = now.AddMinutes(5);
-                message.Status = "pending";
-                message.NextAttemptAt = now.AddMinutes(5);
-                message.LastErrorSummary = ex.Message;
-            }
-        }
 
-        await context.SaveChangesAsync(cancellationToken);
-        return pendingMessages;
+                    if (matrixNotificationService is null)
+                    {
+                        notification.Status = "pending";
+                        notification.ErrorSummary = "No notification provider is configured.";
+                        notification.NextRetryAt = now.AddMinutes(5);
+                        message.Status = "pending";
+                        message.NextAttemptAt = now.AddMinutes(5);
+                        message.LastErrorSummary = notification.ErrorSummary;
+                        continue;
+                    }
+
+                    try
+                    {
+                        var sendResult = await matrixNotificationService.SendDigestSummaryAsync(new Digest(notification.IngestionRunId ?? Guid.Empty, "standard")
+                        {
+                            Id = digestIdFromPayload(message.PayloadJson) ?? Guid.Empty,
+                            PayloadJson = payloadJsonFromPayload(message.PayloadJson)
+                        }, cancellationToken);
+
+                        if (sendResult.Success)
+                        {
+                            notification.Status = "sent";
+                            notification.ProviderMessageId = sendResult.ProviderMessageId ?? sendResult.ResponseBody;
+                            notification.ErrorSummary = null;
+                            notification.SentAt = now;
+                            notification.NextRetryAt = null;
+                            message.Status = "sent";
+                            message.SentAt = now;
+                            message.NextAttemptAt = null;
+                            message.LastErrorSummary = null;
+                        }
+                        else
+                        {
+                            notification.Status = "pending";
+                            notification.ErrorSummary = sendResult.Message;
+                            notification.NextRetryAt = now.AddMinutes(5);
+                            message.Status = "pending";
+                            message.NextAttemptAt = now.AddMinutes(5);
+                            message.LastErrorSummary = sendResult.Message;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        notification.Status = "pending";
+                        notification.ErrorSummary = ex.Message;
+                        notification.NextRetryAt = now.AddMinutes(5);
+                        message.Status = "pending";
+                        message.NextAttemptAt = now.AddMinutes(5);
+                        message.LastErrorSummary = ex.Message;
+                    }
+                }
+
+                await context.SaveChangesAsync(cancellationToken);
+                return pendingMessages;
+            },
+            new Dictionary<string, object?>
+            {
+                ["notification.provider"] = "matrix"
+            });
     }
 
     private static string BuildRenderedBody(Digest digest)

@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using StreamingDigest.Application.Observability;
 using StreamingDigest.Domain;
 
 namespace StreamingDigest.MatrixNotifier;
@@ -27,34 +29,54 @@ public sealed class MatrixNotificationClient
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
 
-        if (!_options.IsEnabled)
-        {
-            return new MatrixSendResult(false, "Matrix notifications are disabled.");
-        }
+        return await CorrelationContext.RunWithActivityAsync(
+            "matrix.send",
+            async activity =>
+            {
+                activity?.SetTag("messaging.system", "matrix");
+                activity?.SetTag("messaging.operation", "send");
+                activity?.SetTag("messaging.destination", _options.RoomId);
+                activity?.SetTag("messaging.enabled", _options.IsEnabled.ToString());
 
-        ValidateOptions();
+                if (!_options.IsEnabled)
+                {
+                    return new MatrixSendResult(false, "Matrix notifications are disabled.");
+                }
 
-        var requestUri = BuildSendMessageUri();
-        var requestBody = new
-        {
-            msgtype = "m.text",
-            body = message
-        };
+                ValidateOptions();
 
-        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.AccessToken);
-        request.Content = JsonContent.Create(requestBody);
+                var requestUri = BuildSendMessageUri();
+                var requestBody = new
+                {
+                    msgtype = "m.text",
+                    body = message
+                };
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                activity?.SetTag("server.address", _options.HomeserverBaseUrl);
+                activity?.SetTag("url.full", requestUri);
 
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Matrix send failed with {(int)response.StatusCode} {response.ReasonPhrase}: {responseBody}");
-        }
+                using var request = new HttpRequestMessage(HttpMethod.Put, requestUri);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.AccessToken);
+                request.Content = JsonContent.Create(requestBody);
 
-        var providerMessageId = ExtractProviderMessageId(responseBody);
-        return new MatrixSendResult(true, "Matrix message sent.", responseBody, providerMessageId);
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException($"Matrix send failed with {(int)response.StatusCode} {response.ReasonPhrase}: {responseBody}");
+                }
+
+                var providerMessageId = ExtractProviderMessageId(responseBody);
+                return new MatrixSendResult(true, "Matrix message sent.", responseBody, providerMessageId);
+            },
+            new Dictionary<string, object?>
+            {
+                ["messaging.system"] = "matrix",
+                ["messaging.destination"] = _options.RoomId,
+                ["messaging.enabled"] = _options.IsEnabled
+            },
+            ActivityKind.Client);
     }
 
     public Task<MatrixSendResult> SendTestMessageAsync(CancellationToken cancellationToken = default)

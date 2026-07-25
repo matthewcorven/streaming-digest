@@ -8,6 +8,7 @@
 
 <ItemGroup>
   <ProjectReference Include="..\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
+  <ProjectReference Include="..\StreamingDigest.Application\StreamingDigest.Application.csproj" />
 </ItemGroup>
 
 </Project>

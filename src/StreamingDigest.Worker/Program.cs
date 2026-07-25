@@ -40,6 +40,9 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing =>
     {
         tracing.AddSource(CorrelationContext.ActivitySourceName);
+        tracing.AddAspNetCoreInstrumentation();
+        tracing.AddHttpClientInstrumentation();
+        tracing.AddEntityFrameworkCoreInstrumentation();
         tracing.AddOtlpExporter(options => ConfigureOtlpExporter(options));
     })
     .WithMetrics(metrics =>
