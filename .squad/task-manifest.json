@@ -10,7 +10,7 @@
     {
       "id": "0.1",
       "title": "Create solution structure",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [],
       "blocked_by": [],
       "status": "open",
@@ -19,7 +19,7 @@
     {
       "id": "0.2",
       "title": "Add baseline package dependencies",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "0.1"
       ],
@@ -30,7 +30,7 @@
     {
       "id": "0.3",
       "title": "Add schema-validated application config file",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "0.2"
       ],
@@ -41,7 +41,7 @@
     {
       "id": "0.4",
       "title": "Establish test fixture library",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "0.3"
       ],
@@ -52,7 +52,7 @@
     {
       "id": "0.5",
       "title": "Wire baseline observability instrumentation",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "0.4"
       ],
@@ -63,7 +63,7 @@
     {
       "id": "1.1",
       "title": "Create PostgreSQL migration baseline",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "1.0"
       ],
@@ -74,7 +74,7 @@
     {
       "id": "1.2",
       "title": "Add EF Core DbContext and repositories",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "1.1"
       ],
@@ -85,7 +85,7 @@
     {
       "id": "1.3",
       "title": "Add raw SQL migration support",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "1.2"
       ],
@@ -96,7 +96,7 @@
     {
       "id": "1.4",
       "title": "Implement app-settings default seeding",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "1.3"
       ],
@@ -107,7 +107,7 @@
     {
       "id": "1.5",
       "title": "Define domain event type vocabulary",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "1.4"
       ],
@@ -118,7 +118,7 @@
     {
       "id": "2.1",
       "title": "Implement bootstrap admin user",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "2.0"
       ],
@@ -129,7 +129,7 @@
     {
       "id": "2.2",
       "title": "Implement login/logout/change password",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "2.1"
       ],
@@ -140,7 +140,7 @@
     {
       "id": "2.3",
       "title": "Build Blazor app shell",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "2.2"
       ],
@@ -151,7 +151,7 @@
     {
       "id": "2.4",
       "title": "Implement first-run onboarding state",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "2.3"
       ],
@@ -162,7 +162,7 @@
     {
       "id": "2.5",
       "title": "Implement model discovery/download onboarding",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "2.4"
       ],
@@ -173,7 +173,7 @@
     {
       "id": "2.6",
       "title": "Implement security conformance tests",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "2.5"
       ],
@@ -184,7 +184,7 @@
     {
       "id": "3.1",
       "title": "Implement channel CRUD API",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "3.0"
       ],
@@ -195,7 +195,7 @@
     {
       "id": "3.2",
       "title": "Implement channel management UI",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "3.1"
       ],
@@ -206,7 +206,7 @@
     {
       "id": "4.1",
       "title": "Configure Hangfire with PostgreSQL",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "4.0"
       ],
@@ -217,7 +217,7 @@
     {
       "id": "4.2",
       "title": "Implement ingestion run records",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "4.1"
       ],
@@ -228,7 +228,7 @@
     {
       "id": "4.3",
       "title": "Implement custom job progression and batch tracking",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "4.2"
       ],
@@ -239,7 +239,7 @@
     {
       "id": "4.4",
       "title": "Add admin run/retry endpoints",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "4.3"
       ],
@@ -250,7 +250,7 @@
     {
       "id": "4.5",
       "title": "Implement rate-limit deferment service",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "4.4"
       ],
@@ -261,7 +261,7 @@
     {
       "id": "4.6",
       "title": "Implement concurrency and race conformance tests",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "4.5"
       ],
@@ -272,7 +272,7 @@
     {
       "id": "5.1",
       "title": "Implement yt-dlp metadata adapter",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "5.0"
       ],
@@ -283,7 +283,7 @@
     {
       "id": "5.2",
       "title": "Implement optional YouTube API adapter",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "5.1"
       ],
@@ -294,7 +294,7 @@
     {
       "id": "5.3",
       "title": "Implement long-form and max-age filtering",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "5.2"
       ],
@@ -305,7 +305,7 @@
     {
       "id": "5.4",
       "title": "Implement video idempotency and degraded-channel handling",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "5.3"
       ],
@@ -316,7 +316,7 @@
     {
       "id": "5.5",
       "title": "Implement unavailable-video terminal state",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "5.4"
       ],
@@ -327,7 +327,7 @@
     {
       "id": "6.1",
       "title": "Implement caption/transcript ingestion",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "6.0"
       ],
@@ -338,7 +338,7 @@
     {
       "id": "6.2",
       "title": "Implement audio-to-text provider abstraction",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "6.1"
       ],
@@ -349,7 +349,7 @@
     {
       "id": "6.3",
       "title": "Implement local whisper service adapter",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "6.2"
       ],
@@ -360,7 +360,7 @@
     {
       "id": "6.4",
       "title": "Implement temporary media lifecycle and transcription fallback",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "6.3"
       ],
@@ -371,7 +371,7 @@
     {
       "id": "7.1",
       "title": "Store author chapters as segments",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "7.0"
       ],
@@ -382,7 +382,7 @@
     {
       "id": "7.2",
       "title": "Implement deterministic transcript chunking",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "7.1"
       ],
@@ -393,7 +393,7 @@
     {
       "id": "7.3",
       "title": "Implement LLM semantic refinement",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "7.2"
       ],
@@ -404,7 +404,7 @@
     {
       "id": "7.4",
       "title": "Prototype screenshot extraction approaches",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "7.3"
       ],
@@ -415,7 +415,7 @@
     {
       "id": "7.5",
       "title": "Generate WebP screenshots",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "7.4"
       ],
@@ -426,7 +426,7 @@
     {
       "id": "8.1",
       "title": "Extract description and pinned-comment links",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "8.0"
       ],
@@ -437,7 +437,7 @@
     {
       "id": "8.2",
       "title": "Normalize URLs",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "8.1"
       ],
@@ -448,7 +448,7 @@
     {
       "id": "8.3",
       "title": "Rule-based classification",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "8.2"
       ],
@@ -459,7 +459,7 @@
     {
       "id": "8.4",
       "title": "Local LLM classification",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "8.3"
       ],
@@ -470,7 +470,7 @@
     {
       "id": "8.5",
       "title": "Classification correction workflow",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "8.4"
       ],
@@ -481,7 +481,7 @@
     {
       "id": "9.1",
       "title": "Implement repository host detection",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "9.0"
       ],
@@ -492,7 +492,7 @@
     {
       "id": "9.2",
       "title": "Implement repository metadata adapters",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "9.1"
       ],
@@ -503,7 +503,7 @@
     {
       "id": "9.3",
       "title": "Fetch README and LICENSE",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "9.2"
       ],
@@ -514,7 +514,7 @@
     {
       "id": "9.4",
       "title": "Check DeepWiki URL",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "9.3"
       ],
@@ -525,7 +525,7 @@
     {
       "id": "10.1",
       "title": "Build Crawlee/Playwright scraper service",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "10.0"
       ],
@@ -536,7 +536,7 @@
     {
       "id": "10.2",
       "title": "Add robots.txt and rate limiting",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "10.1"
       ],
@@ -547,7 +547,7 @@
     {
       "id": "10.3",
       "title": "Store scraped page results",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "10.2"
       ],
@@ -558,7 +558,7 @@
     {
       "id": "11.1",
       "title": "Implement effective value service",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "11.0"
       ],
@@ -569,7 +569,7 @@
     {
       "id": "11.2",
       "title": "Build search document generator",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "11.1"
       ],
@@ -580,7 +580,7 @@
     {
       "id": "11.3",
       "title": "Implement Semantic Kernel embedding provider",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "11.2"
       ],
@@ -591,7 +591,7 @@
     {
       "id": "11.4",
       "title": "Store embeddings in pgvector",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "11.3"
       ],
@@ -602,7 +602,7 @@
     {
       "id": "11.5",
       "title": "Implement stale embedding regeneration",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "11.4"
       ],
@@ -613,7 +613,7 @@
     {
       "id": "11.6",
       "title": "Implement recent-search storage and embeddings",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "11.5"
       ],
@@ -624,7 +624,7 @@
     {
       "id": "11.7",
       "title": "Implement video-cluster aggregate embeddings",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "11.6"
       ],
@@ -635,7 +635,7 @@
     {
       "id": "12.1",
       "title": "Implement full-text/trigram search SQL",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.0"
       ],
@@ -646,7 +646,7 @@
     {
       "id": "12.2",
       "title": "Implement vector search SQL",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.1"
       ],
@@ -657,7 +657,7 @@
     {
       "id": "12.3",
       "title": "Implement hybrid ranking",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.2"
       ],
@@ -668,7 +668,7 @@
     {
       "id": "12.4",
       "title": "Implement search UI",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.3"
       ],
@@ -679,7 +679,7 @@
     {
       "id": "12.5",
       "title": "Implement cluster ranking and similarity percentages",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.4"
       ],
@@ -690,7 +690,7 @@
     {
       "id": "12.6",
       "title": "Implement dashboard daily digest and pending-action inbox",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.5"
       ],
@@ -701,7 +701,7 @@
     {
       "id": "12.7",
       "title": "Build search recall evaluation harness",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.6"
       ],
@@ -712,7 +712,7 @@
     {
       "id": "12.8",
       "title": "Measure search performance against latency targets",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "12.7"
       ],
@@ -723,7 +723,7 @@
     {
       "id": "13.1",
       "title": "Implement override APIs",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "13.0"
       ],
@@ -734,7 +734,7 @@
     {
       "id": "13.2",
       "title": "Implement notes APIs",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "13.1"
       ],
@@ -745,7 +745,7 @@
     {
       "id": "13.3",
       "title": "Implement Blazor modals",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "13.2"
       ],
@@ -756,7 +756,7 @@
     {
       "id": "14.1",
       "title": "Select Matrix SDK/implementation",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "14.0"
       ],
@@ -767,7 +767,7 @@
     {
       "id": "14.2",
       "title": "Build Matrix notifier service",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "14.1"
       ],
@@ -778,7 +778,7 @@
     {
       "id": "14.3",
       "title": "Integrate ingestion notifications",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "14.2"
       ],
@@ -789,7 +789,7 @@
     {
       "id": "14.4",
       "title": "Implement notification audit and outbox dispatch",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "14.3"
       ],
@@ -800,7 +800,7 @@
     {
       "id": "15.1",
       "title": "Verify and extend OpenTelemetry instrumentation",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "15.0"
       ],
@@ -811,7 +811,7 @@
     {
       "id": "15.2",
       "title": "Add production observability Compose services",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "15.1"
       ],
@@ -822,7 +822,7 @@
     {
       "id": "15.3",
       "title": "Store domain events and warning/error summaries",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "15.2"
       ],
@@ -833,7 +833,7 @@
     {
       "id": "15.4",
       "title": "Add UI observability links",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "15.3"
       ],
@@ -844,7 +844,7 @@
     {
       "id": "15.5",
       "title": "Implement retention and cleanup jobs",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "15.4"
       ],
@@ -855,7 +855,7 @@
     {
       "id": "16.1",
       "title": "Implement concurrency configuration defaults",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "16.0"
       ],
@@ -866,7 +866,7 @@
     {
       "id": "16.2",
       "title": "Implement contextual admin actions (UI/API)",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "16.1"
       ],
@@ -877,7 +877,7 @@
     {
       "id": "16.3",
       "title": "Implement Admin page (settings, models, observability, backup, maintenance)",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "16.2"
       ],
@@ -888,7 +888,7 @@
     {
       "id": "17.1",
       "title": "Aspire-to-Compose deployment",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "17.0"
       ],
@@ -899,7 +899,7 @@
     {
       "id": "17.2",
       "title": "Configure volumes",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "17.1"
       ],
@@ -910,7 +910,7 @@
     {
       "id": "17.3",
       "title": "Implement MVP backup/restore",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "17.2"
       ],
@@ -921,7 +921,7 @@
     {
       "id": "17.4",
       "title": "Document and test restore runbook",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "17.3"
       ],
@@ -932,7 +932,7 @@
     {
       "id": "17.5",
       "title": "Implement upgrade and migration policy",
-      "source": "issue-extract",
+      "source": "github-issue",
       "depends_on": [
         "17.4"
       ],
