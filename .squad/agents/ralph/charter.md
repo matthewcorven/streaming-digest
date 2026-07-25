@@ -10,6 +10,7 @@ Work monitor that keeps the squad moving across issues, PRs, reviews, and backlo
 ## Responsibilities
 
 - Monitor backlog, issue labels, PR state, and follow-up work
+- Resolve work from GitHub issues by running `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text` to find the first open issue with no unmet dependencies or blockers, and `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text` to inspect the repo's `Available` and `Blocked` sections; add `--label squad:{member}` when you want a member-scoped queue. Use the issue body's `## Depends On` and `## Blocked By` sections as the source of truth; the title is not used for readiness or ordering.
 - Trigger the next useful unit of work when the board is not clear
 - Report concise board status and keep the work queue unblocked
 

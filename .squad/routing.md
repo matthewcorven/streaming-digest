@@ -39,7 +39,8 @@ How to decide who handles what.
 5. **"Team, ..." → fan-out.** Spawn all relevant agents in parallel as `mode: "background"`.
 6. **Anticipate downstream work.** If a feature is being built, spawn the tester to write test cases from requirements simultaneously.
 7. **Issue-labeled work** — when a `squad:{member}` label is applied to an issue, route to that member. The Lead handles all `squad` (base label) triage.
-8. **Sequential execution is mandatory for implementation-plan work.** Agents must execute GitHub issues according to the dependency graph in `.squad/task-manifest.json` rather than by recency, issue number, or current backlog position.
+8. **Dependency-driven issue execution.** Before choosing work, agents must run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text` to identify the first open issue with no unmet dependencies or blockers and inspect the `Available`/`Blocked` sections. Add `--label squad:{member}` when they need a member-scoped queue. They should treat the issue bodies' `## Depends On` and `## Blocked By` sections as the source of truth for ordering; the issue title is not used for readiness or prioritization.
 9. **Stop on blockers.** If a task is blocked by an unmet prerequisite, missing dependency, or unresolved blocker, agents must stop and report the blocker rather than jumping ahead to later tasks.
 10. **Blocked work stays open.** A task that is blocked remains open and does not get marked complete or implicitly skipped.
-11. **Manifest-first orchestration.** When the task manifest changes, agents must re-read `.squad/task-manifest.json` before choosing work so new tasks and re-ordered dependencies are respected.
+11. **Issue tracker is the live queue.** When issue content changes, agents must re-run the helper before choosing work so the latest dependencies and blockers are respected.
+12. **Ralph owns the queue.** Ralph should run the helper during triage and share the ready-vs-blocked view with the squad instead of scanning issues ad hoc.
