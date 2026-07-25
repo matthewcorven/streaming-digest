@@ -1,4 +1,4 @@
-# Phase-gate Task X.0 references denote previous-phase completion, not gated launches
+# Phase-gate Task X.0 references denote real upstream data/capability dependencies
 
 The issue tracker (authoritative for execution ordering, per `.github/copilot-instructions.md`)
 contained 17 phase-chain-head issues whose `## Depends On` section referenced a bare task id
@@ -12,37 +12,35 @@ Left as-is, those 17 heads were blocked forever under any flag — the referent 
 exist. Mass-unblocking them was explicitly rejected (it would release the entire backlog at
 once, far more damaging than the under-reporting it fixed).
 
-We decided: **a bare `Task X.0` reference means "the previous phase's work is complete," and
-is rewritten to that phase's last task (in plan order).** The rewrite is a one-time,
-reversible data fix on the 17 issue bodies; the convention going forward is that new phase
-chains reference the real previous-phase last task, and no `X.0` placeholder ref is ever
-introduced again.
+We decided: **a bare `Task X.0` reference is rewritten to the real issue whose completion
+produces the data or capability the head actually consumes.** Where that coincides with the
+previous phase's last task, the edge is unremarkable. Where it does not, the ADR records why.
+If no upstream issue exists, the head has **no dependency**. Numeric adjacency is never
+sufficient by itself.
 
 Evidence that phases are reference groupings, not execution gates: the plan's own
 `## Implementation sequencing` section states *"phase numbering is a reference grouping for
 requirements, not the build order"* — execution order is the numbered vertical slices, and the
 `phase-N` label is pure grouping metadata. A phase is therefore not a launch gate a human
-opens; it is a numbering boundary.
+opens; it is a numbering boundary. Slice order remains useful corroborating evidence, but it is
+not the governing rule. The governing rule is the task's **real upstream dependency**.
 
-### Convention refinement (2026-07-25 follow-up): previous-**slice**, not previous-**phase**
+### Convention refinement (2026-07-25 follow-up): real dependency, not numeric or slice adjacency
 
-The original text above quoted the plan's *"not the build order"* line and then encoded
-**numeric phase order** anyway ("previous phase's last task"). That is a self-contradiction.
-The plan's execution order is the **vertical slices**, not the numeric phases. The correct
-convention is therefore: **a head's gate is completion of the *previous slice* in execution
-order, which — for 13 of the 17 heads — coincides with the previous numeric phase, and for 4
-does not.** Every rewrite edge points at the **previous slice's** last task (or the head's own
-upstream within the same slice), **never forward into the head's own phase or a later slice.**
+The earlier follow-up draft corrected "previous phase" to "previous slice." That still encoded
+adjacency as the rule, and only used real semantics in the exception notes. The user ruled that
+the honest convention is: **rewrite the head to the issue that produces the data or capability
+it actually consumes**. Slice order is still a useful consistency check, but it is not the
+decision procedure. Every retained edge must still point **backward** in execution order; an
+edge is never justified by mere numeric adjacency.
 
-Where a head's previous slice coincides with the previous numeric phase, the edge is the
-previous phase's last task. Where the plan defers tasks *out* of a phase into a later slice
-(e.g. Whisper `6.3–6.4` deferred from Phase 6 into slice 9; `11.7` deferred from Phase 11 into
-slice 12), or pulls a phase's first task *forward* into an earlier slice, the numeric phase is
-**not** the build order and the edge must follow the slice, not the phase number.
+For **12 of the 17** heads, the honest real dependency still coincides with the previous
+numeric phase's last task. The five divergences are `#15`, `#24`, `#33`, `#36`, and `#80`.
+Those are recorded explicitly below.
 
 The rewrite map below records the **live** issue bodies (verified against GitHub after the
-one-time rewrite; see `docs/verification/101-issue-queue-readiness.md`). **Every edge points at
-the previous phase's/slice's last task — never at a task inside the head's own phase.**
+one-time rewrite; see `docs/verification/101-issue-queue-readiness.md`). It is regenerated from
+live state after any body edit — never hand-carried forward from an intermediate map.
 
 | Head issue | Old ref | New ref | New referent |
 |---|---|---|---|
@@ -52,49 +50,44 @@ the previous phase's/slice's last task — never at a task inside the head's own
 | #65 [Task 4.1] | 4.0 | 3.2 | #64 |
 | #71 [Task 5.1] | 5.0 | 4.6 | #70 |
 | #76 [Task 6.1] | 6.0 | 5.5 | #75 |
-| #80 [Task 7.1] | 7.0 | 4.6 | #70 |
+| #80 [Task 7.1] | 7.0 | 5.5 | #75 |
 | #86 [Task 8.1] | 8.0 | 7.5 | #85 |
 | #91 [Task 9.1] | 9.0 | 8.5 | #90 |
 | #11 [Task 10.1] | 10.0 | 9.4 | #94 |
 | #15 [Task 11.1] | 11.0 | 5.5 | #75 |
-| #24 [Task 12.1] | 12.0 | 5.5 | #75 |
-| #33 [Task 13.1] | 13.0 | 8.4 | #89 |
-| #36 [Task 14.1] | 14.0 | 13.3 | #35 |
+| #24 [Task 12.1] | 12.0 | 11.2 | #16 |
+| #33 [Task 13.1] | 13.0 | 11.1 | #15 |
+| #36 [Task 14.1] | 14.0 | None | None |
 | #40 [Task 15.1] | 15.0 | 14.4 | #39 |
 | #45 [Task 16.1] | 16.0 | 15.5 | #44 |
 | #48 [Task 17.1] | 17.0 | 16.3 | #47 |
 
 After the rewrite, a full `--state all` scan reports zero missing referents, and all 17 heads
-remain correctly blocked behind a real OPEN issue.
+remain correctly resolved: 16 heads point at a real issue, and `#36` honestly has no upstream
+issue dependency.
 
-### Slice-order exceptions — 4 edges flagged for a user scheduling ruling (NOT silently re-pointed)
+### Non-obvious edges and divergences from previous-phase adjacency
 
-A 2026-07-25 review flagged 4 live edges as candidates that may invert the plan's slice build
-order. Re-pointing a dependency is a **scheduling decision** (it changes when work becomes
-available), not a data cleanup. All 4 heads are currently Blocked in the live queue (none is
-Available), so a re-point could only *change what they wait on*, not silently release them —
-but choosing a different prerequisite still picks one build order over another, which is the
-user's call. Per the ruling's hard constraints, these were **left as-is and flagged for a user
-ruling** rather than guessed:
-
-- **#15 [Task 11.1] (slice 5) → 5.5 / #75** — head is in slice 5 (Transcript + embeddings +
-  basic search UI); current referent is Phase 5's last task (yt-dlp ingestion, slice 4).
-  Numeric-phase order would point at 11.6, but Phase 11 is *inside* the same slice 5, so a
-  phase-number edge would be a forward reference into the head's own slice/phase. Live value is
-  slice-consistent. Candidate re-point (to an intra-slice-5 upstream) is a scheduling call.
-- **#24 [Task 12.1] (slice 5) → 5.5 / #75** — same shape as #15; Phase 12 is split across
-  slices 5/12, and 12.1 is in the slice-5 ("early 12") portion. Live value is slice-consistent.
-- **#80 [Task 7.1] (slice 6) → 4.6 / #70** — head is in slice 6 (Segmentation + screenshots);
-  current referent is Phase 4's last task (Hangfire, slice 3). A Phase-6 referent would be
-  slice-inconsistent (Phase 6 is split across slices 5/9/10). Live value is slice-consistent.
-- **#33 [Task 13.1] (slice 11) → 8.4 / #89** — head is in slice 11 (Notes/edit); current
-  referent is 8.4 (#89, slice 9, Local LLM classification). Live value is slice-consistent.
-
-**Status:** these 4 are **open questions for the user**. The live bodies are internally
-consistent (no forward reference into the head's own phase, every referent is a real OPEN
-issue, nothing is mass-unblocked, and — because all 4 are currently Blocked — no re-point
-could silently release work into Available). Any change to them requires an explicit user
-scheduling ruling and is tracked in `docs/verification/101-issue-queue-readiness.md`.
+- **#15 [Task 11.1] → 5.5 / #75 (confirmed as-is).** The effective-value service's first
+  concrete inputs are the editable scraped video fields produced by Phase 5 ingestion. Later
+  override families (transcripts, links, repositories) reuse that abstraction, but do not block
+  defining it.
+- **#24 [Task 12.1] → 11.2 / #16 (changed from `5.5 / #75`).** The task body says
+  *"Search over `search_documents`."* The real prerequisite is the search-document generator,
+  not merely raw ingested video metadata. This overturns the earlier "Phase 5 is enough"
+  reading.
+- **#33 [Task 13.1] → 11.1 / #15 (changed from `8.4 / #89`).** Override APIs are built on the
+  `original` / `override` / `effective` contract and `field_override_history`. The enabling
+  capability is the effective-value service, not local LLM classification. `8.4` remains an
+  input to one override subtype, not the general gate for the override API surface.
+- **#36 [Task 14.1] → no dependency (changed from `13.3 / #35`).** Selecting a Matrix SDK is a
+  research/evaluation task. It does not consume the edit-modal work from Phase 13, and it does
+  not need the stored Digest artifact — that dependency belongs downstream in the notification
+  implementation path if anywhere. Under the real-dependency rule, inventing an adjacency blocker
+  here would be less honest than leaving the issue dependency-free.
+- **#80 [Task 7.1] → 5.5 / #75 (changed from `4.6 / #70`).** Author chapters come from the
+  yt-dlp metadata fetched in Phase 5. Hangfire concurrency tests produce nothing Task 7.1
+  consumes.
 
 ## Considered options
 
@@ -111,22 +104,23 @@ scheduling ruling and is tracked in `docs/verification/101-issue-queue-readiness
   cannot hide. Missing refs still block; they are just no longer invisible.
 - **(d) Rewrite the 17 bodies to reference real issues** — **chosen**: least-destructive,
   reversible, preserves the plan's true ordering semantics, and fixes the under-reporting
-  without releasing the backlog.
+  without inventing fake gate issues.
 
 ## Consequences
 
-- The 17 chain heads now resolve their dependencies against real issues and flow through the
-  ready-vs-blocked queue correctly; none is available until its previous-phase last task closes.
+- The 17 chain heads now resolve against the real data/capability they consume. For 16 heads
+  that is a real upstream issue; for `#36` it is honestly no dependency.
 - The queue helper's `(missing)` marker makes the entire class of "reference to a nonexistent
   issue" defect visible in text output forever — a missing referent can never again masquerade
   as a routine open dependency.
-- Going forward, a new phase chain's first task must reference the previous phase's actual last
-  task in its `## Depends On` section; bare `X.0` refs are not used.
-- **Convention clarification (2026-07-25):** the dependency target is the **previous slice's**
-  last task in execution order, not the previous *numeric* phase's last task. For 13 of the 17
-  heads these coincide; for the 4 flagged exceptions the distinction matters and any re-point
-  is a user scheduling ruling, not a data fix. Every edge points backward in slice order,
-  never forward into the head's own phase or a later slice.
+- Going forward, a new phase chain's first task must reference the issue that produces the data
+  or capability it actually consumes. Bare `X.0` refs are not used, and "previous phase" is not
+  the default answer unless it is also the real dependency.
+- **Convention clarification (2026-07-25):** 12 of the 17 heads happen to coincide with the
+  previous numeric phase's last task; five do not (`#15`, `#24`, `#33`, `#36`, `#80`). Slice
+  order is corroborating evidence only. The governing rule is real dependency.
+- If no real upstream issue exists, leave `## Depends On` empty / `None`; do not invent an
+  adjacency gate solely to keep the item blocked.
 - If a genuine human-opened phase gate is ever wanted, it is created as a real issue and
   referenced by number — never as a bare `X.0` placeholder.
 - This ADR is a process/convention ruling on tracker data, recorded as an ADR (not merely a

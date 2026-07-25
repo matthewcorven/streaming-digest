@@ -29,14 +29,14 @@
     {"issue": 65, "old": "4.0",  "new": "3.2",  "referent": 64},
     {"issue": 71, "old": "5.0",  "new": "4.6",  "referent": 70},
     {"issue": 76, "old": "6.0",  "new": "5.5",  "referent": 75},
-    {"issue": 80, "old": "7.0",  "new": "4.6",  "referent": 70},
+    {"issue": 80, "old": "7.0",  "new": "5.5",  "referent": 75},
     {"issue": 86, "old": "8.0",  "new": "7.5",  "referent": 85},
     {"issue": 91, "old": "9.0",  "new": "8.5",  "referent": 90},
     {"issue": 11, "old": "10.0", "new": "9.4",  "referent": 94},
     {"issue": 15, "old": "11.0", "new": "5.5",  "referent": 75},
-    {"issue": 24, "old": "12.0", "new": "5.5",  "referent": 75},
-    {"issue": 33, "old": "13.0", "new": "8.4",  "referent": 89},
-    {"issue": 36, "old": "14.0", "new": "13.3", "referent": 35},
+    {"issue": 24, "old": "12.0", "new": "11.2", "referent": 16},
+    {"issue": 33, "old": "13.0", "new": "11.1", "referent": 15},
+    {"issue": 36, "old": "14.0", "new": null,   "referent": null},
     {"issue": 40, "old": "15.0", "new": "14.4", "referent": 39},
     {"issue": 45, "old": "16.0", "new": "15.5", "referent": 44},
     {"issue": 48, "old": "17.0", "new": "16.3", "referent": 47}
@@ -77,5 +77,74 @@
       "draft_pr": 0,
       "four_flagged_heads_available": false
     }
+  },
+  "run3_2026_07_25": {
+    "scope": "user ruling applied: real data dependency, per-edge justification; live issue bodies updated where the ruled derivation changed",
+    "ruling": "rewrite bare Task X.0 refs to the issue that produces the data/capability the head actually consumes; if no upstream issue exists, the head has no dependency",
+    "coincides_with_previous_numeric_phase_last_task": 12,
+    "divergent_heads": [15, 24, 33, 36, 80],
+    "per_edge_verdicts": [
+      {
+        "head": 15,
+        "before": "5.5/#75",
+        "after": "5.5/#75",
+        "changed": false,
+        "reason": "effective-value service first consumes the editable scraped video fields produced by Phase 5 ingestion"
+      },
+      {
+        "head": 24,
+        "before": "5.5/#75",
+        "after": "11.2/#16",
+        "changed": true,
+        "reason": "Task 12.1 explicitly searches over search_documents, so the real prerequisite is the search-document generator"
+      },
+      {
+        "head": 33,
+        "before": "8.4/#89",
+        "after": "11.1/#15",
+        "changed": true,
+        "reason": "override APIs are built on the original/override/effective contract and field_override_history, so the enabling capability is the effective-value service"
+      },
+      {
+        "head": 36,
+        "before": "13.3/#35",
+        "after": null,
+        "changed": true,
+        "reason": "Matrix SDK selection is a research/evaluation task with no upstream issue dependency"
+      },
+      {
+        "head": 80,
+        "before": "4.6/#70",
+        "after": "5.5/#75",
+        "changed": true,
+        "reason": "author chapters come from yt-dlp metadata ingestion, not from Hangfire concurrency testing"
+      }
+    ],
+    "queue_state_before_after": {
+      "before": {
+        "missing_referents": 0,
+        "available": 9,
+        "available_issues": [2, 12, 29, 53, 57, 58, 59, 83, 85],
+        "next_available": 2,
+        "blocked": 82
+      },
+      "after": {
+        "missing_referents": 0,
+        "available": 10,
+        "available_issues": [2, 12, 29, 36, 53, 57, 58, 59, 83, 85],
+        "next_available": 2,
+        "blocked": 81
+      },
+      "delta_cause": "only #36 moved from Blocked to Available because its ruled real dependency is none",
+      "silently_mass_unblocked": false,
+      "still_blocked": [15, 24, 33, 80]
+    },
+    "labels_audited": {
+      "24": ["squad", "squad:neo", "phase-12", "slice-5"],
+      "33": ["squad", "squad:tank", "phase-13", "slice-11"],
+      "36": ["squad", "squad:dozer", "phase-14", "slice-13"],
+      "80": ["squad", "squad:tank", "phase-7", "slice-6"]
+    },
+    "out_of_scope_finding": "if the Matrix notification path needs an explicit Digest dependency, it belongs on #37/#38 rather than #36"
   }
 }
