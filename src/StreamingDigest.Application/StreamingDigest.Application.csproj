@@ -10,4 +10,8 @@
   <ProjectReference Include="..\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
 </ItemGroup>
 
+<ItemGroup>
+  <PackageReference Include="Microsoft.SemanticKernel" Version="1.55.0" />
+</ItemGroup>
+
 </Project>
