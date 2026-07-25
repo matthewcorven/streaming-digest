@@ -1,0 +1,81 @@
+{
+  "task": "7.4-screenshot-extraction",
+  "date": "2026-07-25T17:30:00.0000000Z",
+  "prototype_policy": "synthetic programmatically generated data only; no AI; no token/latency cost",
+  "decision": "ffmpeg direct frame extraction",
+  "reframing": "yt-dlp is a downloader, not a frame extractor; Path B = yt-dlp download + the SAME ffmpeg extraction. Not a symmetric two-extractor race.",
+  "environment": {
+    "host_os": "macOS arm64 (Apple Silicon)",
+    "ffmpeg_host": "8.1.2 (Homebrew) — NOTE: no libfreetype (no drawtext), no libwebp",
+    "ffmpeg_container": "6.1.1-3ubuntu5 (Debian/Ubuntu) — HAS libwebp + drawtext",
+    "yt_dlp": "2026.07.04 (pipx, Python 3.14.6)",
+    "python": "3.14.6 (Pillow 12.2.0)",
+    "docker": "29.5.3",
+    "dotnet_sdk": "10.0.301",
+    "linux_measured_via": "Docker linux/arm64 (native arm64, no emulation)"
+  },
+  "fixtures": {
+    "generator": "testsrc2 (burns timestamp/frame counter into every frame) + ffprobe ground truth + reference frames by exact frame number",
+    "clipA": { "file": "clipA-short.mp4", "duration_s": 30, "resolution": "640x360", "fps": 30, "gop": 30, "size_bytes": 4029495 },
+    "clipB": { "file": "clipB-long.mp4", "duration_s": 300, "resolution": "1280x720", "fps": 30, "gop": 90, "size_bytes": 144258096 },
+    "failure_fixtures": ["audio-only.m4a (no video stream)", "clipD-truncated.mp4 (40% of clipA, cut mid-stream)"]
+  },
+  "extraction_results": {
+    "runs_per_target": 5,
+    "pathA_ffmpeg_direct": [
+      { "target": "clipA@5.00s", "alignment": "keyframe", "extract_median_ms": 44, "extract_spread_ms": [44, 45], "accuracy_psnr_vs_reference": "inf", "landed_frame": 150, "expected_frame": 150, "frame_error": 0 },
+      { "target": "clipA@5.37s", "alignment": "non-keyframe", "extract_median_ms": 47, "extract_spread_ms": [46, 50], "accuracy_psnr_vs_reference": "16.96", "landed_frame": 162, "expected_frame": 161, "frame_error": 1, "time_error_ms": 30 },
+      { "target": "clipB@65.00s", "alignment": "keyframe", "extract_median_ms": 77, "extract_spread_ms": [76, 79], "accuracy_psnr_vs_reference": "inf", "landed_frame": 1950, "expected_frame": 1950, "frame_error": 0 },
+      { "target": "clipB@65.37s", "alignment": "non-keyframe", "extract_median_ms": 80, "extract_spread_ms": [79, 83], "accuracy_psnr_vs_reference": "16.91", "landed_frame": 1962, "expected_frame": 1961, "frame_error": 1, "time_error_ms": 30 }
+    ],
+    "pathB_ytdlp_download_then_ffmpeg": [
+      { "target": "clipA@5.00s", "download_median_ms": 364, "extract_median_ms": 44, "total_median_ms": 409, "total_spread_ms": [405, 418], "accuracy_psnr_vs_reference": "inf" },
+      { "target": "clipA@5.37s", "download_median_ms": 363, "extract_median_ms": 47, "total_median_ms": 411, "total_spread_ms": [407, 418], "accuracy_psnr_vs_reference": "16.96" },
+      { "target": "clipB@65.00s", "download_median_ms": 394, "extract_median_ms": 77, "total_median_ms": 470, "total_spread_ms": [463, 480], "accuracy_psnr_vs_reference": "inf" },
+      { "target": "clipB@65.37s", "download_median_ms": 383, "extract_median_ms": 79, "total_median_ms": 462, "total_spread_ms": [462, 474], "accuracy_psnr_vs_reference": "16.91" }
+    ],
+    "pathB_note": "extract step PSNR identical to Path A on every target — proving yt-dlp adds a download step then uses the SAME ffmpeg extraction. Download figures are LOCAL HTTP best-case lower bounds; real YouTube adds format selection, DASH/HLS, nsig, throttling."
+  },
+  "webp": {
+    "host_via_pillow_q80": [
+      { "frame": "clipA@5.00", "png_bytes": 44656, "webp_bytes": 10364, "encode_median_ms": 7, "ratio_png_to_webp": 4.31 },
+      { "frame": "clipA@5.37", "png_bytes": 50150, "webp_bytes": 10546, "encode_median_ms": 6, "ratio_png_to_webp": 4.75 },
+      { "frame": "clipB@65.00", "png_bytes": 160207, "webp_bytes": 29504, "encode_median_ms": 25, "ratio_png_to_webp": 5.43 },
+      { "frame": "clipB@65.37", "png_bytes": 160420, "webp_bytes": 29824, "encode_median_ms": 24, "ratio_png_to_webp": 5.38 }
+    ],
+    "container_via_ffmpeg_libwebp_q80": { "encode_ms_first_call": 42, "webp_bytes": 10550, "png_bytes": 56634, "note": "Debian ffmpeg has libwebp natively; no PIL needed in container" }
+  },
+  "dependency_footprint": {
+    "ffmpeg_host_macos": "present (Homebrew), but Homebrew build lacks libwebp + drawtext",
+    "yt_dlp_toolchain": { "yt_dlp_venv_mb": 14, "python_runtime_mb": 88, "total_mb": 102, "note": "requires a Python runtime; pip blocked by PEP 668, needed pipx" },
+    "windows_arm": {
+      "type": "ANALYSIS (not measured — cannot execute Windows ARM on this host)",
+      "ffmpeg_winarm64": "AVAILABLE — BtbN publishes stable winarm64 builds (n7.1, n8.1; gpl/lgpl; shared/static)",
+      "yt_dlp_winarm64": "AVAILABLE — yt-dlp_arm64.exe + yt-dlp_win_arm64.zip published, but bundles a Python interpreter (PyInstaller-style)"
+    }
+  },
+  "container_image_sizes": {
+    "base_dotnet_runtime_10": "326MB",
+    "plus_ffmpeg": "869MB (+543MB over base)",
+    "plus_ffmpeg_python_ytdlp": "985MB (+659MB over base, +116MB over ffmpeg-only)",
+    "build_time_ffmpeg_s": 30.48,
+    "build_time_ffmpeg_ytdlp_s": 36.44,
+    "platform": "linux/arm64"
+  },
+  "failure_modes": {
+    "audio_only_input": { "pathA": "clean error 'Output file does not contain any stream', exit 234, NO file produced", "pathB": "identical — NO file produced" },
+    "truncated_download": { "pathA": "clean error 'moov atom not found', exit 183, NO file produced", "pathB": "identical — NO file produced" },
+    "non_keyframe_seek": "lands 1 frame late (frame_error=1, ~30ms at 30fps) — ffmpeg -ss decodes accurately to next frame at/after target",
+    "ytdlp_download_sections": "FAILED with ffmpeg exit 183 on faststart-less mp4 (moov at end) — yt-dlp's only time-window feature is brittle and re-encodes"
+  },
+  "verdicts": {
+    "frame_quality": "PROVEN ffmpeg — keyframe-aligned seeks pixel-identical (PSNR=inf)",
+    "timestamp_accuracy": "PROVEN ffmpeg — 0 frame error keyframe, +1 frame non-keyframe (within 1 frame)",
+    "file_size_webp_encode_cost": "PROVEN — WebP ~4.3-5.4x smaller than PNG, encode 6-25ms (PIL host) / 42ms (libwebp container first-call)",
+    "wall_clock_speed": "PROVEN ffmpeg — extract 44-80ms; Path B adds 363-394ms download (local best-case)",
+    "dependency_footprint_per_platform": "PROVEN ffmpeg — single binary, no runtime; yt-dlp adds ~102MB Python toolchain. macOS/Linux/Windows-ARM all have ffmpeg.",
+    "temp_media_lifecycle_quota_fit": "PROVEN ffmpeg — operates on already-downloaded temp file inside Task 6.4 lifecycle; Path B re-downloads outside it",
+    "failure_modes": "PROVEN ffmpeg — clean no-file failures on audio-only + truncated; feeds 7.5 placeholder/retry design",
+    "container_operational_complexity": "PROVEN ffmpeg — +543MB single apt layer; yt-dlp adds +116MB Python + pip. Container ffmpeg has libwebp natively."
+  }
+}

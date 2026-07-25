@@ -1,0 +1,2 @@
+FROM mcr.microsoft.com/dotnet/runtime:10.0
+RUN echo "base runtime image, no media tools"

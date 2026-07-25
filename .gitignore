@@ -503,3 +503,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Throwaway spike outputs: regenerable fixtures + measurement results
+spikes/StreamingDigest.ScreenshotPrototype/fixtures/
+spikes/StreamingDigest.ScreenshotPrototype/results/
