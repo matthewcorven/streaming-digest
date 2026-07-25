@@ -1,0 +1,246 @@
+@page "/ingestion/runs/{RunId}"
+@inject IIngestionRunDetailFixtureService FixtureService
+
+<PageTitle>@(CurrentRun?.Title ?? "Ingestion run")</PageTitle>
+
+<div class="ingestion-detail-page">
+    @if (CurrentRun is null)
+    {
+        <div class="empty-state">
+            <h1>Run not found</h1>
+            <p>@ErrorMessage</p>
+            <a class="action-link" href="/ingestion">Browse fixtures</a>
+        </div>
+    }
+    else
+    {
+        <div class="page-heading">
+            <div>
+                <a class="back-link" href="/ingestion">← Ingestion runs</a>
+                <p class="eyebrow">Operational detail</p>
+                <h1>@CurrentRun.Title</h1>
+                <p class="page-description">@CurrentRun.Subtitle</p>
+            </div>
+            <div class="header-actions">
+                @foreach (var link in CurrentRun.Links)
+                {
+                    <a class="action-link" href="@link.Url" target="_blank" rel="noreferrer">@link.Label</a>
+                }
+                <button class="action-button" type="button">Retry failed</button>
+            </div>
+        </div>
+
+        <div class="status-pill">@CurrentRun.StatusText</div>
+        <p class="page-description">@CurrentRun.Description</p>
+
+        @if (CurrentRun.HasActiveDeferments)
+        {
+            <section class="deferment-banner">
+                <div>
+                    <p class="eyebrow">Active deferments</p>
+                    <h2>Rate-limit pause is active</h2>
+                    <p>@CurrentRun.DefermentBanner</p>
+                </div>
+                <div class="deferment-list">
+                    @foreach (var deferment in CurrentRun.Deferments)
+                    {
+                        <div class="deferment-card">
+                            <strong>@deferment.Scope</strong>
+                            <p>@deferment.Reason</p>
+                            <span>@deferment.ResumeLabel</span>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+
+        <p class="outcome-note">
+            @(CurrentRun.IsCompleted
+                ? "The run outcome is frozen at completion. The live rollup below reflects the current item states after any later retries."
+                : "The run outcome below is paired with the current item-state rollup so operators can compare the recorded result with the latest state.")
+        </p>
+
+        <section class="outcome-grid">
+            <article class="outcome-card">
+                <p class="eyebrow">Frozen run outcome</p>
+                <h2>@CurrentRun.FrozenOutcome.Heading</h2>
+                <p>@CurrentRun.FrozenOutcome.Caption</p>
+                <dl>
+                    <div><dt>Channels</dt><dd>@CurrentRun.FrozenOutcome.Channels</dd></div>
+                    <div><dt>Found</dt><dd>@CurrentRun.FrozenOutcome.FoundVideos</dd></div>
+                    <div><dt>Processed</dt><dd>@CurrentRun.FrozenOutcome.ProcessedVideos</dd></div>
+                    <div><dt>Failed</dt><dd>@CurrentRun.FrozenOutcome.FailedVideos</dd></div>
+                    <div><dt>Repos</dt><dd>@CurrentRun.FrozenOutcome.Repositories</dd></div>
+                    <div><dt>Sites</dt><dd>@CurrentRun.FrozenOutcome.Websites</dd></div>
+                </dl>
+            </article>
+            <article class="outcome-card live-card">
+                <p class="eyebrow">Live rollup</p>
+                <h2>@CurrentRun.LiveRollup.Heading</h2>
+                <p>@CurrentRun.LiveRollup.Caption</p>
+                <dl>
+                    <div><dt>Channels</dt><dd>@CurrentRun.LiveRollup.Channels</dd></div>
+                    <div><dt>Found</dt><dd>@CurrentRun.LiveRollup.FoundVideos</dd></div>
+                    <div><dt>Processed</dt><dd>@CurrentRun.LiveRollup.ProcessedVideos</dd></div>
+                    <div><dt>Failed</dt><dd>@CurrentRun.LiveRollup.FailedVideos</dd></div>
+                    <div><dt>Repos</dt><dd>@CurrentRun.LiveRollup.Repositories</dd></div>
+                    <div><dt>Sites</dt><dd>@CurrentRun.LiveRollup.Websites</dd></div>
+                </dl>
+            </article>
+        </section>
+
+        <section class="section-card">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Timeline</p>
+                    <h2>Stage timeline</h2>
+                </div>
+                <p class="muted">The progress bars below mirror the run's per-stage rollup at the time the run completed.</p>
+            </div>
+            <div class="timeline-list">
+                @foreach (var stage in CurrentRun.Stages)
+                {
+                    var percent = GetProgressPercent(stage.Completed, stage.Total);
+                    <div class="timeline-step">
+                        <div class="timeline-header">
+                            <strong>@stage.Name</strong>
+                            <span class="status-pill status-@GetStatusClass(stage.Status)">@stage.Status</span>
+                        </div>
+                        <div class="progress-track"><div class="progress-fill" style="width: @percent%"></div></div>
+                        <p>@stage.Completed / @stage.Total completed · @stage.Detail</p>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="section-card">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Videos</p>
+                    <h2>Per-item status</h2>
+                </div>
+                <p class="muted">Each item shows its current roster of statuses, extracted resources, and retry history.</p>
+            </div>
+            <div class="item-list">
+                @foreach (var item in CurrentRun.Items)
+                {
+                    <article class="item-card">
+                        <div class="item-summary">
+                            <div>
+                                <div class="item-title-row">
+                                    <h3>@item.Title</h3>
+                                    <span class="status-pill status-@GetStatusClass(item.Status)">@item.Status</span>
+                                </div>
+                                <p>@item.Channel · stage @item.Stage</p>
+                            </div>
+                            <div class="item-actions">
+                                @if (item.CanRetry)
+                                {
+                                    <button class="action-button" type="button">Retry</button>
+                                }
+                                <button class="secondary-button" type="button" @onclick="() => ToggleExpanded(item.Id)">@(IsExpanded(item.Id) ? "Collapse" : "Expand")</button>
+                            </div>
+                        </div>
+                        @if (IsExpanded(item.Id))
+                        {
+                            <div class="item-details">
+                                @if (!string.IsNullOrWhiteSpace(item.FailureSummary))
+                                {
+                                    <p class="failure-summary">@item.FailureSummary</p>
+                                }
+                                <div class="detail-grid">
+                                    <div class="detail-block">
+                                        <h4>Statuses</h4>
+                                        <ul>
+                                            <li>Transcript: @item.TranscriptStatus</li>
+                                            <li>Screenshot: @item.ScreenshotStatus</li>
+                                            <li>Embedding: @item.EmbeddingStatus</li>
+                                        </ul>
+                                    </div>
+                                    <div class="detail-block">
+                                        <h4>Extracted resources</h4>
+                                        <ul>
+                                            <li>Links: @item.LinkCount</li>
+                                            <li>Repositories: @item.RepositoryCount</li>
+                                            <li>Websites: @item.WebsiteCount</li>
+                                        </ul>
+                                    </div>
+                                    <div class="detail-block">
+                                        <h4>Retry history</h4>
+                                        @if (item.RetryHistory.Count == 0)
+                                        {
+                                            <p>No retry history recorded yet.</p>
+                                        }
+                                        else
+                                        {
+                                            <ul>
+                                                @foreach (var history in item.RetryHistory)
+                                                {
+                                                    <li><strong>@history.Label</strong> · @history.Detail</li>
+                                                }
+                                            </ul>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </article>
+                }
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string? RunId { get; set; }
+
+    private IngestionRunDetailViewModel? CurrentRun { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private readonly HashSet<string> ExpandedItemIds = [];
+
+    protected override void OnParametersSet()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(RunId))
+            {
+                CurrentRun = null;
+                ErrorMessage = "No run id was supplied.";
+                return;
+            }
+
+            CurrentRun = FixtureService.GetRun(RunId);
+            ErrorMessage = string.Empty;
+        }
+        catch (KeyNotFoundException ex)
+        {
+            CurrentRun = null;
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private bool IsExpanded(string itemId) => ExpandedItemIds.Contains(itemId);
+
+    private void ToggleExpanded(string itemId)
+    {
+        if (ExpandedItemIds.Contains(itemId))
+        {
+            ExpandedItemIds.Remove(itemId);
+        }
+        else
+        {
+            ExpandedItemIds.Add(itemId);
+        }
+    }
+
+    private static string GetStatusClass(string status) => status.ToLowerInvariant() switch
+    {
+        "done" or "processed" => "ready",
+        "warning" or "failed" => "warning",
+        "deferred" => "deferred",
+        _ => "neutral",
+    };
+
+    private static string GetProgressPercent(int completed, int total) => total == 0 ? "0" : ((int)Math.Round(completed * 100d / total)).ToString();
+}
