@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+<PropertyGroup>
+  <TargetFramework>net10.0</TargetFramework>
+  <Nullable>enable</Nullable>
+  <ImplicitUsings>enable</ImplicitUsings>
+</PropertyGroup>
+
+<ItemGroup>
+  <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.9" />
+  <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
+  <PackageReference Include="Npgsql" Version="10.0.3" />
+</ItemGroup>
+
+<ItemGroup>
+  <ProjectReference Include="..\StreamingDigest.Application\StreamingDigest.Application.csproj" />
+  <ProjectReference Include="..\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" />
+  <ProjectReference Include="..\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
+  <ProjectReference Include="..\StreamingDigest.Web\StreamingDigest.Web.csproj" />
+</ItemGroup>
+
+</Project>

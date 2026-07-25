@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/StreamingDigest.Api/StreamingDigest.Api.csproj" />
+    <Project Path="src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj" />
+    <Project Path="src/StreamingDigest.Application/StreamingDigest.Application.csproj" />
+    <Project Path="src/StreamingDigest.Domain/StreamingDigest.Domain.csproj" />
+    <Project Path="src/StreamingDigest.Infrastructure/StreamingDigest.Infrastructure.csproj" />
+    <Project Path="src/StreamingDigest.MatrixNotifier/StreamingDigest.MatrixNotifier.csproj" />
+    <Folder Name="/src/StreamingDigest.Scraper/">
+      <File Path="src/StreamingDigest.Scraper/package.json" />
+      <File Path="src/StreamingDigest.Scraper/tsconfig.json" />
+      <File Path="src/StreamingDigest.Scraper/src/index.ts" />
+    </Folder>
+    <Project Path="src/StreamingDigest.Web/StreamingDigest.Web.csproj" />
+    <Project Path="src/StreamingDigest.Worker/StreamingDigest.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/StreamingDigest.IntegrationTests/StreamingDigest.IntegrationTests.csproj" />
+    <Project Path="tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj" />
+  </Folder>
+</Solution>
