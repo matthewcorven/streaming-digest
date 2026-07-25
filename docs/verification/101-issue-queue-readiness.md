@@ -62,22 +62,31 @@ phase genuinely starts — the under-reporting is fixed without mass-unblocking.
 | #6 | [Task 1.1] | 1.0 | 0.5 | #5 |
 | #54 | [Task 2.1] | 2.0 | 1.5 | #10 |
 | #63 | [Task 3.1] | 3.0 | 2.6 | #62 |
-| #65 | [Task 4.1] | 4.0 | 4.6 | #70 |
-| #71 | [Task 5.1] | 5.0 | 5.5 | #75 |
-| #76 | [Task 6.1] | 6.0 | 6.4 | #79 |
-| #80 | [Task 7.1] | 7.0 | 7.5 | #85 |
-| #86 | [Task 8.1] | 8.0 | 8.5 | #90 |
-| #91 | [Task 9.1] | 9.0 | 9.4 | #94 |
-| #11 | [Task 10.1] | 10.0 | 10.3 | #14 |
-| #15 | [Task 11.1] | 11.0 | 11.7 | #23 |
-| #24 | [Task 12.1] | 12.0 | 12.8 | #32 |
-| #33 | [Task 13.1] | 13.0 | 13.3 | #35 |
-| #36 | [Task 14.1] | 14.0 | 14.4 | #39 |
-| #40 | [Task 15.1] | 15.0 | 15.5 | #44 |
-| #45 | [Task 16.1] | 16.0 | 16.3 | #47 |
+| #65 | [Task 4.1] | 4.0 | 3.2 | #64 |
+| #71 | [Task 5.1] | 5.0 | 4.6 | #70 |
+| #76 | [Task 6.1] | 6.0 | 5.5 | #75 |
+| #80 | [Task 7.1] | 7.0 | 4.6 | #70 |
+| #86 | [Task 8.1] | 8.0 | 7.5 | #85 |
+| #91 | [Task 9.1] | 9.0 | 8.5 | #90 |
+| #11 | [Task 10.1] | 10.0 | 9.4 | #94 |
+| #15 | [Task 11.1] | 11.0 | 5.5 | #75 |
+| #24 | [Task 12.1] | 12.0 | 5.5 | #75 |
+| #33 | [Task 13.1] | 13.0 | 8.4 | #89 |
+| #36 | [Task 14.1] | 14.0 | 13.3 | #35 |
+| #40 | [Task 15.1] | 15.0 | 14.4 | #39 |
+| #45 | [Task 16.1] | 16.0 | 15.5 | #44 |
 | #48 | [Task 17.1] | 17.0 | 16.3 | #47 |
 
 After the rewrites, a full `--state all` scan reports **zero missing referents**.
+
+> **Correction note (Run 2, 2026-07-25):** the table above is the **Run 2 corrected** map. At
+> the time of Run 2 it matched the live issue bodies exactly (17/17). The Run 1 / merged-ADR table was shifted
+> down one row from row 4 (#65 onward) — it recorded each head's *next* head's referent
+> (e.g. #65 → 4.6, #71 → 5.5) instead of its own. The live GitHub issue bodies were always
+> correct (rewritten to the true previous-phase/slice last task); only the ADR/verification
+> *table* was off-by-one. Run 2 below corrects that table; **Run 3 supersedes the live map**
+> after the later real-data-dependency ruling changed four issue bodies and cleared one
+> dependency entirely.
 
 ### Environment
 
@@ -103,3 +112,185 @@ re-runnable evidence.
   ADR-0017 but do not appear in the PR diff.
 - The new Available set includes #101 itself (this issue) — expected, since it is OPEN,
   squad-labeled, and has no dependencies.
+
+---
+
+## Run 2 — 2026-07-25 (follow-up: ADR table correction + slice-order refinement)
+
+### Scope
+
+Two post-merge review findings on the #101 work, handled on a fresh branch off `origin/main`
+(92a4c83). **The `scripts/issue_queue.py` fix is NOT reopened** — `--state all` default and the
+`_format_reference` `(missing)` helper are unchanged and verified correct.
+
+### Finding 1 — ADR/verification rewrite-map table was off-by-one (FIXED here, docs only)
+
+The merged ADR-0017 and Run 1 verification table were shifted down one row starting at #65:
+each wrong row listed the *next* head's referent, reading as a same-phase forward reference
+(#65 Task 4.1 → 4.6, #71 Task 5.1 → 5.5, … #45 Task 16.1 → 16.3). The **live GitHub issue
+bodies were always correct** — they were rewritten to the true previous-phase/slice last task.
+Only the *recorded table* was wrong. Corrected above (17/17 now match live).
+
+**Discrepancy flag for the reviewer:** a supplied "expected live values" table for this
+follow-up asserted a *different* set of live values (e.g. #76=5.5→claim OK, #80=7.5, #15=11.7,
+#24=12.8, #33=12.8, #36=14.4) that **does not match actual GitHub**. Verified directly against
+`gh issue view` on 2026-07-25: live is `#65=3.2, #71=4.6, #76=5.5, #80=4.6, #86=7.5, #91=8.5,
+#11=9.4, #15=5.5, #24=5.5, #33=8.4, #36=13.3, #40=14.4, #45=15.5, #48=16.3`. I used **live
+GitHub as the source of truth** and did not alter the (correct) live bodies. Only 3 of the
+supplied table's rows matched live (#65=3.2, #71=4.6, #86=7.5); the other 14 were the
+*pre-correction* shifted values, suggesting the supplied table was generated from the stale
+ADR, not from live. This is called out so the discrepancy is investigated rather than
+silently propagated.
+
+**Proof command** (ADR table vs live, prints 17× OK):
+
+```bash
+python3 - <<'PY'
+import subprocess, re
+heads=[6,54,63,65,71,76,80,86,91,11,15,24,33,36,40,45,48]
+adr=open('docs/adr/0017-phase-gate-task-x0-references.md').read()
+for n in heads:
+    b=subprocess.run(['gh','issue','view',str(n),'--repo','matthewcorven/streaming-digest',
+      '--json','body','--jq','.body'],capture_output=True,text=True).stdout
+    dep=re.search(r'## Depends On\s*([\s\S]*?)## Blocked By',b)
+    live=re.search(r'(\d+\.\d+[a-z]?)',dep.group(1)).group(1)
+    m=re.search(r'\| #%d \[Task [^\]]+\] \| [\d.]+ \| ([\d.a-z]+) \| #(\d+) \|'%n,adr)
+    print(n, live, m.group(1), 'OK' if m.group(1)==live else 'MISMATCH')
+PY
+```
+
+### Finding 2 — slice-order refinement + 4 flagged edges (LEFT AS-IS, flagged for user ruling)
+
+The merged ADR quoted the plan's *"phase numbering is a reference grouping, not the build
+order"* and then encoded numeric phase order — a self-contradiction. The convention is now
+corrected in ADR-0017 to: **a head's gate is completion of the previous *slice* in execution
+order** (which coincides with the previous numeric phase for 13 of 17 heads, and differs for
+the 4 below).
+
+A review flagged 4 live edges as candidates that may invert slice build order. Re-pointing is
+a **scheduling decision** (changes when work becomes available), not data cleanup, so per the
+ruling's hard constraints these were **left as-is and flagged** rather than guessed. All 4 are
+currently **Blocked** in the live queue (none Available), and every live referent is a real
+OPEN issue — nothing is mass-unblocked, and no re-point could silently release work:
+
+| Head | Slice | Live edge | Note |
+|---|---|---|---|
+| #15 [Task 11.1] | 5 | → 5.5 / #75 | Phase 11 is inside slice 5; a phase-number edge (11.6) would be a forward ref into the head's own slice. Live is slice-consistent. |
+| #24 [Task 12.1] | 5 | → 5.5 / #75 | Phase 12 split across slices 5/12; 12.1 is the slice-5 "early 12" part. Live is slice-consistent. |
+| #80 [Task 7.1] | 6 | → 4.6 / #70 | Phase 6 split across slices 5/9/10; a Phase-6 referent would be slice-inconsistent. Live is slice-consistent. |
+| #33 [Task 13.1] | 11 | → 8.4 / #89 | Phase 13 is slice 11; current referent 8.4 (#89, slice 9). Live is slice-consistent. |
+
+**Status:** open questions for the user. Any change requires an explicit user scheduling
+ruling. **Ambiguity honestly noted:** "early 12" (slice 5's Phase-12 portion) is not enumerated
+task-by-task in the plan, so the exact slice-5/slice-12 boundary within Phase 12 is not
+machine-derivable from the plan text alone — reinforcing that these 4 are judgment calls, not
+mechanical fixes.
+
+### Queue state — BEFORE vs AFTER this follow-up
+
+This follow-up changed **documentation only** (ADR-0017 + this evidence). No issue bodies were
+modified, so the queue is unchanged by it. Both runs below are `python3 scripts/issue_queue.py
+--repo matthewcorven/streaming-digest --limit 100 --format text`:
+
+- **missing referents = 0** (confirmed `--state all`, before and after)
+- Available = **9**: #2, #12, #29, #53, #57, #58, #59, #83, #85
+- Next available = **#2** [Task 0.2]
+- Blocked = **82** (squad task issues); Untriaged = 0; Member-assigned = 91; Open PR = 0; Draft PR = 0
+- None of the 4 flagged heads (#15, #24, #80, #33) is Available — all remain Blocked.
+  **(AFTER == BEFORE: no issue-body change was made.)**
+
+---
+
+## Run 3 — 2026-07-25 (user ruling applied: real data dependency, per-edge justification)
+
+### Scope
+
+The user ruled that the governing convention is **real data/capability dependency**, not
+previous-slice adjacency and not "points backward, therefore fine." This pass updates the live
+GitHub issue bodies where the ruled derivation changed, rewrites ADR-0017 to record the new
+rule plainly, regenerates the ADR table from live state, and keeps this evidence plus the JSON
+companion in sync.
+
+### Ruling adopted
+
+> A bare `Task X.0` ref is rewritten to the task that produces the data or capability the head
+> actually consumes. Where that coincides with the previous phase's last task, the edge is
+> unremarkable. Where it does not, the ADR records why. Every retained edge must point backward
+> in execution order; an edge is never satisfied by mere numeric adjacency.
+
+This overturned the temporary Run 2 framing of "previous slice" as the governing rule. Slice
+order remains corroborating evidence only.
+
+### Per-edge verdicts
+
+| Head | Run 2 live edge | Run 3 live edge | Verdict |
+|---|---|---|---|
+| #15 [Task 11.1] | 5.5 / #75 | 5.5 / #75 | **Confirmed as-is.** Effective-value service first consumes the editable scraped video fields produced by Phase 5 ingestion. |
+| #24 [Task 12.1] | 5.5 / #75 | 11.2 / #16 | **Changed.** Task body says `Search over search_documents`; the real prerequisite is the search-document generator, not merely raw ingested video metadata. This overturns the earlier "Phase 5 is enough" reading. |
+| #33 [Task 13.1] | 8.4 / #89 | 11.1 / #15 | **Changed.** Override APIs are built on the `original` / `override` / `effective` contract and `field_override_history`, so the enabling capability is the effective-value service, not Local LLM classification. This overturns both the old `8.4` edge and the suggestion that a later embedding task was the first honest gate. |
+| #36 [Task 14.1] | 13.3 / #35 | None | **Changed.** SDK selection is a research/evaluation task with no upstream issue dependency. This overturns both the old `13.3` edge and the earlier suggestion that a stored-Digest task should gate SDK selection. |
+| #80 [Task 7.1] | 4.6 / #70 | 5.5 / #75 | **Changed.** Author chapters come from yt-dlp metadata ingestion; Hangfire concurrency tests produce nothing Task 7.1 consumes. |
+
+### Current live rewrite map (regenerated from GitHub after the body edits)
+
+| Issue | Head | Old ref | Current live ref | Current referent |
+|---|---|---|---|---|
+| #6 | [Task 1.1] | 1.0 | 0.5 | #5 |
+| #54 | [Task 2.1] | 2.0 | 1.5 | #10 |
+| #63 | [Task 3.1] | 3.0 | 2.6 | #62 |
+| #65 | [Task 4.1] | 4.0 | 3.2 | #64 |
+| #71 | [Task 5.1] | 5.0 | 4.6 | #70 |
+| #76 | [Task 6.1] | 6.0 | 5.5 | #75 |
+| #80 | [Task 7.1] | 7.0 | 5.5 | #75 |
+| #86 | [Task 8.1] | 8.0 | 7.5 | #85 |
+| #91 | [Task 9.1] | 9.0 | 8.5 | #90 |
+| #11 | [Task 10.1] | 10.0 | 9.4 | #94 |
+| #15 | [Task 11.1] | 11.0 | 5.5 | #75 |
+| #24 | [Task 12.1] | 12.0 | 11.2 | #16 |
+| #33 | [Task 13.1] | 13.0 | 11.1 | #15 |
+| #36 | [Task 14.1] | 14.0 | None | None |
+| #40 | [Task 15.1] | 15.0 | 14.4 | #39 |
+| #45 | [Task 16.1] | 16.0 | 15.5 | #44 |
+| #48 | [Task 17.1] | 17.0 | 16.3 | #47 |
+
+**Coincidence recount:** under the final real-dependency rule, **12 of the 17** heads still
+coincide with the previous numeric phase's last task. The five divergences are `#15`, `#24`,
+`#33`, `#36`, and `#80`.
+
+### Queue state — BEFORE vs AFTER the Run 3 body edits
+
+Before the Run 3 issue-body edits:
+
+- missing referents = **0**
+- Available = **9**: #2, #12, #29, #53, #57, #58, #59, #83, #85
+- Next available = **#2**
+- Blocked = **82**
+
+After the Run 3 issue-body edits:
+
+- missing referents = **0**
+- Available = **10**: #2, #12, #29, #36, #53, #57, #58, #59, #83, #85
+- Next available = **#2**
+- Blocked = **81**
+
+**Attributed delta:** exactly **one** issue moved from Blocked to Available: `#36 [Task 14.1]`.
+Cause: the ruled derivation found that SDK selection has **no upstream issue dependency**, so
+its `## Depends On` section was correctly cleared. No other head silently flipped state. `#15`,
+`#24`, `#33`, and `#80` all remain Blocked behind real OPEN issues.
+
+### Labels audited on touched issues
+
+- `#24` — `squad`, `squad:neo`, `phase-12`, `slice-5`
+- `#33` — `squad`, `squad:tank`, `phase-13`, `slice-11`
+- `#36` — `squad`, `squad:dozer`, `phase-14`, `slice-13`
+- `#80` — `squad`, `squad:tank`, `phase-7`, `slice-6`
+
+No auto-triage cleanup was required in this pass.
+
+### Out-of-scope new finding
+
+`#36` no longer carries the stored-Digest / notification dependency that earlier adjacency-based
+gating accidentally smuggled in. If the Matrix notification path needs an explicit Digest
+dependency, that dependency belongs on the **implementation** issues (`#37` / `#38`), not on
+SDK selection. This is a new finding, not a correction to the phase-head rewrite map, so it is
+flagged here rather than silently expanding the PR's scope.
