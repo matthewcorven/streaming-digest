@@ -24,6 +24,12 @@ def get_repo_name() -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Discover the next GitHub issues that are ready to work on based on their issue-body dependency sections.")
+    parser.add_argument(
+        "--mode",
+        choices=["queue", "status"],
+        default="queue",
+        help="Output mode: queue preserves the existing ready-vs-blocked view; status adds Ralph/board counts.",
+    )
     parser.add_argument("--repo", default=None, help="GitHub repository (owner/repo). Defaults to the current repo.")
     parser.add_argument("--state", default="open", choices=["open", "all"], help="Issue state to inspect (default: open).")
     parser.add_argument("--label", action="append", default=None, help="Label to include. Repeat for multiple labels. Defaults to squad.")
@@ -88,6 +94,43 @@ def parse_section_references(body: str, heading: str) -> List[str]:
 def has_label(issue: Dict[str, object], label_name: str) -> bool:
     labels = issue.get("labels", []) or []
     return any((label.get("name") or "").lower() == label_name.lower() for label in labels)
+
+
+def has_member_label(issue: Dict[str, object]) -> bool:
+    labels = issue.get("labels", []) or []
+    return any((label.get("name") or "").lower().startswith("squad:") for label in labels)
+
+
+def fetch_issues(repo: str, state: str, limit: int) -> List[Dict[str, object]]:
+    command_args = [
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        state,
+        "--limit",
+        str(limit),
+        "--json",
+        "number,title,body,state,labels",
+    ]
+    return json.loads(run_gh(command_args))
+
+
+def fetch_pull_requests(repo: str, limit: int) -> List[Dict[str, object]]:
+    command_args = [
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--limit",
+        str(limit),
+        "--json",
+        "number,title,isDraft",
+    ]
+    return json.loads(run_gh(command_args))
 
 
 def build_issue_index(issues: List[Dict[str, object]]) -> Dict[str, Dict[str, object]]:
@@ -159,7 +202,7 @@ def build_issue_summaries(issues: List[Dict[str, object]], issue_index: Dict[str
     return summaries
 
 
-def format_text(result: Dict[str, object]) -> str:
+def format_queue_text(result: Dict[str, object]) -> str:
     lines = [f"Repository: {result['repo']}", f"State: {result['state']}", ""]
 
     if result.get("next_available"):
@@ -203,25 +246,71 @@ def format_text(result: Dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def format_status_text(result: Dict[str, object]) -> str:
+    lines = [f"Repository: {result['repo']}", f"State: {result['state']}", "", "Board status:"]
+
+    next_available = result.get("next_available")
+    if next_available:
+        lines.append(f"- Next available: #{next_available['number']} {next_available['title']}")
+    else:
+        lines.append("- Next available: none")
+
+    lines.append(f"- Available count: {result['available_count']}")
+    lines.append(f"- Blocked count: {result['blocked_count']}")
+    lines.append(f"- Untriaged squad issues: {result['untriaged_count']}")
+    lines.append(f"- Member-assigned squad issues: {result['assigned_count']}")
+    lines.append(f"- Open PR count: {result['open_pr_count']}")
+    lines.append(f"- Draft PR count: {result['draft_pr_count']}")
+    lines.append("")
+
+    lines.append("Available:")
+    available = result.get("available") or []
+    if available:
+        for issue in available:
+            lines.append(f"- #{issue['number']} {issue['title']}")
+    else:
+        lines.append("- none")
+
+    lines.append("")
+    lines.append("Blocked:")
+    blocked = result.get("blocked") or []
+    if blocked:
+        for issue in blocked:
+            reasons = []
+            if issue.get("unresolved_dependencies"):
+                deps = ", ".join(
+                    f"#{entry['resolved']['number']}" if entry.get("resolved") else entry["reference"]
+                    for entry in issue["unresolved_dependencies"]
+                )
+                reasons.append(f"depends on {deps}")
+            if issue.get("unresolved_blockers"):
+                blockers = ", ".join(
+                    f"#{entry['resolved']['number']}" if entry.get("resolved") else entry["reference"]
+                    for entry in issue["unresolved_blockers"]
+                )
+                reasons.append(f"blocked by {blockers}")
+            lines.append(f"- #{issue['number']} {issue['title']} ({'; '.join(reasons)})")
+    else:
+        lines.append("- none")
+
+    lines.append("")
+    lines.append("Untriaged squad issues:")
+    untriaged = result.get("untriaged") or []
+    if untriaged:
+        for issue in untriaged:
+            lines.append(f"- #{issue['number']} {issue['title']}")
+    else:
+        lines.append("- none")
+
+    return "\n".join(lines)
+
+
 def main() -> int:
     args = parse_args()
     repo = args.repo or get_repo_name()
     labels = [label for label in (args.label or ["squad"]) if label]
 
-    command_args = [
-        "issue",
-        "list",
-        "--repo",
-        repo,
-        "--state",
-        args.state,
-        "--limit",
-        str(args.limit),
-        "--json",
-        "number,title,body,state,labels",
-    ]
-    stdout = run_gh(command_args)
-    issues = json.loads(stdout)
+    issues = fetch_issues(repo, args.state, args.limit)
 
     filtered_issues = [issue for issue in issues if not issue.get("pull_request")]
     if labels:
@@ -232,7 +321,7 @@ def main() -> int:
     available = [issue for issue in summaries if issue["state"] == "OPEN" and not issue["is_blocked"]]
     blocked = [issue for issue in summaries if issue["state"] == "OPEN" and issue["is_blocked"]]
 
-    result = {
+    queue_result = {
         "repo": repo,
         "state": args.state,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -241,10 +330,32 @@ def main() -> int:
         "blocked": blocked,
     }
 
+    if args.mode == "status":
+        open_issues = issues if args.state == "open" else fetch_issues(repo, "open", args.limit)
+        open_squad_issues = [issue for issue in open_issues if has_label(issue, "squad")]
+        untriaged = [issue for issue in open_squad_issues if not has_member_label(issue)]
+        assigned = [issue for issue in open_squad_issues if has_member_label(issue)]
+        pull_requests = fetch_pull_requests(repo, args.limit)
+
+        result = {
+            **queue_result,
+            "mode": "status",
+            "available_count": len(available),
+            "blocked_count": len(blocked),
+            "untriaged_count": len(untriaged),
+            "assigned_count": len(assigned),
+            "untriaged": [{"number": int(issue["number"]), "title": str(issue.get("title") or "")} for issue in untriaged],
+            "open_pr_count": len(pull_requests),
+            "draft_pr_count": sum(1 for pr in pull_requests if pr.get("isDraft")),
+        }
+    else:
+        result = queue_result
+
     if args.format == "json":
         print(json.dumps(result, indent=2))
     else:
-        print(format_text(result))
+        formatter = format_status_text if args.mode == "status" else format_queue_text
+        print(formatter(result))
 
     return 0
 

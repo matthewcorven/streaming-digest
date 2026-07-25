@@ -140,10 +140,10 @@ or "install the update", follow the upgrade flow in the reference file.
 
 ### Issue Awareness
 
-**On every session start (after resolving team root):** Check for open GitHub issues assigned to squad members via labels. Use the GitHub CLI or API to list issues with `squad:*` labels:
+**On every session start (after resolving team root):** Check open member-scoped queues with the issue helper. For Ralph status / queue status, the helper is mandatory and raw `gh issue list` output is not authoritative.
 
 ```
-gh issue list --label "squad:{member-name}" --state open --json number,title,labels,body --limit 10
+python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --label squad:{member-name}
 ```
 
 For each squad member with assigned issues, note them in the session context. When presenting a catch-up or when the user asks for status, include pending issues:
@@ -813,6 +813,8 @@ Before connecting to a GitHub repository, verify that the `gh` CLI is available 
 Ralph is the always-on work monitor. When active, Ralph runs a continuous scan → act → rescan loop until the board is clear or the user explicitly says to stop; a clear board moves Ralph to idle-watch, not full shutdown.
 
 Do not pause for permission between work items when Ralph is active.
+
+For Ralph status / queue status requests, Ralph MUST first run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output; raw GitHub queries are follow-up only after the helper identifies the specific issue or PR to inspect.
 
 **On-demand reference:** Read `.squad/templates/ralph-reference.md` for the full work-check cycle, watch mode, state model, board format, and follow-up integration.
 

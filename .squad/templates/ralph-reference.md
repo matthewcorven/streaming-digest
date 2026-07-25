@@ -19,7 +19,7 @@ Ralph always appears in `team.md`: `| Ralph | Work Monitor | — | 🔄 Monitor 
 | User says | Action |
 |-----------|--------|
 | "Ralph, go" / "Ralph, start monitoring" / "keep working" | Activate work-check loop |
-| "Ralph, status" / "What's on the board?" / "How's the backlog?" | Run one work-check cycle, report results, don't loop |
+| "Ralph, status" / "What's on the board?" / "How's the backlog?" | Run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`, report results, don't loop |
 | "Ralph, check every N minutes" | Set idle-watch polling interval |
 | "Ralph, idle" / "Take a break" / "Stop monitoring" | Fully deactivate (stop loop + idle-watch) |
 | "Ralph, scope: just issues" / "Ralph, skip CI" | Adjust what Ralph monitors this session |
@@ -30,21 +30,13 @@ These are intent signals, not exact strings — match meaning, not words.
 
 When Ralph is active, run this check cycle after every batch of agent work completes (or immediately on activation):
 
-**Step 1 — Scan for work** (run these in parallel):
+**Step 1 — Scan for work** (this helper is the canonical first command):
 
 ```bash
-# Untriaged issues (labeled squad but no squad:{member} sub-label)
-gh issue list --label "squad" --state open --json number,title,labels,assignees --limit 20
-
-# Member-assigned issues (labeled squad:{member}, still open)
-gh issue list --state open --json number,title,labels,assignees --limit 20 | # filter for squad:* labels
-
-# Open PRs from squad members
-gh pr list --state open --json number,title,author,labels,isDraft,reviewDecision --limit 20
-
-# Draft PRs (agent work in progress)
-gh pr list --state open --draft --json number,title,author,labels,checks --limit 20
+python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status
 ```
+
+**MUST / NEVER rule:** Ralph MUST use the helper above for Ralph status, queue status, and initial board scans. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output or ad hoc label filtering. Use targeted `gh issue view`, `gh pr view`, or `gh pr list` only after the helper identifies the specific issue or PR that needs follow-up.
 
 **Step 2 — Categorize findings:**
 
