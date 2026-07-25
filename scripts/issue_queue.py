@@ -31,7 +31,16 @@ def parse_args() -> argparse.Namespace:
         help="Output mode: queue preserves the existing ready-vs-blocked view; status adds Ralph/board counts.",
     )
     parser.add_argument("--repo", default=None, help="GitHub repository (owner/repo). Defaults to the current repo.")
-    parser.add_argument("--state", default="open", choices=["open", "all"], help="Issue state to inspect (default: open).")
+    parser.add_argument(
+        "--state",
+        default="all",
+        choices=["open", "all"],
+        help=(
+            "Issue state to fetch for dependency resolution (default: all). "
+            "Closed issues are used only to resolve Depends On / Blocked By references and never appear in output lists. "
+            "Use 'open' to reproduce the legacy resolution view."
+        ),
+    )
     parser.add_argument("--label", action="append", default=None, help="Label to include. Repeat for multiple labels. Defaults to squad.")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="Output format (default: json).")
     parser.add_argument("--limit", type=int, default=1000, help="Maximum issues to fetch from GitHub (default: 1000).")
@@ -172,6 +181,10 @@ def build_issue_summaries(issues: List[Dict[str, object]], issue_index: Dict[str
         depends_on = parse_section_references(body, "Depends On")
         blocked_by = parse_section_references(body, "Blocked By")
 
+        # A reference is unsatisfied only when its referent is OPEN. A CLOSED referent is
+        # satisfied (completed work cannot block). A missing referent means the referenced
+        # issue does not exist in any state — a distinct condition from an open referent,
+        # so missing entries stay flagged as missing in both JSON and text output.
         unresolved_dependencies = []
         for reference in depends_on:
             resolved = resolve_reference(reference, issue_index)
@@ -202,6 +215,14 @@ def build_issue_summaries(issues: List[Dict[str, object]], issue_index: Dict[str
     return summaries
 
 
+def _format_reference(entry: Dict[str, object]) -> str:
+    if entry.get("resolved"):
+        return f"#{entry['resolved']['number']}"
+    # Missing referent: no issue exists with this task id / number in any state.
+    # Kept visually distinct from an open referent so broken references cannot hide.
+    return f"{entry['reference']} (missing)"
+
+
 def format_queue_text(result: Dict[str, object]) -> str:
     lines = [f"Repository: {result['repo']}", f"State: {result['state']}", ""]
 
@@ -229,13 +250,13 @@ def format_queue_text(result: Dict[str, object]) -> str:
             reasons = []
             if issue.get("unresolved_dependencies"):
                 deps = ", ".join(
-                    f"#{entry['resolved']['number']}" if entry.get("resolved") else entry["reference"]
+                    _format_reference(entry)
                     for entry in issue["unresolved_dependencies"]
                 )
                 reasons.append(f"depends on {deps}")
             if issue.get("unresolved_blockers"):
                 blockers = ", ".join(
-                    f"#{entry['resolved']['number']}" if entry.get("resolved") else entry["reference"]
+                    _format_reference(entry)
                     for entry in issue["unresolved_blockers"]
                 )
                 reasons.append(f"blocked by {blockers}")
@@ -279,13 +300,13 @@ def format_status_text(result: Dict[str, object]) -> str:
             reasons = []
             if issue.get("unresolved_dependencies"):
                 deps = ", ".join(
-                    f"#{entry['resolved']['number']}" if entry.get("resolved") else entry["reference"]
+                    _format_reference(entry)
                     for entry in issue["unresolved_dependencies"]
                 )
                 reasons.append(f"depends on {deps}")
             if issue.get("unresolved_blockers"):
                 blockers = ", ".join(
-                    f"#{entry['resolved']['number']}" if entry.get("resolved") else entry["reference"]
+                    _format_reference(entry)
                     for entry in issue["unresolved_blockers"]
                 )
                 reasons.append(f"blocked by {blockers}")
@@ -331,6 +352,9 @@ def main() -> int:
     }
 
     if args.mode == "status":
+        # Board counts are always computed from OPEN issues only. When the fetch state is
+        # already "open" reuse it; otherwise make the one extra fetch. With the default
+        # "all" this costs a single additional gh call and keeps board semantics unchanged.
         open_issues = issues if args.state == "open" else fetch_issues(repo, "open", args.limit)
         open_squad_issues = [issue for issue in open_issues if has_label(issue, "squad")]
         untriaged = [issue for issue in open_squad_issues if not has_member_label(issue)]

@@ -37,3 +37,17 @@ Dozer owns orchestration, environment wiring, and container topology.
 - Windows ARM: ANALYZED not measured (can't execute) — BtbN publishes winarm64 ffmpeg builds; yt-dlp_arm64.exe bundles Python. Never present analysis as measurement.
 - Synthetic fixtures via `testsrc2` (built-in timestamp/frame counter) give OBJECTIVE ground truth: frame N at rate R = N/R s, verified by ffprobe; reference frames by exact frame number → PSNR. Better evidence than eyeballing real video.
 - No AppHost change needed for 7.4 (unlike 11.3a's production pgvector pin). Extraction runs in-process in worker; screenshot volume wiring is a 7.5 detail.
+
+## 2026-07-25 — #101: issue_queue.py readiness fix + Task X.0 phase-gate ruling
+
+📌 **Outcome: readiness bug fixed (default `--state open`→`all`); phase-gate refs ruled and rewritten; ADR-0017 written.** Evidence: `docs/verification/101-issue-queue-readiness.md` + `.json`. Decision: `docs/adr/0017-phase-gate-task-x0-references.md`. Issue #101, labels audited to exactly `squad` + `squad:dozer`.
+
+**Key learnings:**
+- The helper's `--state open` default made `fetch_issues` retrieve only OPEN issues, so a CLOSED dependency referent resolved to None and was scored UNSATISFIED — a completed prerequisite read as a blocker. The defect compounds: the more work closes, the more false blockers. Fix was the one-line default flip, NOT editing six doc files — flipping the default makes every already-documented invocation correct at once. The report filters (`state == "OPEN"`) already excluded closed issues from all output lists, so `all` is safe for resolution.
+- Verify the fix against the RIGHT baseline: pre-fix default `--mode status` was itself buggy (under-counted Available by 2). Compared after-state counts to the pre-fix `--state all` baseline (Available 10 / Blocked 82 / Untriaged 0 / Assigned 92 / PR 0/0) — identical.
+- `--state open` kept as explicit opt-in; in `--mode status` + `--state open` the open fetch is reused (no wasteful double-fetch); under the new `all` default status mode makes exactly one extra `gh` call for board counts.
+- 17 phase-chain heads depended on bare `X.0` refs with NO existing referent (no `[Task X.0]` issue in any state, zero `### Task X.0:` in the retired plan). These were migration artifacts — in the plan a phase had no body, so its first task depended on the phase itself. Plan's own sequencing says "phase numbering is a reference grouping, not the build order."
+- Ruled option (d) rewrite-to-real-issue (previous phase's last task in plan order) + (c) `(missing)` marker as safety net. Did NOT mass-unblock: each of the 17 still depends on a real OPEN issue and stays blocked until it closes. After rewrite, zero missing referents remain.
+- Added a `_format_reference` helper so a missing referent renders as `ref (missing)` in both queue and status text — a broken ref can never again masquerade as a routine open dependency. JSON already carried `missing: true`; the gap was text-only.
+- No automated test added: NO test convention covers `scripts/` (tests/ is .NET MSTest only; no pytest/conftest/CI Python job). Recorded exact reproduction commands in the verification doc instead of inventing tooling.
+- Auto-triage workflow strikes again: stamped wrong `squad:trinity` + `go:needs-research` on #101. Removed; verified exactly one owner label remains. Always audit labels after issue creation.
