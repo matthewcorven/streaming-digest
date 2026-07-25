@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "id": "dafbc06e-7e91-4712-97bb-5179d53e0076",
+    "class": "DECISION",
+    "loadGuidance": "ALWAYS",
+    "title": "Session model directive",
+    "path": ".squad/decisions/inbox/squad-session-model-directive-dafbc06e.md",
+    "status": "active",
+    "createdAt": "2026-07-25T21:05:31.860Z",
+    "updatedAt": "2026-07-25T21:05:31.860Z"
+  },
+  {
+    "id": "954e1d93-d861-4c76-ba71-e47bada25574",
+    "class": "DECISION",
+    "loadGuidance": "ALWAYS",
+    "title": "Ralph commits per issue",
+    "path": ".squad/decisions/inbox/squad-ralph-commits-per-issue-954e1d93.md",
+    "status": "active",
+    "createdAt": "2026-07-25T21:53:39.796Z",
+    "updatedAt": "2026-07-25T21:53:39.796Z"
+  },
+  {
+    "id": "8de04d46-2018-46da-b9ce-3ef29877e4de",
+    "class": "DECISION",
+    "loadGuidance": "ALWAYS",
+    "title": "Ralph delegates implementation",
+    "path": ".squad/decisions/inbox/squad-ralph-delegates-implementation-8de04d46.md",
+    "status": "active",
+    "createdAt": "2026-07-25T21:55:35.159Z",
+    "updatedAt": "2026-07-25T21:55:35.159Z"
+  }
+]
