@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Logs;
@@ -10,6 +11,7 @@ using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
 using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Infrastructure.Persistence;
+using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
 using StreamingDigest.Worker.Scraping;
@@ -46,6 +48,11 @@ builder.Services.AddOpenTelemetry()
         metrics.AddOtlpExporter(options => ConfigureOtlpExporter(options));
     });
 
+var connectionString = builder.Configuration.GetConnectionString("streamingdigest")
+    ?? builder.Configuration.GetConnectionString("postgres")
+    ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
+
+builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddHttpClient<MatrixNotificationClient>();
@@ -66,6 +73,7 @@ builder.Services.AddSingleton(sp =>
     };
 });
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
+builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 builder.Services.AddHttpClient<ScraperClient>(client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["Scraper:BaseUrl"] ?? "http://localhost:3000");
@@ -80,10 +88,6 @@ using var startupScope = CorrelationContext.BeginLoggingScope(host.Services.GetR
     ["startup"] = "worker",
     ["environment"] = environmentName
 });
-
-var connectionString = builder.Configuration.GetConnectionString("streamingdigest")
-    ?? builder.Configuration.GetConnectionString("postgres")
-    ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
 
 var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);

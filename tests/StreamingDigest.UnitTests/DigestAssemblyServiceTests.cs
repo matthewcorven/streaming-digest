@@ -1,46 +1,20 @@
-using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using StreamingDigest.Domain;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
+using StreamingDigest.MatrixNotifier;
 
 namespace StreamingDigest.UnitTests;
 
-public sealed class DigestAssemblyServiceTests : IAsyncLifetime
+public sealed class DigestAssemblyServiceTests
 {
-    private const string ImageName = "postgres:16-alpine";
-    private const string DatabaseName = "postgres";
-    private const string Username = "postgres";
-    private const string Password = "postgres";
-
-    private readonly string _containerName = $"streaming-digest-digest-tests-{Guid.NewGuid():N}";
-    private readonly int _hostPort = GetAvailablePort();
-    private string? _connectionString;
-
-    public async Task InitializeAsync()
-    {
-        await StartPostgresContainerAsync();
-        _connectionString = $"Host=127.0.0.1;Port={_hostPort};Database={DatabaseName};Username={Username};Password={Password};SslMode=Disable";
-        await WaitForPostgresAsync();
-    }
-
-    public async Task DisposeAsync()
-    {
-        await StopPostgresContainerAsync();
-    }
-
     [Fact]
     public async Task Assemble_and_persist_digest_with_transition_and_threshold_rules()
     {
-        var options = new DbContextOptionsBuilder<StreamingDigestDbContext>()
-            .UseNpgsql(_connectionString!)
-            .Options;
+        var (context, databaseFilePath) = await CreateContextAsync();
 
-        await using (var context = new StreamingDigestDbContext(options))
+        try
         {
-            await context.Database.EnsureCreatedAsync();
-
             var service = new DigestAssemblyService(context);
             var ingestionRunId = Guid.NewGuid();
 
@@ -75,44 +49,142 @@ public sealed class DigestAssemblyServiceTests : IAsyncLifetime
             Assert.Equal(0.80, payload.HighSignalThresholdPercent);
             Assert.True(payload.IsBackfillRun);
         }
-    }
-
-    private async Task StartPostgresContainerAsync()
-    {
-        var containerId = await RunProcessAsync("docker", new[]
+        finally
         {
-            "run",
-            "--rm",
-            "-d",
-            "--name",
-            _containerName,
-            "-e",
-            $"POSTGRES_USER={Username}",
-            "-e",
-            $"POSTGRES_PASSWORD={Password}",
-            "-e",
-            $"POSTGRES_DB={DatabaseName}",
-            "-p",
-            $"{_hostPort}:5432",
-            ImageName
-        });
-
-        if (string.IsNullOrWhiteSpace(containerId))
-        {
-            throw new InvalidOperationException("Docker did not return a container id for the digest assembly test container.");
+            await context.DisposeAsync();
+            DeleteDatabaseFile(databaseFilePath);
         }
     }
 
-    private async Task StopPostgresContainerAsync()
+    [Fact]
+    public async Task Assemble_and_persist_digest_persists_notification_audit_and_outbox_on_success()
     {
-        if (string.IsNullOrWhiteSpace(_containerName))
-        {
-            return;
-        }
+        var (context, databaseFilePath) = await CreateContextAsync();
 
         try
         {
-            await RunProcessAsync("docker", new[] { "rm", "-f", _containerName });
+            var fakeNotificationService = new FakeMatrixNotificationService(successOnAttempt: 1, providerMessageId: "$event-success");
+            var notificationDispatchService = new NotificationDispatchService(context, fakeNotificationService);
+            var service = new DigestAssemblyService(context, notificationDispatchService: notificationDispatchService);
+
+            var request = CreateRequest(Guid.NewGuid(), Guid.NewGuid(), "scheduled");
+            var digest = await service.AssembleAndPersistAsync(request);
+
+            var notification = await context.Notifications.SingleAsync();
+            var outboxMessage = await context.OutboxMessages.SingleAsync();
+
+            Assert.Equal(digest.IngestionRunId, notification.IngestionRunId);
+            Assert.Equal(request.OperationId, notification.OperationId);
+            Assert.Equal("matrix", notification.Provider);
+            Assert.Equal("sent", notification.Status);
+            Assert.Equal("$event-success", notification.ProviderMessageId);
+            Assert.Equal(1, notification.AttemptCount);
+            Assert.Equal("sent", outboxMessage.Status);
+            Assert.Equal(1, outboxMessage.AttemptCount);
+            Assert.NotNull(outboxMessage.SentAt);
+        }
+        finally
+        {
+            await context.DisposeAsync();
+            DeleteDatabaseFile(databaseFilePath);
+        }
+    }
+
+    [Fact]
+    public async Task Assemble_and_persist_digest_creates_retryable_outbox_state_when_delivery_fails()
+    {
+        var (context, databaseFilePath) = await CreateContextAsync();
+
+        try
+        {
+            var fakeNotificationService = new FakeMatrixNotificationService(successOnAttempt: 2, providerMessageId: "$event-retry");
+            var notificationDispatchService = new NotificationDispatchService(context, fakeNotificationService);
+            var service = new DigestAssemblyService(context, notificationDispatchService: notificationDispatchService);
+
+            var request = CreateRequest(Guid.NewGuid(), Guid.NewGuid(), "scheduled");
+            var digest = await service.AssembleAndPersistAsync(request);
+
+            var notification = await context.Notifications.SingleAsync();
+            var outboxMessage = await context.OutboxMessages.SingleAsync();
+
+            Assert.Equal(digest.IngestionRunId, notification.IngestionRunId);
+            Assert.Equal("pending", notification.Status);
+            Assert.Equal(1, notification.AttemptCount);
+            Assert.Equal("pending", outboxMessage.Status);
+            Assert.Equal(1, outboxMessage.AttemptCount);
+            Assert.NotNull(notification.NextRetryAt);
+            Assert.NotNull(outboxMessage.NextAttemptAt);
+            Assert.Contains("simulated", notification.ErrorSummary);
+        }
+        finally
+        {
+            await context.DisposeAsync();
+            DeleteDatabaseFile(databaseFilePath);
+        }
+    }
+
+    [Fact]
+    public async Task DispatchPendingAsync_retries_failed_notification_and_marks_it_sent()
+    {
+        var (context, databaseFilePath) = await CreateContextAsync();
+
+        try
+        {
+            var fakeNotificationService = new FakeMatrixNotificationService(successOnAttempt: 2, providerMessageId: "$event-retry");
+            var notificationDispatchService = new NotificationDispatchService(context, fakeNotificationService);
+            var service = new DigestAssemblyService(context, notificationDispatchService: notificationDispatchService);
+
+            var request = CreateRequest(Guid.NewGuid(), Guid.NewGuid(), "scheduled");
+            await service.AssembleAndPersistAsync(request);
+
+            var notification = await context.Notifications.SingleAsync();
+            Assert.Equal("pending", notification.Status);
+            Assert.Equal(1, notification.AttemptCount);
+
+            await notificationDispatchService.DispatchPendingAsync();
+
+            notification = await context.Notifications.SingleAsync();
+            var outboxMessage = await context.OutboxMessages.SingleAsync();
+
+            Assert.Equal("sent", notification.Status);
+            Assert.Equal("$event-retry", notification.ProviderMessageId);
+            Assert.Equal(2, notification.AttemptCount);
+            Assert.Equal("sent", outboxMessage.Status);
+            Assert.Equal(2, outboxMessage.AttemptCount);
+        }
+        finally
+        {
+            await context.DisposeAsync();
+            DeleteDatabaseFile(databaseFilePath);
+        }
+    }
+
+    private static async Task<(StreamingDigestDbContext Context, string DatabaseFilePath)> CreateContextAsync()
+    {
+        var databaseFilePath = Path.Combine(Path.GetTempPath(), $"streaming-digest-tests-{Guid.NewGuid():N}.db");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databaseFilePath,
+            Mode = SqliteOpenMode.ReadWriteCreate
+        }.ToString();
+
+        var options = new DbContextOptionsBuilder<StreamingDigestDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        var context = new StreamingDigestDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        return (context, databaseFilePath);
+    }
+
+    private static void DeleteDatabaseFile(string databaseFilePath)
+    {
+        try
+        {
+            if (File.Exists(databaseFilePath))
+            {
+                File.Delete(databaseFilePath);
+            }
         }
         catch
         {
@@ -120,62 +192,33 @@ public sealed class DigestAssemblyServiceTests : IAsyncLifetime
         }
     }
 
-    private async Task WaitForPostgresAsync()
-    {
-        for (var attempt = 0; attempt < 30; attempt++)
+    private static DigestAssemblyRequest CreateRequest(Guid ingestionRunId, Guid operationId, string runType)
+        => new()
         {
-            try
-            {
-                await using var connection = new Npgsql.NpgsqlConnection(_connectionString!);
-                await connection.OpenAsync();
-                return;
-            }
-            catch (Exception)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1));
-            }
-        }
-
-        throw new TimeoutException("Timed out waiting for the PostgreSQL digest assembly test container to become ready.");
-    }
-
-    private static async Task<string> RunProcessAsync(string fileName, IReadOnlyCollection<string> arguments)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
+            IngestionRunId = ingestionRunId,
+            OperationId = operationId,
+            RunType = runType,
+            NotificationTarget = "#matrix"
         };
 
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start process '{fileName}'.");
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"Process '{fileName}' exited with code {process.ExitCode}: {stderr}");
-        }
-
-        return stdout.Trim();
-    }
-
-    private static int GetAvailablePort()
+    private sealed class FakeMatrixNotificationService(int successOnAttempt, string? providerMessageId = null) : IMatrixNotificationService
     {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
+        private int _attempts;
+
+        public bool IsEnabled => true;
+
+        public Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, CancellationToken cancellationToken = default)
+        {
+            _attempts++;
+            if (_attempts < successOnAttempt)
+            {
+                return Task.FromResult(new MatrixSendResult(false, "simulated notifier failure"));
+            }
+
+            return Task.FromResult(new MatrixSendResult(true, "Matrix message sent.", "{\"event_id\":\"" + providerMessageId + "\"}", providerMessageId));
+        }
+
+        public Task<MatrixSendResult> SendTestNotificationAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new MatrixSendResult(true, "Matrix message sent.", "{\"event_id\":\"$test\"}", "$test"));
     }
 }
