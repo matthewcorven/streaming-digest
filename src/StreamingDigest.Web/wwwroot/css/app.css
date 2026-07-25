@@ -1,5 +1,5 @@
 html, body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
 }
 
 h1:focus {
@@ -276,6 +276,12 @@ code {
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.outcome-note {
+    margin: 0;
+    color: #53657b;
+    font-weight: 600;
+}
+
 .outcome-card {
     background: linear-gradient(180deg, #f7fbff, #ffffff);
 }
@@ -292,7 +298,7 @@ code {
 }
 
 .timeline-step {
-    border-left: 4px solid #1b6ec2;
+    border-left: 4px solid #dce5f0;
     padding-left: 0.9rem;
 }
 

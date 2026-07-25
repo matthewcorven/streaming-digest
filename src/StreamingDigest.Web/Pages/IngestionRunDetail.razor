@@ -54,6 +54,12 @@
             </section>
         }
 
+        <p class="outcome-note">
+            @(CurrentRun.IsCompleted
+                ? "The run outcome is frozen at completion. The live rollup below reflects the current item states after any later retries."
+                : "The run outcome below is paired with the current item-state rollup so operators can compare the recorded result with the latest state.")
+        </p>
+
         <section class="outcome-grid">
             <article class="outcome-card">
                 <p class="eyebrow">Frozen run outcome</p>
