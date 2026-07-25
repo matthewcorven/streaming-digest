@@ -11,6 +11,7 @@ using StreamingDigest.Application.Observability;
 using Npgsql;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Infrastructure.Persistence;
+using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.MatrixNotifier;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -66,6 +67,7 @@ builder.Services.AddSingleton(sp =>
     };
 });
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
+builder.Services.AddSingleton<INotificationDispatchService, NotificationDispatchService>();
 
 var app = builder.Build();
 

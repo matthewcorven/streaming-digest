@@ -4,7 +4,10 @@ using StreamingDigest.MatrixNotifier;
 
 namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
-public sealed class DigestAssemblyService(StreamingDigestDbContext context, IMatrixNotificationService? notificationService = null)
+public sealed class DigestAssemblyService(
+    StreamingDigestDbContext context,
+    IMatrixNotificationService? notificationService = null,
+    INotificationDispatchService? notificationDispatchService = null)
 {
     public async Task<Digest> AssembleAndPersistAsync(DigestAssemblyRequest request, CancellationToken cancellationToken = default)
     {
@@ -35,7 +38,11 @@ public sealed class DigestAssemblyService(StreamingDigestDbContext context, IMat
 
         await context.SaveChangesAsync(cancellationToken);
 
-        if (notificationService is not null)
+        if (notificationDispatchService is not null)
+        {
+            await notificationDispatchService.QueueDigestNotificationAsync(digestEntity, request.OperationId, request.NotificationTarget, cancellationToken);
+        }
+        else if (notificationService is not null)
         {
             await notificationService.SendDigestSummaryAsync(digestEntity, cancellationToken);
         }
@@ -69,7 +76,9 @@ public sealed class DigestAssemblyService(StreamingDigestDbContext context, IMat
 public sealed class DigestAssemblyRequest
 {
     public Guid IngestionRunId { get; init; }
+    public Guid? OperationId { get; init; }
     public string RunType { get; init; } = "standard";
+    public string? NotificationTarget { get; init; }
     public IReadOnlyCollection<DigestItem> NewVideos { get; init; } = Array.Empty<DigestItem>();
     public IReadOnlyCollection<DigestResource> NewResources { get; init; } = Array.Empty<DigestResource>();
     public IReadOnlyCollection<HighSignalMatch> HighSignalMatches { get; init; } = Array.Empty<HighSignalMatch>();

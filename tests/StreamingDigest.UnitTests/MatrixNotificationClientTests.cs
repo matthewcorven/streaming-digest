@@ -59,6 +59,7 @@ public sealed class MatrixNotificationClientTests
         Assert.True(result.Success);
         Assert.Equal("Matrix message sent.", result.Message);
         Assert.Contains("$event", result.ResponseBody);
+        Assert.Equal("$event", result.ProviderMessageId);
         Assert.Contains("/_matrix/client/v3/rooms/!room%3Aexample.com/send/m.room.message/", handler.RequestUri!.ToString());
     }
 

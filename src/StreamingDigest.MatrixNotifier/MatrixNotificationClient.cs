@@ -53,7 +53,8 @@ public sealed class MatrixNotificationClient
             throw new InvalidOperationException($"Matrix send failed with {(int)response.StatusCode} {response.ReasonPhrase}: {responseBody}");
         }
 
-        return new MatrixSendResult(true, "Matrix message sent.", responseBody);
+        var providerMessageId = ExtractProviderMessageId(responseBody);
+        return new MatrixSendResult(true, "Matrix message sent.", responseBody, providerMessageId);
     }
 
     public Task<MatrixSendResult> SendTestMessageAsync(CancellationToken cancellationToken = default)
@@ -90,6 +91,29 @@ public sealed class MatrixNotificationClient
             throw new InvalidOperationException("A Matrix room ID is required.");
         }
     }
+
+    private static string? ExtractProviderMessageId(string? responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(responseBody);
+            if (document.RootElement.TryGetProperty("event_id", out var eventIdElement) && eventIdElement.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return eventIdElement.GetString();
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Ignore malformed provider payloads; the notification audit will rely on the response body if needed.
+        }
+
+        return null;
+    }
 }
 
 public sealed class MatrixNotificationOptions
@@ -105,4 +129,4 @@ public sealed class MatrixNotificationOptions
     public string DashboardBaseUrl { get; init; } = "http://localhost:8080";
 }
 
-public sealed record MatrixSendResult(bool Success, string Message, string? ResponseBody = null);
+public sealed record MatrixSendResult(bool Success, string Message, string? ResponseBody = null, string? ProviderMessageId = null);
