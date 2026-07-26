@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Hangfire;
 using Hangfire.Dashboard;
+using Hangfire.MemoryStorage;
 using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -88,7 +89,27 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
     ?? builder.Configuration.GetConnectionString("postgres")
     ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
 
-builder.Services.AddHangfire(config => config.UsePostgreSqlStorage(connectionString));
+using var startupLoggerFactory = LoggerFactory.Create(logging =>
+{
+    logging.ClearProviders();
+    logging.AddSimpleConsole(options =>
+    {
+        options.SingleLine = true;
+        options.TimestampFormat = "HH:mm:ss ";
+    });
+});
+var startupLogger = startupLoggerFactory.CreateLogger("Startup");
+var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
+var hangfireStorage = databaseStatus.Connected
+    ? (JobStorage)new PostgreSqlStorage(connectionString)
+    : new MemoryStorage();
+
+if (!databaseStatus.Connected)
+{
+    startupLogger.LogWarning("Hangfire PostgreSQL connectivity is unavailable; the dashboard will use in-memory storage for this startup.");
+}
+
+builder.Services.AddHangfire(config => config.UseStorage(hangfireStorage));
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
@@ -246,7 +267,6 @@ using var startupScope = CorrelationContext.BeginLoggingScope(app.Logger, new Di
     ["environment"] = app.Environment.EnvironmentName
 });
 
-var databaseStatus = await EnsureDatabaseConnectivityAsync(app.Logger, connectionString);
 var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
 var defaultRetentionDays = StorageRetentionPolicy.ComputeObservabilityRetentionDays(StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes());
 var observabilityRuntime = await LoadObservabilityRuntimeAsync(app.Logger, builder.Configuration, builder.Environment, connectionString, databaseStatus.Connected, defaultObservabilityEnabled, defaultRetentionDays);
