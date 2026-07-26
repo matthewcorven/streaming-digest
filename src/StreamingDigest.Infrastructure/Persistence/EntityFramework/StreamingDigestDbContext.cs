@@ -9,6 +9,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     public DbSet<Video> Videos => Set<Video>();
     public DbSet<Digest> Digests => Set<Digest>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<DomainEvent> DomainEvents => Set<DomainEvent>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -17,6 +18,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
         modelBuilder.ApplyConfiguration(new VideoConfiguration());
         modelBuilder.ApplyConfiguration(new DigestConfiguration());
         modelBuilder.ApplyConfiguration(new NotificationConfiguration());
+        modelBuilder.ApplyConfiguration(new DomainEventConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
     }
 
