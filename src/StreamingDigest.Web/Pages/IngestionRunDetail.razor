@@ -1,5 +1,7 @@
 @page "/ingestion/runs/{RunId}"
+@using System.Net.Http.Json
 @inject IIngestionRunDetailFixtureService FixtureService
+@inject HttpClient Http
 
 <PageTitle>@(CurrentRun?.Title ?? "Ingestion run")</PageTitle>
 
@@ -26,9 +28,15 @@
                 {
                     <a class="action-link" href="@link.Url" target="_blank" rel="noreferrer">@link.Label</a>
                 }
-                <button class="action-button" type="button">Retry failed</button>
+                <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildRunRetryEndpoint(), GetRetryFailedLabel()))">Retry failed</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildChannelScreenshotPurgeEndpoint(), GetChannelScreenshotPurgeLabel()))">Purge screenshots (channel)</button>
             </div>
         </div>
+
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <p class="action-feedback @_statusClass">@_statusMessage</p>
+        }
 
         <div class="status-pill">@CurrentRun.StatusText</div>
         <p class="page-description">@CurrentRun.Description</p>
@@ -136,8 +144,26 @@
                             <div class="item-actions">
                                 @if (item.CanRetry)
                                 {
-                                    <button class="action-button" type="button">Retry</button>
+                                    <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildVideoRetryEndpoint(item.Id), BuildRetryLabel(item.Title)))">Retry</button>
                                 }
+                                @if (item.LinkCount > 0)
+                                {
+                                    <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildLinkRetryEndpoint(item.Id), BuildLinkRetryLabel(item.Title)))">Retry links</button>
+                                }
+                                @if (item.RepositoryCount > 0)
+                                {
+                                    <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildRepositoryRetryEndpoint(item.Id), BuildRepositoryRetryLabel(item.Title)))">Retry repo</button>
+                                }
+                                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildVideoReprocessEndpoint(item.Id), BuildReprocessLabel(item.Title)))">Reprocess</button>
+                                @if (item.RepositoryCount > 0)
+                                {
+                                    <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildRepositoryReprocessEndpoint(item.Id), BuildRepositoryReprocessLabel(item.Title)))">Reprocess repo</button>
+                                }
+                                @if (item.WebsiteCount > 0)
+                                {
+                                    <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildResourceReprocessEndpoint(item.Id), BuildResourceReprocessLabel(item.Title)))">Reprocess resource</button>
+                                }
+                                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildScreenshotPurgeEndpoint(item.Id), BuildScreenshotPurgeLabel(item.Title)))">Purge screenshots</button>
                                 <button class="secondary-button" type="button" @onclick="() => ToggleExpanded(item.Id)">@(IsExpanded(item.Id) ? "Collapse" : "Expand")</button>
                             </div>
                         </div>
@@ -198,6 +224,9 @@
     private IngestionRunDetailViewModel? CurrentRun { get; set; }
     private string ErrorMessage { get; set; } = string.Empty;
     private readonly HashSet<string> ExpandedItemIds = [];
+    private bool _isBusy;
+    private string? _statusMessage;
+    private string _statusClass = "neutral";
 
     protected override void OnParametersSet()
     {
@@ -222,6 +251,41 @@
 
     private bool IsExpanded(string itemId) => ExpandedItemIds.Contains(itemId);
 
+    private async Task TriggerActionAsync(string endpoint, string label)
+    {
+        _isBusy = true;
+        _statusMessage = $"Dispatching {label.ToLowerInvariant()}...";
+        _statusClass = "neutral";
+
+        try
+        {
+            using var response = await Http.PostAsync(endpoint, null);
+            var payload = await response.Content.ReadFromJsonAsync<AdminActionResponse>();
+
+            if (response.IsSuccessStatusCode && payload is not null)
+            {
+                _statusMessage = payload.Status is "completed" or "ok"
+                    ? $"{label} completed. {payload.Message}"
+                    : $"{label} accepted. {payload.Message}";
+                _statusClass = payload.Status is "completed" or "ok" ? "success" : "pending";
+            }
+            else
+            {
+                _statusMessage = $"{label} failed to trigger.";
+                _statusClass = "error";
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"{label} could not be triggered: {ex.Message}";
+            _statusClass = "error";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
     private void ToggleExpanded(string itemId)
     {
         if (ExpandedItemIds.Contains(itemId))
@@ -234,6 +298,42 @@
         }
     }
 
+    private string BuildRunRetryEndpoint() => $"/api/admin/operations/ingestion/runs/{CurrentRun?.Id}/retry";
+
+    private string BuildChannelScreenshotPurgeEndpoint() => $"/api/admin/operations/screenshots/purge?target=channel:{CurrentRun?.Id}";
+
+    private static string GetRetryFailedLabel() => "Retry failed";
+
+    private static string GetChannelScreenshotPurgeLabel() => "Purge screenshots (channel)";
+
+    private static string BuildVideoRetryEndpoint(string itemId) => $"/api/admin/operations/videos/{itemId}/retry";
+
+    private static string BuildVideoReprocessEndpoint(string itemId) => $"/api/admin/operations/videos/{itemId}/reprocess";
+
+    private static string BuildLinkRetryEndpoint(string itemId) => $"/api/admin/operations/links/{itemId}/retry";
+
+    private static string BuildRepositoryRetryEndpoint(string itemId) => $"/api/admin/operations/repositories/{itemId}/retry";
+
+    private static string BuildRepositoryReprocessEndpoint(string itemId) => $"/api/admin/operations/repositories/{itemId}/reprocess";
+
+    private static string BuildResourceReprocessEndpoint(string itemId) => $"/api/admin/operations/resources/{itemId}/reprocess";
+
+    private static string BuildScreenshotPurgeEndpoint(string itemId) => $"/api/admin/operations/screenshots/purge?target=video:{itemId}";
+
+    private static string BuildRetryLabel(string title) => $"Retry {title}";
+
+    private static string BuildReprocessLabel(string title) => $"Reprocess {title}";
+
+    private static string BuildLinkRetryLabel(string title) => $"Retry links for {title}";
+
+    private static string BuildRepositoryRetryLabel(string title) => $"Retry repo for {title}";
+
+    private static string BuildRepositoryReprocessLabel(string title) => $"Reprocess repo for {title}";
+
+    private static string BuildResourceReprocessLabel(string title) => $"Reprocess resource for {title}";
+
+    private static string BuildScreenshotPurgeLabel(string title) => $"Purge screenshots for {title}";
+
     private static string GetStatusClass(string status) => status.ToLowerInvariant() switch
     {
         "done" or "processed" => "ready",
@@ -243,4 +343,10 @@
     };
 
     private static string GetProgressPercent(int completed, int total) => total == 0 ? "0" : ((int)Math.Round(completed * 100d / total)).ToString();
+
+    private sealed class AdminActionResponse
+    {
+        public string? Status { get; set; }
+        public string? Message { get; set; }
+    }
 }

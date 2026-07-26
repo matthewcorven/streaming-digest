@@ -1,5 +1,7 @@
 @page "/ingestion"
+@using System.Net.Http.Json
 @inject IIngestionRunDetailFixtureService FixtureService
+@inject HttpClient Http
 
 <PageTitle>Ingestion runs</PageTitle>
 
@@ -11,6 +13,24 @@
         </div>
         <p class="page-description">These fixtures exercise the new ingestion run detail experience, including deferments, retries, and completed-run immutability messaging.</p>
     </div>
+
+    <section class="admin-actions-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Admin</p>
+                <h2>Contextual operations</h2>
+            </div>
+            <p class="page-description">Trigger ingestion and backfill flows from the current ingestion surface.</p>
+        </div>
+        <div class="action-buttons">
+            <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetRunIngestionEndpoint(), GetRunIngestionLabel()))">Run ingestion now</button>
+            <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetChannelBackfillEndpoint(), GetChannelBackfillLabel()))">Run channel backfill</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_feedbackMessage))
+        {
+            <p class="action-feedback @_feedbackClass">@_feedbackMessage</p>
+        }
+    </section>
 
     <div class="fixture-grid">
         @foreach (var fixture in FixtureService.GetFixtures())
@@ -25,3 +45,58 @@
         }
     </div>
 </div>
+
+@code {
+    private bool _isBusy;
+    private string? _feedbackMessage;
+    private string _feedbackClass = "neutral";
+
+    private string GetRunIngestionEndpoint() => "/api/admin/operations/ingestion/run";
+
+    private string GetChannelBackfillEndpoint() => "/api/admin/operations/ingestion/channel-backfill";
+
+    private static string GetRunIngestionLabel() => "Run ingestion now";
+
+    private static string GetChannelBackfillLabel() => "Run channel backfill";
+
+    private async Task TriggerActionAsync(string endpoint, string label)
+    {
+        _isBusy = true;
+        _feedbackMessage = $"Dispatching {label.ToLowerInvariant()}...";
+        _feedbackClass = "neutral";
+
+        try
+        {
+            using var response = await Http.PostAsync(endpoint, null);
+            var payload = await response.Content.ReadFromJsonAsync<AdminActionResponse>();
+
+            if (response.IsSuccessStatusCode && payload is not null)
+            {
+                _feedbackMessage = payload.Status is "completed" or "ok"
+                    ? $"{label} completed. {payload.Message}"
+                    : $"{label} accepted. {payload.Message}";
+                _feedbackClass = payload.Status is "completed" or "ok" ? "success" : "pending";
+            }
+            else
+            {
+                _feedbackMessage = $"{label} failed to trigger.";
+                _feedbackClass = "error";
+            }
+        }
+        catch (Exception ex)
+        {
+            _feedbackMessage = $"{label} could not be triggered: {ex.Message}";
+            _feedbackClass = "error";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private sealed class AdminActionResponse
+    {
+        public string? Status { get; set; }
+        public string? Message { get; set; }
+    }
+}
