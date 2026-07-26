@@ -6,12 +6,14 @@ import { chromium, type Browser, type Page } from 'playwright';
 
 const SCRAPER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0';
 const MAX_VISIBLE_TEXT_LENGTH = 200_000;
+const HOST_RATE_LIMITS = new Map<string, number>();
 
 export interface ScrapeFirstPageRequest {
   url: string;
   respectRobotsTxt: boolean;
   debugCaptureRawHtml: boolean;
   timeoutSeconds: number;
+  rateLimitDelayMs: number;
 }
 
 export interface ScrapeFirstPageResponse {
@@ -61,13 +63,15 @@ export function normalizeScrapeRequest(input: Partial<ScrapeFirstPageRequest>): 
     url: parsedUrl.toString(),
     respectRobotsTxt: input.respectRobotsTxt ?? true,
     debugCaptureRawHtml: input.debugCaptureRawHtml ?? false,
-    timeoutSeconds
+    timeoutSeconds,
+    rateLimitDelayMs: input.rateLimitDelayMs ?? 1000
   };
 }
 
 export async function scrapeFirstPage(request: Partial<ScrapeFirstPageRequest>): Promise<ScrapeFirstPageResponse> {
   const normalized = normalizeScrapeRequest(request);
   const parsedUrl = new URL(normalized.url);
+  await enforcePerHostRateLimit(parsedUrl.hostname, normalized.rateLimitDelayMs);
 
   const exclusionReason = detectExcludedUrl(parsedUrl);
   if (exclusionReason) {
@@ -237,6 +241,23 @@ async function detectLoginPage(page: Page, finalUrl: string): Promise<string | n
 async function extractVisibleText(page: Page): Promise<string> {
   const visibleText = await page.locator('body').innerText().catch(() => '');
   return visibleText.replace(/\s+/g, ' ').trim().slice(0, MAX_VISIBLE_TEXT_LENGTH);
+}
+
+async function enforcePerHostRateLimit(hostname: string, rateLimitDelayMs: number): Promise<void> {
+  const normalizedDelayMs = Math.max(0, Math.floor(rateLimitDelayMs));
+  if (normalizedDelayMs === 0) {
+    return;
+  }
+
+  const normalizedHostname = hostname.toLowerCase();
+  const lastRequestAt = HOST_RATE_LIMITS.get(normalizedHostname) ?? 0;
+  const now = Date.now();
+  const waitMs = Math.max(0, lastRequestAt + normalizedDelayMs - now);
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+
+  HOST_RATE_LIMITS.set(normalizedHostname, Date.now());
 }
 
 async function loadRobotsRules(parsedUrl: URL): Promise<RobotsRule[] | null> {

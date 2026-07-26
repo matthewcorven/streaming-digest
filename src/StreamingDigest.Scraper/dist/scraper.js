@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 const SCRAPER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0';
 const MAX_VISIBLE_TEXT_LENGTH = 200_000;
+const HOST_RATE_LIMITS = new Map();
 export function normalizeScrapeRequest(input) {
     if (!input.url || typeof input.url !== 'string') {
         throw new Error('A non-empty url is required.');
@@ -28,12 +29,14 @@ export function normalizeScrapeRequest(input) {
         url: parsedUrl.toString(),
         respectRobotsTxt: input.respectRobotsTxt ?? true,
         debugCaptureRawHtml: input.debugCaptureRawHtml ?? false,
-        timeoutSeconds
+        timeoutSeconds,
+        rateLimitDelayMs: input.rateLimitDelayMs ?? 1000
     };
 }
 export async function scrapeFirstPage(request) {
     const normalized = normalizeScrapeRequest(request);
     const parsedUrl = new URL(normalized.url);
+    await enforcePerHostRateLimit(parsedUrl.hostname, normalized.rateLimitDelayMs);
     const exclusionReason = detectExcludedUrl(parsedUrl);
     if (exclusionReason) {
         return createExclusionResponse(normalized.url, normalized.url, exclusionReason, 0, null);
@@ -179,6 +182,20 @@ async function detectLoginPage(page, finalUrl) {
 async function extractVisibleText(page) {
     const visibleText = await page.locator('body').innerText().catch(() => '');
     return visibleText.replace(/\s+/g, ' ').trim().slice(0, MAX_VISIBLE_TEXT_LENGTH);
+}
+async function enforcePerHostRateLimit(hostname, rateLimitDelayMs) {
+    const normalizedDelayMs = Math.max(0, Math.floor(rateLimitDelayMs));
+    if (normalizedDelayMs === 0) {
+        return;
+    }
+    const normalizedHostname = hostname.toLowerCase();
+    const lastRequestAt = HOST_RATE_LIMITS.get(normalizedHostname) ?? 0;
+    const now = Date.now();
+    const waitMs = Math.max(0, lastRequestAt + normalizedDelayMs - now);
+    if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    HOST_RATE_LIMITS.set(normalizedHostname, Date.now());
 }
 async function loadRobotsRules(parsedUrl) {
     const robotsUrl = new URL('/robots.txt', parsedUrl);

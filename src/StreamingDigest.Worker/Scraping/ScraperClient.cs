@@ -9,7 +9,8 @@ namespace StreamingDigest.Worker.Scraping;
 public sealed class ScraperClient(
     HttpClient httpClient,
     IScrapeFailureRecorder scrapeFailureRecorder,
-    WorkerOperationConcurrencyController concurrencyController)
+    WorkerOperationConcurrencyController concurrencyController,
+    ApplicationConfiguration applicationConfiguration)
 {
     public async Task<ScrapeFirstPageResponse> ScrapeFirstPageAsync(ScrapeFirstPageRequest request, CancellationToken cancellationToken = default)
     {
@@ -22,13 +23,17 @@ public sealed class ScraperClient(
                 activity?.SetTag("scraper.debug_capture_raw_html", request.DebugCaptureRawHtml.ToString());
                 activity?.SetTag("scraper.timeout_seconds", request.TimeoutSeconds.ToString());
 
+                var effectiveRequest = BuildEffectiveRequest(request);
+                activity?.SetTag("scraper.effective_respect_robots_txt", effectiveRequest.RespectRobotsTxt.ToString());
+                activity?.SetTag("scraper.rate_limit_delay_ms", effectiveRequest.RateLimitDelayMs.ToString());
+
                 try
                 {
                     return await concurrencyController.RunWebsiteScrapeAsync(
                         request.Url,
                         async () =>
                         {
-                            using var response = await httpClient.PostAsJsonAsync("/internal/scrape/first-page", request, cancellationToken);
+                            using var response = await httpClient.PostAsJsonAsync("/internal/scrape/first-page", effectiveRequest, cancellationToken);
                             response.EnsureSuccessStatusCode();
                             var payload = await response.Content.ReadFromJsonAsync<ScrapeFirstPageResponse>(cancellationToken: cancellationToken);
                             return payload ?? throw new InvalidOperationException("The scraper returned an empty payload.");
@@ -49,6 +54,21 @@ public sealed class ScraperClient(
                 ["scraper.timeout_seconds"] = request.TimeoutSeconds
             },
             ActivityKind.Client);
+    }
+
+    private ScrapeFirstPageRequest BuildEffectiveRequest(ScrapeFirstPageRequest request)
+    {
+        var effectiveRespectRobotsTxt = request.RespectRobotsTxt;
+        if (effectiveRespectRobotsTxt)
+        {
+            effectiveRespectRobotsTxt = ScrapingPolicyResolver.ShouldRespectRobotsTxt(request.Url, applicationConfiguration.Scraping);
+        }
+
+        return request with
+        {
+            RespectRobotsTxt = effectiveRespectRobotsTxt,
+            RateLimitDelayMs = Math.Max(0, applicationConfiguration.Scraping.RateLimitDelayMs)
+        };
     }
 
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
@@ -81,9 +101,11 @@ public sealed record ScrapeFirstPageRequest(
     string Url,
     bool RespectRobotsTxt = true,
     bool DebugCaptureRawHtml = false,
-    int TimeoutSeconds = 30);
+    int TimeoutSeconds = 30,
+    int RateLimitDelayMs = 1000);
 
 public sealed record ScrapeFirstPageResponse(
+    string RequestedUrl,
     string FinalUrl,
     string? Title,
     string? Description,
@@ -93,4 +115,5 @@ public sealed record ScrapeFirstPageResponse(
     int HttpStatus,
     string? ContentType,
     string ContentHash,
-    string? RawHtmlDebugPath);
+    string? RawHtmlDebugPath,
+    string? ExclusionReason = null);

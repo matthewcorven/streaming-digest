@@ -51,6 +51,23 @@ public class ApplicationConfigurationLoaderTests
     }
 
     [Fact]
+    public void ScrapingPolicyResolver_UsesConfiguredDomainOverride()
+    {
+        var settings = new ScrapingSettings
+        {
+            RespectRobotsTxtByDefault = true,
+            DomainOverrides =
+            [
+                new ScrapingDomainOverride { Domain = "example.com", RespectRobotsTxt = false }
+            ]
+        };
+
+        var shouldRespect = ScrapingPolicyResolver.ShouldRespectRobotsTxt("https://www.example.com/article", settings);
+
+        Assert.False(shouldRespect);
+    }
+
+    [Fact]
     public void LoadFromDirectory_InvalidConfiguration_ThrowsHelpfulValidationError()
     {
         var tempDirectory = CreateTempDirectory();
