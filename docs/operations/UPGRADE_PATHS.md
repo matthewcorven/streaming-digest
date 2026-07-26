@@ -162,7 +162,44 @@ The Admin UI should include an **Upgrade & Maintenance** panel.
 | Risk level | Safe, backup recommended, backup required, manual migration required | Open runbook | Require confirmation for high-risk steps |
 | Post-upgrade checklist | Login, search, screenshots, Matrix send, embedding test, backup path | Run checks | Show targeted remediation per failed check |
 
-## 6. Non-negotiable upgrade invariants
+## 6. Restore runbook (MVP / MVP+)
+
+Restore operations should be treated as a recovery path for a fresh Compose stack, not as a backup-file existence check. The archive is the transport; the operator must prove that PostgreSQL, mounted media, Matrix data/config, app config, and secrets can be recovered into the expected Compose-mounted paths.
+
+### 6.1 Restore scope
+
+- PostgreSQL: restore the `postgresql/postgres.sql` asset into the target database with `psql --single-transaction --set ON_ERROR_STOP=1`.
+- Screenshots/media: restore `media/` into the configured screenshot/media volume and verify that the restored files are readable from the container or host path.
+- Matrix bot session/config: restore `matrix/` into the Matrix configuration/session volume. MVP validates that the session/config files are present and the bot can start; Matrix E2EE crypto/session migration and encrypted-send verification remain MVP+.
+- App config and secrets: restore `config/appsettings.json`, `config/appsettings.schema.json`, and `.env` into the fresh Compose stack's config root. Secrets must be re-applied through the same secret/env source used by the deployment.
+- Backup artifact metadata: each archive should include manifest metadata with `createdAtUtc`, `backupFileName`, `schemaVersion`, `verificationStatus`, `restoreTarget`, and the asset list. Maintenance operations should record whether restore validation completed and what restore target was validated.
+
+### 6.2 Operator procedure
+
+1. Create or start a fresh Compose stack with the target volume mounts and config paths.
+2. Restore the latest backup archive into the fresh stack's media, Matrix, and config locations.
+3. Re-apply the app config and secrets expected by the deployment, then restart the affected services.
+4. Validate the restored stack by running a restore dry run, checking service health, and confirming the expected files are present at the mounted paths.
+5. Record the evidence in the maintenance operation record and the backup artifact manifest so the next operator can see that restore validation completed.
+
+### 6.3 Validation evidence
+
+- Restore dry-run evidence should include the backup filename, manifest metadata, the restore target path, and the validation output from the fresh stack.
+- For evidence, save the restore command output, the service health summary, and a short note confirming that the expected PostgreSQL dump, media files, Matrix config/session files, and config/secrets were restored successfully.
+- The restore validation is considered successful only when the fresh stack can reach the expected readiness state, not simply when the backup archive exists.
+
+### 6.4 MVP vs MVP+ expectations
+
+| Capability | MVP | MVP+ |
+|---|---|---|
+| Manual restore from backup archive into a fresh Compose stack | Yes | Yes |
+| Restore dry-run validation and evidence capture | Yes | Yes |
+| Polished automated restore UI in Admin | No | Yes |
+| Scheduled backup jobs | No | Yes |
+| CLI backup/restore workflow | No | Yes |
+| Matrix E2EE session-store migration and encrypted-send verification | Partial/manual | Yes |
+
+## 7. Non-negotiable upgrade invariants
 
 - Worker must not process jobs against an incompatible DB schema.
 - Already processed videos must not be reprocessed during normal daily ingestion because of an app upgrade.

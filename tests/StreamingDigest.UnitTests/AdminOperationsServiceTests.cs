@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.Configuration;
 
@@ -80,8 +81,18 @@ public sealed class AdminOperationsServiceTests
             Assert.True(File.Exists(archivePath));
 
             using var archive = ZipFile.OpenRead(archivePath);
-            Assert.Contains(archive.Entries, entry => string.Equals(entry.FullName, "manifest.json", StringComparison.OrdinalIgnoreCase));
+            var manifestEntry = archive.Entries.Single(entry => string.Equals(entry.FullName, "manifest.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(archive.Entries, entry => string.Equals(entry.FullName, "config/appsettings.json", StringComparison.OrdinalIgnoreCase));
+
+            await using var manifestStream = manifestEntry.Open();
+            using var manifestReader = new StreamReader(manifestStream);
+            var manifestJson = await manifestReader.ReadToEndAsync();
+            using var manifestDocument = JsonDocument.Parse(manifestJson);
+
+            Assert.Equal("1.0.0", manifestDocument.RootElement.GetProperty("schemaVersion").GetString());
+            Assert.Equal("pending", manifestDocument.RootElement.GetProperty("verificationStatus").GetString());
+            Assert.Equal("compose-stack", manifestDocument.RootElement.GetProperty("restoreTarget").GetString());
+            Assert.Equal(result.Target, manifestDocument.RootElement.GetProperty("backupFileName").GetString());
         }
         finally
         {
