@@ -1,40 +1,343 @@
+@page "/admin"
 @page "/settings"
 
-<PageTitle>Settings</PageTitle>
+@using System.Net.Http.Json
+@using System.Text.Json
+@using StreamingDigest.Web.Pages
 
-<div class="page-shell">
+@inject HttpClient Http
+
+<PageTitle>Admin</PageTitle>
+
+<div class="admin-page-shell">
     <section class="hero-card">
         <div>
-            <p class="eyebrow">Admin</p>
-            <h1>Settings</h1>
-            <p>Configure the operator experience, onboarding readiness, and the services that power ingestion.</p>
+            <p class="eyebrow">Admin console</p>
+            <h1>Settings, models, observability, and maintenance</h1>
+            <p>The admin surface now connects to the runtime settings and observability endpoints so operators can monitor readiness and adjust core services from one place.</p>
         </div>
-        <a class="secondary-button" href="/ingestion">Review ingestion runs</a>
+        <div class="hero-actions">
+            <a class="secondary-button" href="/ingestion">Review ingestion runs</a>
+            <a class="secondary-button" href="/admin/upgrade-maintenance">Open maintenance view</a>
+        </div>
+    </section>
+
+    <section class="admin-actions-card">
+        <div class="section-heading">
+            <div>
+                <h2>Operational status</h2>
+                <p class="page-description">The view below syncs against the live admin API and surfaces the latest runtime state.</p>
+            </div>
+            <span class="status-pill @GetStatusClass(_statusTone)">@(_isLoading ? "Loading" : _statusTone)</span>
+        </div>
+        <div class="action-buttons">
+            <button class="action-button" type="button" disabled="@(_isLoading || _isSaving)" @onclick="ReloadAsync">Refresh</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_statusMessage))
+        {
+            <p class="action-feedback @_statusTone">@_statusMessage</p>
+        }
     </section>
 
     <section class="card-grid">
         <article class="card">
             <div class="card-header">
-                <h2>Authentication</h2>
-                <span class="status-pill status-ready">Configured</span>
+                <h2>Settings</h2>
+                <span class="status-pill @GetStatusClass(_observabilityEnabled ? "success" : "neutral")">@(_observabilityEnabled ? "Enabled" : "Disabled")</span>
             </div>
-            <p class="card-body">Login and route protection are wired to the new shell. The demo account remains simple and easy to exercise.</p>
+            <div class="toggle-row">
+                <label for="observability-enabled">Enable observability</label>
+                <input id="observability-enabled" type="checkbox" checked="@_observabilityEnabled" @onchange="ToggleObservabilityAsync" disabled="@_isSaving" />
+            </div>
+            <dl class="kv-list">
+                <div class="kv-row"><dt>Retention days</dt><dd>@_retentionDays</dd></div>
+                <div class="kv-row"><dt>Retention warning</dt><dd>@(_retentionWarning ? "Required" : "Clear")</dd></div>
+            </dl>
         </article>
 
         <article class="card">
             <div class="card-header">
-                <h2>Ingestion defaults</h2>
-                <span class="status-pill status-neutral">Defaults</span>
+                <h2>Runtime config</h2>
+                <span class="status-pill status-neutral">@(_runtimeEnvironment)</span>
             </div>
-            <p class="card-body">Daily runs, stale-index warnings, and retry backoff values are visible in the shell and ready for the next API integration.</p>
+            <dl class="kv-list">
+                <div class="kv-row"><dt>Environment</dt><dd>@_runtimeEnvironment</dd></div>
+                <div class="kv-row"><dt>Deploy mode</dt><dd>@_deployMode</dd></div>
+            </dl>
+            <ul class="stack-list">
+                @foreach (var feature in _features)
+                {
+                    <li>@feature</li>
+                }
+            </ul>
         </article>
 
+        <article class="card">
+            <div class="card-header">
+                <h2>Models</h2>
+                <span class="status-pill status-neutral">@(_models.Count) available</span>
+            </div>
+            <ul class="stack-list">
+                @foreach (var model in _models)
+                {
+                    <li>
+                        <div class="list-title-row">
+                            <strong>@model.Id</strong>
+                            <span class="status-pill @GetStatusClass(model.Status)">@model.Status</span>
+                        </div>
+                        <div class="meta-row">
+                            <span>@model.Family</span>
+                            <button class="secondary-button compact" type="button" disabled="@_isBusy" @onclick="() => QueueModelDownloadAsync(model.Id)">Queue download</button>
+                        </div>
+                    </li>
+                }
+            </ul>
+        </article>
+    </section>
+
+    <section class="card-grid accent-grid">
         <article class="card">
             <div class="card-header">
                 <h2>Observability</h2>
-                <span class="status-pill status-warning">Needs attention</span>
+                <span class="status-pill status-neutral">Live links</span>
             </div>
-            <p class="card-body">The workbench surfaces the core health checks that should be expanded once the live ingestion endpoints are connected.</p>
+            <ObservabilityPanel />
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <h2>Backup & maintenance</h2>
+                <span class="status-pill status-neutral">Operations</span>
+            </div>
+            <UpgradeMaintenancePanel />
         </article>
     </section>
 </div>
+
+@code {
+    private bool _isLoading;
+    private bool _isSaving;
+    private bool _isBusy;
+    private string _statusMessage = "Connecting to the admin API…";
+    private string _statusTone = "neutral";
+    private bool _observabilityEnabled;
+    private int _retentionDays;
+    private bool _retentionWarning;
+    private string _runtimeEnvironment = "—";
+    private string _deployMode = "—";
+    private IReadOnlyList<string> _features = Array.Empty<string>();
+    private IReadOnlyList<ModelOption> _models = Array.Empty<ModelOption>();
+    private string? _csrfToken;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _isLoading = true;
+        _statusTone = "neutral";
+        _statusMessage = "Connecting to the admin API…";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            var settings = await Http.GetFromJsonAsync<AdminSettingsResponse>("/api/settings");
+            var runtime = await Http.GetFromJsonAsync<RuntimeSettingsResponse>("/api/config/runtime");
+            var models = await Http.GetFromJsonAsync<ModelsResponse>("/api/models/options");
+
+            var values = settings?.Values ?? new Dictionary<string, JsonElement>();
+            _observabilityEnabled = ReadBool(values, "observability.enabled", false);
+            _retentionDays = ReadInt(values, "observability.retentionDays", 0);
+            _retentionWarning = ReadBool(values, "observability.retentionWarning", false);
+
+            _runtimeEnvironment = runtime?.Environment ?? "unknown";
+            _deployMode = runtime?.DeployMode ?? "unknown";
+            _features = runtime?.Features ?? Array.Empty<string>();
+            _models = (models?.Models ?? Array.Empty<ModelOption>()).ToList();
+
+            _statusMessage = "Admin data loaded from the live API.";
+            _statusTone = "success";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to load the admin experience: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task ToggleObservabilityAsync(ChangeEventArgs args)
+    {
+        var enabled = args.Value is bool value
+            ? value
+            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
+
+        _isSaving = true;
+        _statusTone = "neutral";
+        _statusMessage = enabled ? "Saving observability settings…" : "Saving observability settings…";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            using var request = new HttpRequestMessage(HttpMethod.Put, "/api/settings");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+            request.Content = JsonContent.Create(new Dictionary<string, object?>
+            {
+                ["observability.enabled"] = enabled
+            });
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"The admin API rejected the update with {(int)response.StatusCode}.");
+            }
+
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to update observability: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task QueueModelDownloadAsync(string modelId)
+    {
+        _isBusy = true;
+        _statusTone = "neutral";
+        _statusMessage = $"Queueing {modelId} download…";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+            request.Content = JsonContent.Create(new { modelId });
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"The admin API rejected the request with {(int)response.StatusCode}.");
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<ModelDownloadResponse>();
+            _statusMessage = payload?.Status is "queued"
+                ? $"Queued {modelId} for download."
+                : $"Requested {modelId} download.";
+            _statusTone = "success";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to queue the model download: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task EnsureApiSessionAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_csrfToken))
+        {
+            return;
+        }
+
+        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        if (!loginResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("The admin API could not authenticate the demo session.");
+        }
+
+        var csrf = await Http.GetFromJsonAsync<CsrfResponse>("/api/auth/csrf");
+        _csrfToken = csrf?.Token;
+    }
+
+    private static bool ReadBool(IReadOnlyDictionary<string, JsonElement> values, string key, bool fallback)
+    {
+        if (!values.TryGetValue(key, out var value))
+        {
+            return fallback;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsedBoolean) && parsedBoolean,
+            JsonValueKind.Number => value.GetInt32() != 0,
+            _ => fallback
+        };
+    }
+
+    private static int ReadInt(IReadOnlyDictionary<string, JsonElement> values, string key, int fallback)
+    {
+        if (!values.TryGetValue(key, out var value))
+        {
+            return fallback;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number => value.GetInt32(),
+            JsonValueKind.String when int.TryParse(value.GetString(), out var parsedInt) => parsedInt,
+            _ => fallback
+        };
+    }
+
+    private static string GetStatusClass(string tone)
+        => tone.ToLowerInvariant() switch
+        {
+            "success" => "status-success",
+            "warning" => "status-warning",
+            "error" => "status-danger",
+            _ => "status-neutral"
+        };
+
+    private sealed class AdminSettingsResponse
+    {
+        public Dictionary<string, JsonElement>? Values { get; set; }
+    }
+
+    private sealed class RuntimeSettingsResponse
+    {
+        public string? Environment { get; set; }
+        public string? DeployMode { get; set; }
+        public string[]? Features { get; set; }
+    }
+
+    private sealed class ModelsResponse
+    {
+        public ModelOption[]? Models { get; set; }
+    }
+
+    private sealed class ModelOption
+    {
+        public string? Id { get; set; }
+        public string? Family { get; set; }
+        public string? Status { get; set; }
+    }
+
+    private sealed class CsrfResponse
+    {
+        public string? Token { get; set; }
+    }
+
+    private sealed class ModelDownloadResponse
+    {
+        public string? Status { get; set; }
+    }
+}
