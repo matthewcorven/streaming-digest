@@ -325,9 +325,10 @@ public sealed class AdminOperationsService : IAdminOperationsService
         try
         {
             await using var sourceStream = dumpEntry.Open();
-            using var reader = new StreamReader(sourceStream);
-            var dumpContent = await reader.ReadToEndAsync(cancellationToken);
-            await File.WriteAllTextAsync(dumpPath, dumpContent, cancellationToken);
+            await using var memoryStream = new MemoryStream();
+            await sourceStream.CopyToAsync(memoryStream, cancellationToken);
+            var dumpContent = memoryStream.ToArray();
+            await File.WriteAllBytesAsync(dumpPath, dumpContent, cancellationToken);
 
             var builder = new NpgsqlConnectionStringBuilder(connectionString);
             var host = builder.Host ?? "localhost";
