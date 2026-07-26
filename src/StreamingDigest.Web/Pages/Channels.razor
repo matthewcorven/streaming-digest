@@ -1,5 +1,8 @@
 @page "/channels"
 
+@using System.Net.Http.Json
+@inject HttpClient Http
+
 <PageTitle>Channels</PageTitle>
 
 <div class="page-shell">
@@ -12,29 +15,592 @@
         <a class="primary-button" href="/settings">Open admin settings</a>
     </section>
 
-    <section class="card-list">
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="action-feedback @_statusTone">@_statusMessage</div>
+    }
+
+    <section class="card-grid">
         <article class="card">
-            <div class="card-header">
-                <h2>Developer Weekly</h2>
-                <span class="status-pill status-ready">Healthy</span>
+            <div class="section-heading">
+                <div>
+                    <h2>Add a channel</h2>
+                    <p class="page-description">Accept a public YouTube channel URL, handle, or channel ID. Unsupported or logged-in-only subscription import flows are rejected in MVP.</p>
+                </div>
             </div>
-            <p class="card-body">Three new videos were processed in the last 24 hours.</p>
+
+            <div class="form-stack">
+                <label class="field-label" for="channel-input">Source</label>
+                <input id="channel-input" class="text-input" placeholder="https://www.youtube.com/@@handle or UC..." @bind="_addModel.Source" />
+                @if (!string.IsNullOrWhiteSpace(_addValidationMessage))
+                {
+                    <p class="helper-text error">@_addValidationMessage</p>
+                }
+                else
+                {
+                    <p class="helper-text">Supported examples: @@handle, https://www.youtube.com/@@handle, https://www.youtube.com/channel/UC..., or https://www.youtube.com/user/name.</p>
+                }
+                <div class="action-buttons">
+                    <button class="action-button" type="button" disabled="@(_isSaving || _isLoading)" @onclick="CreateChannelAsync">Add channel</button>
+                </div>
+            </div>
         </article>
 
         <article class="card">
-            <div class="card-header">
-                <h2>Build & Release</h2>
-                <span class="status-pill status-neutral">Awaiting run</span>
+            <div class="section-heading">
+                <div>
+                    <h2>Configured channels</h2>
+                    <p class="page-description">Pause channels without deleting them, edit ingestion defaults, or remove them with optional related-data deletion.</p>
+                </div>
+                <button class="secondary-button" type="button" disabled="@_isLoading" @onclick="ReloadAsync">Refresh</button>
             </div>
-            <p class="card-body">Next run is scheduled for 18:30 UTC.</p>
-        </article>
 
-        <article class="card">
-            <div class="card-header">
-                <h2>LangChain Notes</h2>
-                <span class="status-pill status-warning">Needs review</span>
-            </div>
-            <p class="card-body">A recent run surfaced a duplicate video cluster.</p>
+            @if (_isLoading)
+            {
+                <p class="helper-text">Loading channels from the live API…</p>
+            }
+            else if (_channels.Count == 0)
+            {
+                <p class="helper-text">No channels have been configured yet.</p>
+            }
+            else
+            {
+                <div class="channel-list">
+                    @foreach (var channel in _channels)
+                    {
+                        <article class="channel-card">
+                            <div class="channel-card-body">
+                                <div class="channel-title-row">
+                                    <strong>@channel.Name</strong>
+                                    <span class="status-pill @GetStatusClass(channel)">@GetStatusLabel(channel)</span>
+                                </div>
+                                <div class="meta-row">
+                                    <span>@channel.YoutubeChannelId</span>
+                                    <span>@(channel.IsPaused ? "Paused" : "Active")</span>
+                                    <span>@(string.IsNullOrWhiteSpace(channel.LastIngestionStatus) ? "No recent ingest" : channel.LastIngestionStatus)</span>
+                                </div>
+                                <div class="meta-row secondary">
+                                    <span>@channel.ProfileUrl</span>
+                                </div>
+                            </div>
+                            <div class="action-buttons">
+                                <button class="secondary-button compact" type="button" @onclick="() => TogglePauseAsync(channel)">@GetPauseButtonText(channel)</button>
+                                <button class="secondary-button compact" type="button" @onclick="() => StartEditingAsync(channel)">Edit</button>
+                                <button class="secondary-button compact danger" type="button" @onclick="() => StartDeleteAsync(channel)">Delete</button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
         </article>
     </section>
+
+    @if (_editingChannel is not null)
+    {
+        <section class="card">
+            <div class="section-heading">
+                <div>
+                    <h2>Edit @(_editingChannel.Name)</h2>
+                    <p class="page-description">Adjust the visible metadata and ingestion defaults for this channel.</p>
+                </div>
+                <button class="secondary-button" type="button" @onclick="CancelEditing">Cancel</button>
+            </div>
+
+            <div class="form-stack">
+                <label class="field-label" for="channel-name">Display name override</label>
+                <input id="channel-name" class="text-input" @bind="_editModel.NameOverride" />
+
+                <label class="field-label" for="channel-description">Description override</label>
+                <input id="channel-description" class="text-input" @bind="_editModel.DescriptionOverride" />
+
+                <label class="field-label" for="channel-paused">Paused</label>
+                <input id="channel-paused" type="checkbox" @bind="_editModel.IsPaused" />
+
+                <label class="field-label" for="channel-max-age">Default max age (days)</label>
+                <input id="channel-max-age" class="text-input" type="number" min="1" @bind="_editModel.DefaultMaxAgeDays" />
+
+                <label class="field-label" for="channel-backfill">Default backfill max videos</label>
+                <input id="channel-backfill" class="text-input" type="number" min="1" @bind="_editModel.DefaultBackfillMaxVideos" />
+
+                <div class="action-buttons">
+                    <button class="action-button" type="button" disabled="@(_isSaving || _isLoading)" @onclick="SaveEditAsync">Save changes</button>
+                </div>
+            </div>
+        </section>
+    }
+
+    @if (_deleteChannel is not null)
+    {
+        <section class="card">
+            <div class="section-heading">
+                <div>
+                    <h2>Delete channel</h2>
+                    <p class="page-description">Deleting a channel stops future ingestion. Shared canonical repositories and resources are preserved unless you explicitly request related-data deletion.</p>
+                </div>
+                <button class="secondary-button" type="button" @onclick="CancelDelete">Cancel</button>
+            </div>
+
+            <div class="form-stack">
+                <p class="helper-text">Delete <strong>@_deleteChannel.Name</strong> and optionally remove related videos, notes, embeddings, screenshots, and linked media.</p>
+                <label class="checkbox-row">
+                    <input type="checkbox" @bind="_deleteRelatedData" />
+                    <span>Delete related data (destructive)</span>
+                </label>
+                @if (_deleteRelatedData)
+                {
+                    <label class="checkbox-row">
+                        <input type="checkbox" @bind="_deleteConfirmationAcknowledged" />
+                        <span>I understand this removes the channel and its related ingestion artifacts.</span>
+                    </label>
+                }
+                <div class="action-buttons">
+                    <button class="action-button danger" type="button" disabled="@(_isSaving || _isLoading || (_deleteRelatedData && !_deleteConfirmationAcknowledged))" @onclick="DeleteChannelAsync">Delete channel</button>
+                </div>
+            </div>
+        </section>
+    }
 </div>
+
+@code {
+    private bool _isLoading;
+    private bool _isSaving;
+    private string _statusMessage = "Loading channels…";
+    private string _statusTone = "neutral";
+    private IReadOnlyList<ChannelListItemResponse> _channels = Array.Empty<ChannelListItemResponse>();
+    private string? _csrfToken;
+    private readonly AddChannelModel _addModel = new();
+    private string? _addValidationMessage;
+    private ChannelListItemResponse? _editingChannel;
+    private ChannelEditModel _editModel = new();
+    private ChannelListItemResponse? _deleteChannel;
+    private bool _deleteRelatedData;
+    private bool _deleteConfirmationAcknowledged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _isLoading = true;
+        _statusTone = "neutral";
+        _statusMessage = "Loading channels…";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+            using var response = await Http.GetAsync("/api/channels?includePaused=true&page=1&pageSize=100");
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<ChannelListPayload>();
+            _channels = payload?.Items ?? Array.Empty<ChannelListItemResponse>();
+            _statusMessage = _channels.Count == 0 ? "No channels are configured yet." : "Channels loaded from the live API.";
+            _statusTone = "success";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to load channels: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task CreateChannelAsync()
+    {
+        _addValidationMessage = null;
+        _isSaving = true;
+        _statusTone = "neutral";
+        _statusMessage = "Validating the channel input…";
+
+        try
+        {
+            var validation = ValidateAndNormalizeChannelInput(_addModel.Source);
+            if (!validation.IsSupported)
+            {
+                _addValidationMessage = validation.Message;
+                _statusMessage = validation.Message ?? "The channel input could not be validated.";
+                _statusTone = "warning";
+                return;
+            }
+
+            await EnsureApiSessionAsync();
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/channels");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+            request.Content = JsonContent.Create(new { sourceUrl = validation.NormalizedSource });
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+            }
+
+            _addModel.Source = string.Empty;
+            await ReloadAsync();
+            _statusMessage = "Channel added successfully.";
+            _statusTone = "success";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to add the channel: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task TogglePauseAsync(ChannelListItemResponse channel)
+    {
+        _isSaving = true;
+        _statusTone = "neutral";
+        _statusMessage = channel.IsPaused ? "Resuming the channel…" : "Pausing the channel…";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+            using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/channels/{channel.Id}");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+            request.Content = JsonContent.Create(new { isPaused = !channel.IsPaused });
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+            }
+
+            await ReloadAsync();
+            _statusMessage = channel.IsPaused ? "Channel resumed." : "Channel paused.";
+            _statusTone = "success";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to update the pause state: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task StartEditingAsync(ChannelListItemResponse channel)
+    {
+        _editingChannel = channel;
+        _editModel = new ChannelEditModel();
+
+        try
+        {
+            await EnsureApiSessionAsync();
+            var detail = await Http.GetFromJsonAsync<ChannelDetailResponse>($"/api/channels/{channel.Id}");
+            _editModel = new ChannelEditModel
+            {
+                NameOverride = detail?.Name?.Override ?? string.Empty,
+                DescriptionOverride = detail?.Description?.Override ?? string.Empty,
+                IsPaused = detail?.IsPaused ?? false,
+                DefaultMaxAgeDays = detail?.IngestionDefaults?.MaxAgeDays?.ToString() ?? string.Empty,
+                DefaultBackfillMaxVideos = detail?.IngestionDefaults?.BackfillMaxVideos?.ToString() ?? string.Empty
+            };
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to load channel details: {ex.Message}";
+            _statusTone = "error";
+        }
+    }
+
+    private void CancelEditing()
+    {
+        _editingChannel = null;
+        _editModel = new ChannelEditModel();
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editingChannel is null)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        _statusTone = "neutral";
+        _statusMessage = "Saving channel changes…";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+            using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/channels/{_editingChannel.Id}");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+            request.Content = JsonContent.Create(new
+            {
+                nameOverride = _editModel.NameOverride,
+                descriptionOverride = _editModel.DescriptionOverride,
+                isPaused = _editModel.IsPaused,
+                defaultMaxAgeDays = ParseOptionalInt(_editModel.DefaultMaxAgeDays),
+                defaultBackfillMaxVideos = ParseOptionalInt(_editModel.DefaultBackfillMaxVideos)
+            });
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+            }
+
+            CancelEditing();
+            await ReloadAsync();
+            _statusMessage = "Channel updated.";
+            _statusTone = "success";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to save the channel: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private void StartDeleteAsync(ChannelListItemResponse channel)
+    {
+        _deleteChannel = channel;
+        _deleteRelatedData = false;
+        _deleteConfirmationAcknowledged = false;
+    }
+
+    private void CancelDelete()
+    {
+        _deleteChannel = null;
+        _deleteRelatedData = false;
+        _deleteConfirmationAcknowledged = false;
+    }
+
+    private async Task DeleteChannelAsync()
+    {
+        if (_deleteChannel is null)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        _statusTone = "neutral";
+        _statusMessage = _deleteRelatedData ? "Deleting the channel and its related data…" : "Deleting the channel…";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+            var query = $"deleteRelatedData={( _deleteRelatedData ? "true" : "false")}";
+            if (_deleteRelatedData)
+            {
+                query += "&confirm=true";
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/channels/{_deleteChannel.Id}?{query}");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+            }
+
+            CancelDelete();
+            await ReloadAsync();
+            _statusMessage = "Channel deleted.";
+            _statusTone = "success";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Unable to delete the channel: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task EnsureApiSessionAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_csrfToken))
+        {
+            return;
+        }
+
+        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        if (!loginResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("The channel API could not authenticate the demo session.");
+        }
+
+        using var csrfResponse = await Http.GetAsync("/api/auth/csrf");
+        if (!csrfResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("The channel API could not obtain a CSRF token.");
+        }
+
+        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>();
+        _csrfToken = csrf?.Token;
+    }
+
+    private static CreateChannelValidationResult ValidateAndNormalizeChannelInput(string? source)
+    {
+        var trimmed = (source ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return new(false, "Enter a public YouTube channel URL, handle, or channel ID.", null);
+        }
+
+        if (trimmed.StartsWith('@'))
+        {
+            return new(true, null, $"https://www.youtube.com/{trimmed}");
+        }
+
+        if (trimmed.StartsWith("UC", StringComparison.OrdinalIgnoreCase) && trimmed.Length >= 5)
+        {
+            return new(true, null, $"https://www.youtube.com/channel/{trimmed}");
+        }
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return new(false, "Use a public YouTube channel URL, handle, or channel ID. Plain text without a supported pattern is not accepted.", null);
+        }
+
+        if (!uri.Host.Contains("youtube.com", StringComparison.OrdinalIgnoreCase) && !uri.Host.Contains("m.youtube.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return new(false, "Use a public YouTube channel URL, handle, or channel ID. Non-YouTube sources are not supported in MVP.", null);
+        }
+
+        if (uri.AbsolutePath.Contains("/feed/", StringComparison.OrdinalIgnoreCase)
+            || uri.AbsolutePath.Contains("/playlist", StringComparison.OrdinalIgnoreCase)
+            || uri.AbsolutePath.Contains("/watch", StringComparison.OrdinalIgnoreCase)
+            || uri.AbsolutePath.Contains("/results", StringComparison.OrdinalIgnoreCase)
+            || uri.AbsolutePath.Contains("/subscriptions", StringComparison.OrdinalIgnoreCase))
+        {
+            return new(false, "That import flow is marked as MVP+ in the product scope. Use a public channel URL, handle, or channel ID instead.", null);
+        }
+
+        var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            return new(false, "Use a public YouTube channel URL, handle, or channel ID. That input is not a supported channel source.", null);
+        }
+
+        if (segments[0].Equals("channel", StringComparison.OrdinalIgnoreCase) && segments.Length > 1)
+        {
+            return new(true, null, uri.ToString());
+        }
+
+        if (segments[0].Equals("user", StringComparison.OrdinalIgnoreCase) && segments.Length > 1)
+        {
+            return new(true, null, uri.ToString());
+        }
+
+        if (segments[0].StartsWith('@'))
+        {
+            return new(true, null, uri.ToString());
+        }
+
+        return new(false, "Use a public YouTube channel URL, handle, or channel ID. That path is not a supported channel source.", null);
+    }
+
+    private static string GetStatusClass(ChannelListItemResponse channel)
+        => channel.IsPaused ? "status-neutral" : channel.IsDegraded ? "status-warning" : "status-ready";
+
+    private static string GetStatusLabel(ChannelListItemResponse channel)
+        => channel.IsPaused ? "Paused" : channel.IsDegraded ? "Needs review" : "Healthy";
+
+    private static string GetPauseButtonText(ChannelListItemResponse channel)
+        => channel.IsPaused ? "Resume" : "Pause";
+
+    private static int? ParseOptionalInt(string? value)
+    {
+        return int.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static async Task<string> ReadErrorMessageAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        return string.IsNullOrWhiteSpace(body)
+            ? $"The channel API rejected the request with {(int)response.StatusCode}."
+            : body;
+    }
+
+    private sealed class AddChannelModel
+    {
+        public string Source { get; set; } = string.Empty;
+    }
+
+    private sealed class ChannelEditModel
+    {
+        public string NameOverride { get; set; } = string.Empty;
+        public string DescriptionOverride { get; set; } = string.Empty;
+        public bool IsPaused { get; set; }
+        public string DefaultMaxAgeDays { get; set; } = string.Empty;
+        public string DefaultBackfillMaxVideos { get; set; } = string.Empty;
+    }
+
+    private sealed class CreateChannelValidationResult
+    {
+        public CreateChannelValidationResult(bool isSupported, string? message, string? normalizedSource)
+        {
+            IsSupported = isSupported;
+            Message = message;
+            NormalizedSource = normalizedSource;
+        }
+
+        public bool IsSupported { get; }
+        public string? Message { get; }
+        public string? NormalizedSource { get; }
+    }
+
+    private sealed class ChannelListPayload
+    {
+        public IReadOnlyList<ChannelListItemResponse>? Items { get; set; }
+    }
+
+    private sealed class ChannelListItemResponse
+    {
+        public Guid Id { get; set; }
+        public string YoutubeChannelId { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string ProfileUrl { get; set; } = string.Empty;
+        public bool IsPaused { get; set; }
+        public bool IsDegraded { get; set; }
+        public int ConsecutiveFailures { get; set; }
+        public DateTimeOffset? LastIngestedAt { get; set; }
+        public string? LastIngestionStatus { get; set; }
+    }
+
+    private sealed class ChannelDetailResponse
+    {
+        public ChannelValueResponse? Name { get; set; }
+        public ChannelValueResponse? Description { get; set; }
+        public bool IsPaused { get; set; }
+        public IngestionDefaultsResponse? IngestionDefaults { get; set; }
+    }
+
+    private sealed class ChannelValueResponse
+    {
+        public string? Override { get; set; }
+    }
+
+    private sealed class IngestionDefaultsResponse
+    {
+        public int? MaxAgeDays { get; set; }
+        public int? BackfillMaxVideos { get; set; }
+    }
+
+    private sealed class CsrfResponse
+    {
+        public string? Token { get; set; }
+    }
+}

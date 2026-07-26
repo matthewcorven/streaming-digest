@@ -101,6 +101,38 @@ public sealed class ChannelCrudIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, deletedGetResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task Channel_delete_requires_confirmation_for_destructive_delete_requests()
+    {
+        using var client = CreateClient();
+        await AuthenticateAsync(client);
+
+        var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/channels");
+        createRequest.Content = JsonContent.Create(new { sourceUrl = "https://www.youtube.com/@example" });
+        createRequest.Headers.Add("X-CSRF-Token", await GetCsrfTokenAsync(client));
+
+        using var createResponse = await client.SendAsync(createRequest);
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+
+        var createdChannel = await createResponse.Content.ReadFromJsonAsync<ChannelDetailResponse>();
+        Assert.NotNull(createdChannel);
+
+        using var destructiveDeleteWithoutConfirmationRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/channels/{createdChannel!.Id}?deleteRelatedData=true");
+        destructiveDeleteWithoutConfirmationRequest.Headers.Add("X-CSRF-Token", await GetCsrfTokenAsync(client));
+
+        using var destructiveDeleteWithoutConfirmationResponse = await client.SendAsync(destructiveDeleteWithoutConfirmationRequest);
+        Assert.Equal(HttpStatusCode.BadRequest, destructiveDeleteWithoutConfirmationResponse.StatusCode);
+
+        using var destructiveDeleteWithConfirmationRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/channels/{createdChannel.Id}?deleteRelatedData=true&confirm=true");
+        destructiveDeleteWithConfirmationRequest.Headers.Add("X-CSRF-Token", await GetCsrfTokenAsync(client));
+
+        using var destructiveDeleteWithConfirmationResponse = await client.SendAsync(destructiveDeleteWithConfirmationRequest);
+        Assert.Equal(HttpStatusCode.OK, destructiveDeleteWithConfirmationResponse.StatusCode);
+
+        using var deletedGetResponse = await client.GetAsync($"/api/channels/{createdChannel.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, deletedGetResponse.StatusCode);
+    }
+
     private async Task AuthenticateAsync(HttpClient client)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = BootstrapPassword });
