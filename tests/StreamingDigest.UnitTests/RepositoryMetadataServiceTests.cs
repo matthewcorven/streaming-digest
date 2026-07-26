@@ -89,6 +89,43 @@ public sealed class RepositoryMetadataServiceTests
     }
 
     [Fact]
+    public void Fetch_returns_null_readme_and_license_content_for_malformed_or_unsupported_document_payloads()
+    {
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/readme") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"content\":\"not-base64\",\"encoding\":\"base64\"}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/license") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"content\":\"TUlU\",\"encoding\":\"utf8\"}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"description\":\"Streaming Digest\",\"stargazers_count\":42,\"language\":\"C#\",\"default_branch\":\"main\",\"private\":false,\"license\":{\"spdx_id\":\"MIT\"}}", Encoding.UTF8, "application/json")
+            };
+        });
+        var httpClient = new HttpClient(handler);
+        var service = new RepositoryMetadataService(new RepositoryHostDetectionService(), httpClient);
+
+        var result = service.Fetch("https://github.com/matthewcorven/streaming-digest");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage ?? "Repository metadata fetch unexpectedly failed.");
+        Assert.NotNull(result.Metadata);
+        Assert.Null(result.Metadata!.ReadmeContent);
+        Assert.Null(result.Metadata.LicenseContent);
+    }
+
+    [Fact]
     public void Fetch_returns_failure_for_unsupported_repository_urls()
     {
         var service = new RepositoryMetadataService(new RepositoryHostDetectionService(), new HttpClient());
