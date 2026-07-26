@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using Hangfire;
+using Hangfire.MemoryStorage;
+using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
@@ -60,6 +63,29 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
     ?? builder.Configuration.GetConnectionString("postgres")
     ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
 
+var startupLoggerFactory = LoggerFactory.Create(logging =>
+{
+    logging.ClearProviders();
+    logging.AddSimpleConsole(options =>
+    {
+        options.SingleLine = true;
+        options.TimestampFormat = "HH:mm:ss ";
+    });
+});
+var startupLogger = startupLoggerFactory.CreateLogger("Startup");
+var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
+var hangfireStorage = CreateHangfireStorage(startupLogger, connectionString, databaseStatus.Connected);
+
+if (!databaseStatus.Connected)
+{
+    startupLogger.LogWarning("Hangfire PostgreSQL connectivity is unavailable; the worker will use in-memory storage for this startup.");
+}
+
+builder.Services.AddHangfire(config => config.UseStorage(hangfireStorage));
+builder.Services.AddHangfireServer(options =>
+{
+    options.WorkerCount = Math.Max(1, Environment.ProcessorCount / 2);
+});
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
@@ -111,8 +137,6 @@ using var startupScope = CorrelationContext.BeginLoggingScope(host.Services.GetR
     ["environment"] = environmentName
 });
 
-var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
 var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
 var defaultRetentionDays = StorageRetentionPolicy.ComputeObservabilityRetentionDays(StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes());
 
@@ -167,6 +191,24 @@ static async Task<DatabaseStatus> EnsureDatabaseConnectivityAsync(ILogger logger
     {
         logger.LogWarning(ex, "Worker could not connect to PostgreSQL; the worker will continue in degraded mode");
         return new DatabaseStatus(false, connectionStringBuilder.Database ?? "postgres", "unavailable");
+    }
+}
+
+static JobStorage CreateHangfireStorage(ILogger logger, string connectionString, bool databaseConnected)
+{
+    if (!databaseConnected)
+    {
+        return new MemoryStorage();
+    }
+
+    try
+    {
+        return new PostgreSqlStorage(connectionString);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Hangfire PostgreSQL storage initialization failed; the worker will use in-memory storage for this startup.");
+        return new MemoryStorage();
     }
 }
 

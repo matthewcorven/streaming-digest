@@ -4,6 +4,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Hangfire;
+using Hangfire.Dashboard;
+using Hangfire.MemoryStorage;
+using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
@@ -86,6 +89,25 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
     ?? builder.Configuration.GetConnectionString("postgres")
     ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
 
+var startupLoggerFactory = LoggerFactory.Create(logging =>
+{
+    logging.ClearProviders();
+    logging.AddSimpleConsole(options =>
+    {
+        options.SingleLine = true;
+        options.TimestampFormat = "HH:mm:ss ";
+    });
+});
+var startupLogger = startupLoggerFactory.CreateLogger("Startup");
+var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
+var hangfireStorage = CreateHangfireStorage(startupLogger, connectionString, databaseStatus.Connected);
+
+if (!databaseStatus.Connected)
+{
+    startupLogger.LogWarning("Hangfire PostgreSQL connectivity is unavailable; the dashboard will use in-memory storage for this startup.");
+}
+
+builder.Services.AddHangfire(config => config.UseStorage(hangfireStorage));
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
@@ -260,7 +282,6 @@ using var startupScope = CorrelationContext.BeginLoggingScope(app.Logger, new Di
     ["environment"] = app.Environment.EnvironmentName
 });
 
-var databaseStatus = await EnsureDatabaseConnectivityAsync(app.Logger, connectionString);
 var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
 var defaultRetentionDays = StorageRetentionPolicy.ComputeObservabilityRetentionDays(StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes());
 var observabilityRuntime = await LoadObservabilityRuntimeAsync(app.Logger, builder.Configuration, builder.Environment, connectionString, databaseStatus.Connected, defaultObservabilityEnabled, defaultRetentionDays);
@@ -330,6 +351,11 @@ app.Use(async (context, next) =>
 
     context.Items["AuthenticatedUser"] = authenticationResult.User;
     await next();
+});
+
+app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
+{
+    Authorization = new[] { new PassThroughDashboardAuthorizationFilter() }
 });
 
 app.MapGet("/api/channels", async (HttpContext context, StreamingDigestDbContext dbContext) =>
@@ -957,6 +983,24 @@ static async Task<DatabaseStatus> EnsureDatabaseConnectivityAsync(ILogger logger
     }
 }
 
+static JobStorage CreateHangfireStorage(ILogger logger, string connectionString, bool databaseConnected)
+{
+    if (!databaseConnected)
+    {
+        return new MemoryStorage();
+    }
+
+    try
+    {
+        return new PostgreSqlStorage(connectionString);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Hangfire PostgreSQL storage initialization failed; the dashboard will use in-memory storage for this startup.");
+        return new MemoryStorage();
+    }
+}
+
 static void ConfigureOtlpExporter(OtlpExporterOptions options)
 {
     var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -1177,6 +1221,11 @@ static bool RequiresAuthentication(HttpRequest request)
         return false;
     }
 
+    if (IsHangfireDashboardPath(path))
+    {
+        return true;
+    }
+
     return path.StartsWith("/api/internal", StringComparison.Ordinal)
         || path.StartsWith("/api/onboarding", StringComparison.Ordinal)
         || path.StartsWith("/api/settings", StringComparison.Ordinal)
@@ -1188,7 +1237,18 @@ static bool RequiresAuthentication(HttpRequest request)
 
 static bool RequiresCsrfProtection(HttpRequest request)
 {
+    if (IsHangfireDashboardPath(request.Path.Value ?? string.Empty))
+    {
+        return false;
+    }
+
     return request.Method is not "GET" and not "HEAD" and not "OPTIONS" and not "TRACE";
+}
+
+static bool IsHangfireDashboardPath(string path)
+{
+    return path.Equals("/admin/jobs", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith("/admin/jobs/", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool HasValidCsrfToken(HttpRequest request, string? expectedToken)
@@ -1323,6 +1383,11 @@ internal sealed record ChannelListItemResponse(Guid Id, string YoutubeChannelId,
 internal sealed record ChannelDetailResponse(Guid Id, string YoutubeChannelId, ChannelValueResponse Name, ChannelValueResponse Description, string ProfileUrl, string SourceUrl, bool IsPaused, bool IsDegraded, int ConsecutiveFailures, DateTimeOffset? LastIngestedAt, string? LastIngestionStatus, ChannelIngestionDefaultsResponse IngestionDefaults);
 internal sealed record ChannelValueResponse(string? Original, string? Override, string? Effective);
 internal sealed record ChannelIngestionDefaultsResponse(int? MaxAgeDays, int? BackfillMaxVideos);
+
+sealed class PassThroughDashboardAuthorizationFilter : IDashboardAuthorizationFilter
+{
+    public bool Authorize(DashboardContext context) => true;
+}
 
 sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
 
