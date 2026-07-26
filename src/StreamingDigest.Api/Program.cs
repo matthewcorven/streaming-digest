@@ -89,7 +89,7 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
     ?? builder.Configuration.GetConnectionString("postgres")
     ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
 
-using var startupLoggerFactory = LoggerFactory.Create(logging =>
+var startupLoggerFactory = LoggerFactory.Create(logging =>
 {
     logging.ClearProviders();
     logging.AddSimpleConsole(options =>
@@ -100,9 +100,7 @@ using var startupLoggerFactory = LoggerFactory.Create(logging =>
 });
 var startupLogger = startupLoggerFactory.CreateLogger("Startup");
 var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
-var hangfireStorage = databaseStatus.Connected
-    ? (JobStorage)new PostgreSqlStorage(connectionString)
-    : new MemoryStorage();
+var hangfireStorage = CreateHangfireStorage(startupLogger, connectionString, databaseStatus.Connected);
 
 if (!databaseStatus.Connected)
 {
@@ -948,6 +946,24 @@ static async Task<DatabaseStatus> EnsureDatabaseConnectivityAsync(ILogger logger
     {
         logger.LogWarning(ex, "API could not connect to PostgreSQL; the API will continue in degraded mode");
         return new DatabaseStatus(false, connectionStringBuilder.Database ?? "postgres", "unavailable");
+    }
+}
+
+static JobStorage CreateHangfireStorage(ILogger logger, string connectionString, bool databaseConnected)
+{
+    if (!databaseConnected)
+    {
+        return new MemoryStorage();
+    }
+
+    try
+    {
+        return new PostgreSqlStorage(connectionString);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Hangfire PostgreSQL storage initialization failed; the dashboard will use in-memory storage for this startup.");
+        return new MemoryStorage();
     }
 }
 
