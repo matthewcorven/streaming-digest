@@ -63,7 +63,18 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
-builder.Services.AddSingleton<ILinkClassificationService, LinkClassificationService>();
+builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+    var llmBaseUrl = builder.Configuration["llm:baseUrl"]
+        ?? Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
+        ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
+        ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
+    if (!string.IsNullOrWhiteSpace(llmBaseUrl))
+    {
+        client.BaseAddress = new Uri(llmBaseUrl);
+    }
+});
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {

@@ -1,3 +1,7 @@
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
 using StreamingDigest.Application;
 
 namespace StreamingDigest.UnitTests;
@@ -86,5 +90,73 @@ public sealed class LinkClassificationServiceTests
         var result = _service.Classify("mailto:test@example.com");
 
         Assert.Equal(LinkClassification.Other, result.Classification);
+    }
+
+    [Fact]
+    public void Classify_uses_llm_result_when_available()
+    {
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"message\":{\"content\":\"{\\\"classification\\\":\\\"Course\\\",\\\"confidence\\\":0.92}\"}}", Encoding.UTF8, "application/json")
+            };
+        });
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:11434/")
+        };
+
+        var service = new LinkClassificationService(httpClient);
+        var result = service.Classify("https://www.udemy.com/course/ai-fundamentals");
+
+        Assert.Equal(LinkClassification.Course, result.Classification);
+        Assert.Equal("llm", result.Method);
+        Assert.Equal(0.92, result.Confidence, 5);
+    }
+
+    [Fact]
+    public void Classify_includes_examples_in_llm_prompt()
+    {
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            Assert.Contains("https://example.com/sponsor", body);
+            Assert.Contains("AdSponsor", body);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"message\":{\"content\":\"{\\\"classification\\\":\\\"WebsiteResource\\\",\\\"confidence\\\":0.88}\"}}", Encoding.UTF8, "application/json")
+            };
+        });
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:11434/")
+        };
+        var service = new LinkClassificationService(httpClient);
+        var examples = new[]
+        {
+            new LinkClassificationExample("https://example.com/sponsor", LinkClassification.AdSponsor, "sponsored content")
+        };
+
+        var result = service.Classify("https://example.com/guide", examples);
+
+        Assert.Equal(LinkClassification.WebsiteResource, result.Classification);
+        Assert.Equal("llm", result.Method);
+    }
+
+    private sealed class StubHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> _handler;
+
+        public StubHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> handler)
+        {
+            _handler = handler;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_handler(request, cancellationToken));
+        }
     }
 }

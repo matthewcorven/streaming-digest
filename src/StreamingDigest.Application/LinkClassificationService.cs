@@ -1,3 +1,8 @@
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+
 namespace StreamingDigest.Application;
 
 public enum LinkClassification
@@ -15,15 +20,49 @@ public enum LinkClassification
 }
 
 public sealed record LinkClassificationResult(LinkClassification Classification, string Method, double Confidence);
+public sealed record LinkClassificationExample(string Url, LinkClassification Classification, string? Reason = null);
 
 public interface ILinkClassificationService
 {
     LinkClassificationResult Classify(string? url);
+    LinkClassificationResult Classify(string? url, IReadOnlyList<LinkClassificationExample>? examples);
 }
 
 public sealed class LinkClassificationService : ILinkClassificationService
 {
-    public LinkClassificationResult Classify(string? url)
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<LinkClassificationService>? _logger;
+    private readonly bool _llmEnabled;
+
+    public LinkClassificationService()
+        : this(new HttpClient(), null)
+    {
+    }
+
+    public LinkClassificationService(HttpClient httpClient, ILogger<LinkClassificationService>? logger = null)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _logger = logger;
+        _llmEnabled = ResolveLlmEnabled();
+
+        if (_httpClient.BaseAddress is null)
+        {
+            var configuredBaseUrl = ResolveBaseUrl();
+            if (!string.IsNullOrWhiteSpace(configuredBaseUrl))
+            {
+                _httpClient.BaseAddress = new Uri(configuredBaseUrl);
+            }
+        }
+    }
+
+    public LinkClassificationResult Classify(string? url) => Classify(url, null);
+
+    public LinkClassificationResult Classify(string? url, IReadOnlyList<LinkClassificationExample>? examples)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -36,6 +75,56 @@ public sealed class LinkClassificationService : ILinkClassificationService
         }
 
         var uri = normalized!;
+        var ruleResult = ApplyRuleBasedClassification(uri);
+        if (!_llmEnabled || _httpClient.BaseAddress is null)
+        {
+            return ruleResult;
+        }
+
+        var llmResult = TryClassifyWithLocalLlm(url, uri, examples);
+        return llmResult ?? ruleResult;
+    }
+
+    private LinkClassificationResult? TryClassifyWithLocalLlm(string? url, Uri uri, IReadOnlyList<LinkClassificationExample>? examples)
+    {
+        try
+        {
+            var payload = new
+            {
+                model = ResolveModelName(),
+                stream = false,
+                format = "json",
+                options = new { temperature = 0.0 },
+                messages = new object[]
+                {
+                    new { role = "system", content = BuildSystemPrompt() },
+                    new { role = "user", content = BuildUserPrompt(url, uri, examples) }
+                }
+            };
+
+            using var response = _httpClient.PostAsJsonAsync("api/chat", payload).GetAwaiter().GetResult();
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var content = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (!TryParseLlmClassification(content, out var classification, out var confidence))
+            {
+                return null;
+            }
+
+            return new LinkClassificationResult(classification, confidence >= 0.8 ? "llm" : "rule+llm", confidence);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Local LLM classification failed for {Url}; falling back to rules", url);
+            return null;
+        }
+    }
+
+    private static LinkClassificationResult ApplyRuleBasedClassification(Uri uri)
+    {
         var host = uri.Host;
         var path = uri.AbsolutePath;
         var combined = $"{host} {path} {uri.Query}";
@@ -164,5 +253,206 @@ public sealed class LinkClassificationService : ILinkClassificationService
         }
 
         return false;
+    }
+
+    private static string BuildSystemPrompt()
+    {
+        return "You classify URLs into the categories Unknown, CodeRepository, WebsiteResource, AdSponsor, Affiliate, Social, Newsletter, Course, Merch, or Other. Return compact JSON with classification and confidence fields only.";
+    }
+
+    private static string BuildUserPrompt(string? url, Uri uri, IReadOnlyList<LinkClassificationExample>? examples)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Classify the following URL.");
+        builder.AppendLine($"URL: {url}");
+        builder.AppendLine($"Host: {uri.Host}");
+        builder.AppendLine($"Path: {uri.AbsolutePath}");
+        builder.AppendLine($"Query: {uri.Query}");
+
+        if (examples is { Count: > 0 })
+        {
+            builder.AppendLine("Corrections/examples:");
+            foreach (var example in examples.Take(5))
+            {
+                builder.AppendLine($"- {example.Url}: {example.Classification} ({example.Reason ?? "no reason"})");
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool TryParseLlmClassification(string content, out LinkClassification classification, out double confidence)
+    {
+        classification = LinkClassification.Unknown;
+        confidence = 0.0;
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        var normalized = content.Trim();
+        if (normalized.StartsWith("```", StringComparison.Ordinal))
+        {
+            normalized = normalized.Trim('`', '\n', '\r', ' ');
+        }
+
+        if (!TryExtractJsonPayload(normalized, out var payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (TryReadNestedContent(root, out var nestedContent))
+                {
+                    if (!TryParseLlmClassification(nestedContent, out classification, out confidence))
+                    {
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                if (root.TryGetProperty("classification", out var classificationProperty))
+                {
+                    var classificationValue = classificationProperty.GetString();
+                    if (TryParseClassification(classificationValue, out classification))
+                    {
+                        confidence = ReadConfidence(root);
+                        return true;
+                    }
+                }
+
+                if (root.TryGetProperty("label", out var labelProperty))
+                {
+                    var classificationValue = labelProperty.GetString();
+                    if (TryParseClassification(classificationValue, out classification))
+                    {
+                        confidence = ReadConfidence(root);
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadNestedContent(JsonElement root, out string content)
+    {
+        content = string.Empty;
+        if (root.TryGetProperty("message", out var messageElement) && messageElement.ValueKind == JsonValueKind.Object)
+        {
+            if (messageElement.TryGetProperty("content", out var contentElement) && contentElement.ValueKind == JsonValueKind.String)
+            {
+                content = contentElement.GetString() ?? string.Empty;
+                return !string.IsNullOrWhiteSpace(content);
+            }
+        }
+
+        return false;
+    }
+
+    private static double ReadConfidence(JsonElement root)
+    {
+        if (root.TryGetProperty("confidence", out var confidenceProperty))
+        {
+            if (confidenceProperty.ValueKind == JsonValueKind.Number && confidenceProperty.TryGetDouble(out var parsed))
+            {
+                return Math.Clamp(parsed, 0.0, 1.0);
+            }
+        }
+
+        return 0.8;
+    }
+
+    private static bool TryParseClassification(string? value, out LinkClassification classification)
+    {
+        classification = LinkClassification.Unknown;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (Enum.TryParse<LinkClassification>(value, true, out var parsed))
+        {
+            classification = parsed;
+            return true;
+        }
+
+        return value.ToLowerInvariant() switch
+        {
+            "code repository" => (classification = LinkClassification.CodeRepository, true).Item2,
+            "website resource" => (classification = LinkClassification.WebsiteResource, true).Item2,
+            "ad sponsor" => (classification = LinkClassification.AdSponsor, true).Item2,
+            "affiliate" => (classification = LinkClassification.Affiliate, true).Item2,
+            "social" => (classification = LinkClassification.Social, true).Item2,
+            "newsletter" => (classification = LinkClassification.Newsletter, true).Item2,
+            "course" => (classification = LinkClassification.Course, true).Item2,
+            "merch" => (classification = LinkClassification.Merch, true).Item2,
+            "other" => (classification = LinkClassification.Other, true).Item2,
+            _ => false
+        };
+    }
+
+    private static bool TryExtractJsonPayload(string content, out string payload)
+    {
+        payload = string.Empty;
+        var startIndex = content.IndexOf('{');
+        if (startIndex < 0)
+        {
+            return false;
+        }
+
+        var depth = 0;
+        for (var index = startIndex; index < content.Length; index++)
+        {
+            var current = content[index];
+            if (current == '{')
+            {
+                depth++;
+            }
+            else if (current == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    payload = content[startIndex..(index + 1)];
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool ResolveLlmEnabled()
+    {
+        var hasConfiguredBaseUrl = _httpClient.BaseAddress is not null || !string.IsNullOrWhiteSpace(ResolveBaseUrl());
+        return hasConfiguredBaseUrl && !string.IsNullOrWhiteSpace(ResolveModelName());
+    }
+
+    private static string? ResolveBaseUrl()
+    {
+        return Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
+    }
+
+    private static string? ResolveModelName()
+    {
+        return Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_MODEL")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")
+            ?? "llama3.2";
     }
 }
