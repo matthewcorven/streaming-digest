@@ -105,6 +105,7 @@ public sealed record ScrapeFirstPageRequest(
     int RateLimitDelayMs = 1000);
 
 public sealed record ScrapeFirstPageResponse(
+    string RequestedUrl,
     string FinalUrl,
     string? Title,
     string? Description,
@@ -114,4 +115,5 @@ public sealed record ScrapeFirstPageResponse(
     int HttpStatus,
     string? ContentType,
     string ContentHash,
-    string? RawHtmlDebugPath);
+    string? RawHtmlDebugPath,
+    string? ExclusionReason = null);

@@ -19,6 +19,7 @@ public sealed class ScraperClientTests
             capturedRequest = await request.Content!.ReadFromJsonAsync<ScrapeFirstPageRequest>(cancellationToken: cancellationToken);
 
             var payload = new ScrapeFirstPageResponse(
+                "https://www.example.com/article",
                 "https://www.example.com/target",
                 null,
                 null,
@@ -68,6 +69,51 @@ public sealed class ScraperClientTests
         Assert.Equal(250, capturedRequest.RateLimitDelayMs);
         Assert.Equal("/internal/scrape/first-page", requestedPath);
         Assert.Equal("https://www.example.com/target", response.FinalUrl);
+        Assert.Equal("https://www.example.com/article", response.RequestedUrl);
+    }
+
+    [Fact]
+    public async Task ScrapeFirstPageAsync_preserves_robots_exclusion_details_from_scraper_response()
+    {
+        var handler = new StubHttpMessageHandler(async (request, cancellationToken) =>
+        {
+            var payload = new ScrapeFirstPageResponse(
+                "https://www.example.com/blocked",
+                "https://www.example.com/blocked",
+                null,
+                null,
+                JsonDocument.Parse("{}" ).RootElement,
+                string.Empty,
+                false,
+                0,
+                null,
+                "sha256:blocked",
+                null,
+                "robots-txt");
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(payload)
+            };
+        });
+
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://scraper.internal")
+        };
+
+        var client = new ScraperClient(
+            httpClient,
+            new NoOpScrapeFailureRecorder(),
+            new WorkerOperationConcurrencyController(new WorkerConcurrencySettings()),
+            new ApplicationConfiguration());
+
+        var response = await client.ScrapeFirstPageAsync(new ScrapeFirstPageRequest("https://www.example.com/blocked", RespectRobotsTxt: true));
+
+        Assert.False(response.RobotsAllowed);
+        Assert.Equal("https://www.example.com/blocked", response.RequestedUrl);
+        Assert.Equal("robots-txt", response.ExclusionReason);
+        Assert.Equal(string.Empty, response.VisibleText);
     }
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
