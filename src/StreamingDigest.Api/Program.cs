@@ -17,6 +17,7 @@ using StreamingDigest.Application.Configuration;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.MatrixNotifier;
+using StreamingDigest.Web.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -220,7 +221,7 @@ app.MapGet("/api/settings", (HttpContext context) =>
                 ["observability.links.prometheusUrl"] = observabilityRuntime.PrometheusUrl,
                 ["observability.links.lokiUrl"] = observabilityRuntime.LokiUrl,
                 ["observability.links.tempoUrl"] = observabilityRuntime.TempoUrl,
-                ["observability.links.hangfireUrl"] = "/admin/jobs"
+                ["observability.links.hangfireUrl"] = observabilityRuntime.HangfireUrl
             }
         })
         : Results.Unauthorized());
@@ -266,8 +267,15 @@ app.MapGet("/api/observability", () => Results.Ok(new
     mode = observabilityRuntime.Enabled ? "enabled" : "disabled",
     retentionDays = observabilityRuntime.RetentionDays,
     retentionWarning = observabilityRuntime.RetentionWarning,
+    links = ObservabilityLinkCatalog.Create(
+        observabilityRuntime.HangfireUrl,
+        observabilityRuntime.GrafanaUrl,
+        observabilityRuntime.PrometheusUrl,
+        observabilityRuntime.LokiUrl,
+        observabilityRuntime.TempoUrl),
     services = new
     {
+        hangfire = observabilityRuntime.HangfireUrl,
         grafana = observabilityRuntime.GrafanaUrl,
         prometheus = observabilityRuntime.PrometheusUrl,
         loki = observabilityRuntime.LokiUrl,
@@ -473,6 +481,7 @@ static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogg
     var prometheusUrl = configuration["observability:services:prometheus:url"] ?? "http://prometheus:9090";
     var lokiUrl = configuration["observability:services:loki:url"] ?? "http://loki:3100";
     var tempoUrl = configuration["observability:services:tempo:url"] ?? "http://tempo:3200";
+    var hangfireUrl = configuration["observability:services:hangfire:url"] ?? "/admin/jobs";
     var otelCollectorUrl = configuration["observability:services:otelCollector:url"] ?? "http://otel-collector:4317";
 
     if (databaseConnected)
@@ -487,6 +496,7 @@ static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogg
             prometheusUrl = await ReadStringSettingAsync(connection, "observability.links.prometheusUrl", prometheusUrl);
             lokiUrl = await ReadStringSettingAsync(connection, "observability.links.lokiUrl", lokiUrl);
             tempoUrl = await ReadStringSettingAsync(connection, "observability.links.tempoUrl", tempoUrl);
+            hangfireUrl = await ReadStringSettingAsync(connection, "observability.links.hangfireUrl", hangfireUrl);
             otelCollectorUrl = await ReadStringSettingAsync(connection, "observability.links.otelCollectorUrl", otelCollectorUrl);
         }
         catch (Exception ex)
@@ -504,6 +514,7 @@ static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogg
         PrometheusUrl = prometheusUrl,
         LokiUrl = lokiUrl,
         TempoUrl = tempoUrl,
+        HangfireUrl = hangfireUrl,
         OtelCollectorUrl = otelCollectorUrl
     };
 }
@@ -758,6 +769,7 @@ public sealed class ObservabilityRuntimeState
     public string PrometheusUrl { get; set; } = string.Empty;
     public string LokiUrl { get; set; } = string.Empty;
     public string TempoUrl { get; set; } = string.Empty;
+    public string HangfireUrl { get; set; } = string.Empty;
     public string OtelCollectorUrl { get; set; } = string.Empty;
 }
 
