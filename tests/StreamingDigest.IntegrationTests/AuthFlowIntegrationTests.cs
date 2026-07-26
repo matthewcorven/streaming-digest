@@ -163,12 +163,47 @@ public sealed class AuthFlowIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Disallowed_internal_and_media_paths_are_not_served_by_the_spa_fallback()
+    public async Task Hangfire_dashboard_requires_authentication_for_unauthenticated_clients()
     {
         using var client = CreateClient();
 
-        var adminResponse = await client.GetAsync("/admin/jobs");
-        Assert.Equal(HttpStatusCode.NotFound, adminResponse.StatusCode);
+        var response = await client.GetAsync("/admin/jobs");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Hangfire_dashboard_is_available_to_authenticated_clients()
+    {
+        using var client = CreateClient();
+
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = BootstrapPassword });
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var csrfResponse = await client.GetAsync("/api/auth/csrf");
+        Assert.Equal(HttpStatusCode.OK, csrfResponse.StatusCode);
+        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfTokenResponse>();
+        Assert.NotNull(csrf);
+
+        using var changePasswordRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/change-password");
+        changePasswordRequest.Headers.Add("X-CSRF-Token", csrf!.Token);
+        changePasswordRequest.Content = JsonContent.Create(new { currentPassword = BootstrapPassword, newPassword = "new-passw0rd-123!" });
+
+        var changePasswordResponse = await client.SendAsync(changePasswordRequest);
+        Assert.Equal(HttpStatusCode.OK, changePasswordResponse.StatusCode);
+
+        var reloginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = "new-passw0rd-123!" });
+        Assert.Equal(HttpStatusCode.OK, reloginResponse.StatusCode);
+
+        var response = await client.GetAsync("/admin/jobs");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Hangfire", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Disallowed_internal_and_media_paths_are_not_served_by_the_spa_fallback()
+    {
+        using var client = CreateClient();
 
         var mediaResponse = await client.GetAsync("/api/screenshots/does-not-exist");
         Assert.Equal(HttpStatusCode.NotFound, mediaResponse.StatusCode);
