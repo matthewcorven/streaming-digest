@@ -13,8 +13,24 @@ public sealed class RepositoryMetadataServiceTests
         var handler = new StubHttpMessageHandler((request, _) =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);
-            Assert.Equal("https://api.github.com/repos/matthewcorven/streaming-digest", request.RequestUri?.ToString());
+            Assert.Contains("api.github.com/repos/matthewcorven/streaming-digest", request.RequestUri?.ToString() ?? string.Empty);
             Assert.Contains("streaming-digest", request.Headers.UserAgent.ToString());
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/readme") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"content\":\"IyBNaW5lIE5vdGUgUkVBRE1F\",\"encoding\":\"base64\"}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/license") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"content\":\"TUlU\",\"encoding\":\"base64\"}", Encoding.UTF8, "application/json")
+                };
+            }
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -37,6 +53,39 @@ public sealed class RepositoryMetadataServiceTests
         Assert.Equal("main", result.Metadata.DefaultBranch);
         Assert.True(result.Metadata.IsPublic);
         Assert.Equal("MIT", result.Metadata.LicenseName);
+        Assert.Equal("# Mine Note README", result.Metadata.ReadmeContent);
+        Assert.Equal("MIT", result.Metadata.LicenseContent);
+    }
+
+    [Fact]
+    public void Fetch_returns_null_readme_and_license_content_when_github_documents_are_missing()
+    {
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/readme") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/license") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"description\":\"Streaming Digest\",\"stargazers_count\":42,\"language\":\"C#\",\"default_branch\":\"main\",\"private\":false,\"license\":{\"spdx_id\":\"MIT\"}}", Encoding.UTF8, "application/json")
+            };
+        });
+        var httpClient = new HttpClient(handler);
+        var service = new RepositoryMetadataService(new RepositoryHostDetectionService(), httpClient);
+
+        var result = service.Fetch("https://github.com/matthewcorven/streaming-digest");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage ?? "Repository metadata fetch unexpectedly failed.");
+        Assert.NotNull(result.Metadata);
+        Assert.Null(result.Metadata!.ReadmeContent);
+        Assert.Null(result.Metadata.LicenseContent);
     }
 
     [Fact]
