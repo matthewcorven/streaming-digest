@@ -7,6 +7,10 @@
 </PropertyGroup>
 
 <ItemGroup>
+  <FrameworkReference Include="Microsoft.AspNetCore.App" />
+</ItemGroup>
+
+<ItemGroup>
   <ProjectReference Include="..\StreamingDigest.Application\StreamingDigest.Application.csproj" />
   <ProjectReference Include="..\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
   <ProjectReference Include="..\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />

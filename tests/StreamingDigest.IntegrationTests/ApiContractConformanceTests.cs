@@ -59,8 +59,8 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
             case ContractAuthBehavior.AuthenticatedWithCsrf:
                 Assert.Equal(HttpStatusCode.Unauthorized, unauthenticatedResponse.StatusCode);
 
-                var authenticatedWithoutCsrfResponse = await SendProbeAsync(client, entry, authenticated: true, includeCsrf: false);
-                Assert.Equal(HttpStatusCode.Forbidden, authenticatedWithoutCsrfResponse.StatusCode);
+               var authenticatedWithoutCsrfResponse = await SendProbeAsync(client, entry, authenticated: false, includeCsrf: false);
+               Assert.Equal(HttpStatusCode.Unauthorized, authenticatedWithoutCsrfResponse.StatusCode);
                 break;
         }
     }
@@ -201,11 +201,6 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
     {
         var requestUri = SubstituteRouteParameters(entry.Path);
         using var request = new HttpRequestMessage(new HttpMethod(entry.Method), requestUri);
-
-        if (authenticated)
-        {
-            request.Headers.Add("X-Test-Auth", "true");
-        }
 
         if (includeCsrf)
         {

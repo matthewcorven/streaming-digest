@@ -1,6 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
-using Konscious.Security.Cryptography;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -14,6 +12,7 @@ public sealed class BootstrapAdminUserService
 
     private readonly IConfiguration _configuration;
     private readonly ILogger<BootstrapAdminUserService> _logger;
+    private static readonly PasswordHasher<string> PasswordHasher = new();
 
     public BootstrapAdminUserService(IConfiguration configuration, ILogger<BootstrapAdminUserService> logger)
     {
@@ -99,16 +98,6 @@ public sealed class BootstrapAdminUserService
 
     private static string CreatePasswordHash(string password)
     {
-        var passwordBytes = Encoding.UTF8.GetBytes(password);
-        var argon2 = new Argon2id(passwordBytes)
-        {
-            Iterations = 4,
-            MemorySize = 64 * 1024,
-            DegreeOfParallelism = 2,
-            Salt = RandomNumberGenerator.GetBytes(16)
-        };
-
-        var hash = argon2.GetBytes(32);
-        return Convert.ToHexString(hash);
+        return PasswordHasher.HashPassword(string.Empty, password);
     }
 }

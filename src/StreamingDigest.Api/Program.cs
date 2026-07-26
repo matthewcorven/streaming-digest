@@ -19,6 +19,7 @@ using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Web.Models;
 
+var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var builder = WebApplication.CreateBuilder(args);
 
 var applicationConfiguration = ApplicationConfigurationLoader.LoadFromDirectory(builder.Environment.ContentRootPath);
@@ -83,9 +84,11 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
 
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddSingleton<BootstrapAdminUserService>();
+builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 
 var app = builder.Build();
+var authService = app.Services.GetRequiredService<AppAuthService>();
 
 using var startupScope = CorrelationContext.BeginLoggingScope(app.Logger, new Dictionary<string, object?>
 {
@@ -106,6 +109,7 @@ if (databaseStatus.Connected)
 
     var bootstrapAdminUserService = app.Services.GetRequiredService<BootstrapAdminUserService>();
     await bootstrapAdminUserService.EnsureBootstrapAdminUserAsync(connectionString);
+    await authService.EnsureSchemaAsync(connectionString);
 }
 
 if (app.Environment.IsDevelopment())
@@ -116,6 +120,47 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
+
+app.Use(async (context, next) =>
+{
+    if (!RequiresAuthentication(context.Request))
+    {
+        await next();
+        return;
+    }
+
+    RequestAuthenticationResult authenticationResult;
+    try
+    {
+        authenticationResult = await authService.TryAuthenticateRequestAsync(connectionString, context.Request);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Authentication middleware failed while validating the request session.");
+        authenticationResult = new RequestAuthenticationResult(false, null, null, false);
+    }
+
+    if (!authenticationResult.IsAuthenticated)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+
+    if (authenticationResult.RequiresPasswordChange && !ShouldAllowPasswordChangeFlow(context.Request))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+
+    if (RequiresCsrfProtection(context.Request) && !HasValidCsrfToken(context.Request, authenticationResult.CsrfToken))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+
+    context.Items["AuthenticatedUser"] = authenticationResult.User;
+    await next();
+});
 
 app.MapGet("/api/health", () => Results.Ok(new
 {
@@ -167,26 +212,100 @@ app.MapGet("/api/internal/ingestion-runs/{ingestionRunId:guid}/notifications", a
     return Results.Ok(notifications);
 });
 
-app.MapPost("/api/auth/login", () => Results.Ok(new { username = "admin", mustChangePassword = true }));
-app.MapPost("/api/auth/logout", () => Results.Ok(new { success = true }));
-app.MapGet("/api/auth/me", (HttpContext context) =>
-    IsAuthenticated(context.Request)
-        ? Results.Ok(new { username = "admin", mustChangePassword = false })
-        : Results.Unauthorized());
-app.MapGet("/api/auth/csrf", () => Results.Ok(new { token = "test-csrf-token" }));
-app.MapPost("/api/auth/change-password", (HttpContext context) =>
+app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    try
+    {
+        var requestBody = await JsonSerializer.DeserializeAsync<LoginRequest>(context.Request.Body, jsonOptions, cancellationToken);
+        if (requestBody is null)
+        {
+            return Results.BadRequest(new { error = "The request body is required." });
+        }
+
+        var result = await authService.AuthenticateAsync(
+            connectionString,
+            requestBody.Username ?? string.Empty,
+            requestBody.Password ?? string.Empty,
+            context.Connection.RemoteIpAddress?.ToString(),
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            return Results.Json(new { error = result.ErrorMessage }, statusCode: result.StatusCode);
+        }
+
+        context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions());
+        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions());
+
+        return Results.Ok(new { username = result.User!.Username, mustChangePassword = result.User.MustChangePassword });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Login request failed.");
+        return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Login failed", detail: ex.Message);
+    }
+});
+app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
+{
+    var sessionToken = context.Request.Cookies["auth-session"];
+    if (!string.IsNullOrWhiteSpace(sessionToken))
+    {
+        await authService.LogoutAsync(connectionString, sessionToken, cancellationToken);
+    }
+
+    context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
+    context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = true, SameSite = SameSiteMode.Lax });
+
+    return Results.Ok(new { success = true });
+});
+app.MapGet("/api/auth/me", (HttpContext context) =>
+{
+    var authenticatedUser = context.Items["AuthenticatedUser"] as AuthenticatedUser;
+    return authenticatedUser is null
+        ? Results.Unauthorized()
+        : Results.Ok(new { username = authenticatedUser.Username, mustChangePassword = authenticatedUser.MustChangePassword });
+});
+app.MapGet("/api/auth/csrf", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
+{
+    var csrfToken = string.Empty;
+    var authenticationResult = await authService.TryAuthenticateRequestAsync(connectionString, context.Request, cancellationToken);
+    if (authenticationResult.IsAuthenticated && !string.IsNullOrWhiteSpace(authenticationResult.CsrfToken))
+    {
+        csrfToken = authenticationResult.CsrfToken!;
+    }
+
+    if (string.IsNullOrWhiteSpace(csrfToken))
+    {
+        csrfToken = authService.CreateCsrfToken();
+    }
+
+    context.Response.Cookies.Append("csrf-token", csrfToken, CreateCsrfCookieOptions());
+    return Results.Ok(new { token = csrfToken });
+});
+app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
+{
+    var authenticatedUser = context.Items["AuthenticatedUser"] as AuthenticatedUser;
+    if (authenticatedUser is null)
     {
         return Results.Unauthorized();
     }
 
-    if (!HasCsrfToken(context.Request))
+    var authenticationResult = await authService.TryAuthenticateRequestAsync(connectionString, context.Request, cancellationToken);
+    if (!authenticationResult.IsAuthenticated || !HasValidCsrfToken(context.Request, authenticationResult.CsrfToken))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
-    return Results.Ok(new { status = "updated" });
+    var requestBody = await JsonSerializer.DeserializeAsync<ChangePasswordRequest>(context.Request.Body, jsonOptions, cancellationToken);
+    if (requestBody is null || string.IsNullOrWhiteSpace(requestBody.CurrentPassword) || string.IsNullOrWhiteSpace(requestBody.NewPassword))
+    {
+        return Results.BadRequest(new { error = "Both current and new passwords are required." });
+    }
+
+    var changed = await authService.ChangePasswordAsync(connectionString, authenticatedUser.Id, requestBody.CurrentPassword, requestBody.NewPassword, cancellationToken);
+    return changed
+        ? Results.Ok(new { status = "updated" })
+        : Results.BadRequest(new { error = "The current password is invalid or the new password is too weak." });
 });
 
 app.MapGet("/api/onboarding/status", (HttpContext context) =>
@@ -357,21 +476,6 @@ app.MapPost("/api/models/download", (HttpContext context) =>
 app.MapFallbackToFile("index.html");
 
 app.Run();
-
-static bool IsAuthenticated(HttpRequest request)
-{
-    if (request.Headers.TryGetValue("X-Test-Auth", out var authHeader) && authHeader.ToString().Contains("true", StringComparison.OrdinalIgnoreCase))
-    {
-        return true;
-    }
-
-    return request.Cookies.ContainsKey("auth-session");
-}
-
-static bool HasCsrfToken(HttpRequest request)
-{
-    return request.Headers.TryGetValue("X-CSRF-Token", out var csrfHeader) && !string.IsNullOrWhiteSpace(csrfHeader.ToString());
-}
 
 static async Task<DatabaseStatus> EnsureDatabaseConnectivityAsync(ILogger logger, string connectionString)
 {
@@ -633,6 +737,87 @@ static bool ShouldForwardRequestBody(HttpRequest request)
     return request.ContentLength is > 0 || request.Headers.ContainsKey("Transfer-Encoding");
 }
 
+static bool RequiresAuthentication(HttpRequest request)
+{
+    var path = request.Path.Value ?? string.Empty;
+    if (path.Equals("/api/observability", StringComparison.Ordinal))
+    {
+        return false;
+    }
+
+    return path.StartsWith("/api/internal", StringComparison.Ordinal)
+        || path.StartsWith("/api/onboarding", StringComparison.Ordinal)
+        || path.StartsWith("/api/settings", StringComparison.Ordinal)
+        || path.StartsWith("/api/observability/toggle", StringComparison.Ordinal)
+        || path.StartsWith("/api/config", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/me", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/change-password", StringComparison.Ordinal);
+}
+
+static bool RequiresCsrfProtection(HttpRequest request)
+{
+    return request.Method is not "GET" and not "HEAD" and not "OPTIONS" and not "TRACE";
+}
+
+static bool HasValidCsrfToken(HttpRequest request, string? expectedToken)
+{
+    if (string.IsNullOrWhiteSpace(expectedToken))
+    {
+        return false;
+    }
+
+    var requestToken = request.Headers["X-CSRF-Token"].ToString();
+    if (!string.IsNullOrWhiteSpace(requestToken))
+    {
+        return string.Equals(requestToken, expectedToken, StringComparison.Ordinal);
+    }
+
+    return request.Cookies.TryGetValue("csrf-token", out var cookieToken) && string.Equals(cookieToken, expectedToken, StringComparison.Ordinal);
+}
+
+static bool IsAuthenticated(HttpRequest request)
+{
+    return request.Cookies.ContainsKey("auth-session");
+}
+
+static bool HasCsrfToken(HttpRequest request)
+{
+    return request.Headers.ContainsKey("X-CSRF-Token") || request.Cookies.ContainsKey("csrf-token");
+}
+
+static bool ShouldAllowPasswordChangeFlow(HttpRequest request)
+{
+    var path = request.Path.Value ?? string.Empty;
+    return path.StartsWith("/api/auth/change-password", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/me", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/csrf", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/logout", StringComparison.Ordinal);
+}
+
+static CookieOptions CreateSessionCookieOptions()
+{
+    return new CookieOptions
+    {
+        HttpOnly = true,
+        Secure = true,
+        SameSite = SameSiteMode.Lax,
+        Path = "/",
+        MaxAge = TimeSpan.FromHours(8)
+    };
+}
+
+static CookieOptions CreateCsrfCookieOptions()
+{
+    return new CookieOptions
+    {
+        HttpOnly = false,
+        Secure = true,
+        SameSite = SameSiteMode.Lax,
+        Path = "/",
+        MaxAge = TimeSpan.FromHours(8)
+    };
+}
+
 static async Task<byte[]> ReadRequestBodyAsync(HttpRequest request, CancellationToken cancellationToken)
 {
     if (!request.Body.CanSeek)
@@ -683,6 +868,9 @@ static string BuildDisabledPlaceholder(string serviceName)
 </html>
 """;
 }
+
+public sealed record LoginRequest(string Username, string Password);
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
 public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);
 
