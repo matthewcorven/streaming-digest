@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -21,11 +22,13 @@ public enum LinkClassification
 
 public sealed record LinkClassificationResult(LinkClassification Classification, string Method, double Confidence);
 public sealed record LinkClassificationExample(string Url, LinkClassification Classification, string? Reason = null);
+public sealed record LinkClassificationCorrection(string Url, LinkClassification PreviousClassification, LinkClassification CorrectedClassification, string? Reason = null, bool IsActive = true);
 
 public interface ILinkClassificationService
 {
     LinkClassificationResult Classify(string? url);
     LinkClassificationResult Classify(string? url, IReadOnlyList<LinkClassificationExample>? examples);
+    LinkClassificationResult Classify(string? url, IReadOnlyList<LinkClassificationCorrection>? corrections);
 }
 
 public sealed class LinkClassificationService : ILinkClassificationService
@@ -60,7 +63,7 @@ public sealed class LinkClassificationService : ILinkClassificationService
         }
     }
 
-    public LinkClassificationResult Classify(string? url) => Classify(url, null);
+    public LinkClassificationResult Classify(string? url) => Classify(url, (IReadOnlyList<LinkClassificationExample>?)null);
 
     public LinkClassificationResult Classify(string? url, IReadOnlyList<LinkClassificationExample>? examples)
     {
@@ -83,6 +86,12 @@ public sealed class LinkClassificationService : ILinkClassificationService
 
         var llmResult = TryClassifyWithLocalLlm(url, uri, examples);
         return llmResult ?? ruleResult;
+    }
+
+    public LinkClassificationResult Classify(string? url, IReadOnlyList<LinkClassificationCorrection>? corrections)
+    {
+        var examples = BuildPromptExamples(corrections);
+        return Classify(url, examples);
     }
 
     private LinkClassificationResult? TryClassifyWithLocalLlm(string? url, Uri uri, IReadOnlyList<LinkClassificationExample>? examples)
@@ -253,6 +262,25 @@ public sealed class LinkClassificationService : ILinkClassificationService
         }
 
         return false;
+    }
+
+    private static IReadOnlyList<LinkClassificationExample> BuildPromptExamples(IEnumerable<LinkClassificationCorrection>? corrections)
+    {
+        if (corrections is null)
+        {
+            return Array.Empty<LinkClassificationExample>();
+        }
+
+        return corrections
+            .Where(correction => correction is not null && correction.IsActive && !string.IsNullOrWhiteSpace(correction.Url))
+            .Select(correction => new LinkClassificationExample(
+                correction.Url,
+                correction.CorrectedClassification,
+                string.IsNullOrWhiteSpace(correction.Reason)
+                    ? $"corrected from {correction.PreviousClassification}"
+                    : correction.Reason))
+            .Take(5)
+            .ToArray();
     }
 
     private static string BuildSystemPrompt()

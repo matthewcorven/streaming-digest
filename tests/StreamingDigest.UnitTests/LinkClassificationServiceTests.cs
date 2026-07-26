@@ -145,6 +145,38 @@ public sealed class LinkClassificationServiceTests
         Assert.Equal("llm", result.Method);
     }
 
+    [Fact]
+    public void Classify_uses_active_corrections_as_llm_examples()
+    {
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            Assert.Contains("https://example.com/corrected", body);
+            Assert.Contains("Affiliate", body);
+            Assert.DoesNotContain("https://example.com/inactive", body);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"message\":{\"content\":\"{\\\"classification\\\":\\\"WebsiteResource\\\",\\\"confidence\\\":0.88}\"}}", Encoding.UTF8, "application/json")
+            };
+        });
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:11434/")
+        };
+        var service = new LinkClassificationService(httpClient);
+        var corrections = new[]
+        {
+            new LinkClassificationCorrection("https://example.com/corrected", LinkClassification.WebsiteResource, LinkClassification.Affiliate, "affiliate content", true),
+            new LinkClassificationCorrection("https://example.com/inactive", LinkClassification.WebsiteResource, LinkClassification.AdSponsor, "inactive correction", false)
+        };
+
+        var result = service.Classify("https://example.com/guide", corrections);
+
+        Assert.Equal(LinkClassification.WebsiteResource, result.Classification);
+        Assert.Equal("llm", result.Method);
+    }
+
     private sealed class StubHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> _handler;
