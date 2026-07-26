@@ -129,6 +129,88 @@ public sealed class AuthFlowIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Protected_routes_require_authentication()
+    {
+        using var client = CreateClient();
+
+        var routes = new[]
+        {
+            "/api/settings",
+            "/api/config/runtime",
+            "/api/internal/notifications/matrix/health"
+        };
+
+        foreach (var route in routes)
+        {
+            var response = await client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Authenticated_mutating_requests_without_csrf_tokens_are_rejected()
+    {
+        using var client = CreateClient();
+
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = BootstrapPassword });
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/api/settings");
+        request.Content = JsonContent.Create(new Dictionary<string, object?> { ["observability.enabled"] = true });
+
+        var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Disallowed_internal_and_media_paths_are_not_served_by_the_spa_fallback()
+    {
+        using var client = CreateClient();
+
+        var adminResponse = await client.GetAsync("/admin/jobs");
+        Assert.Equal(HttpStatusCode.NotFound, adminResponse.StatusCode);
+
+        var mediaResponse = await client.GetAsync("/api/screenshots/does-not-exist");
+        Assert.Equal(HttpStatusCode.NotFound, mediaResponse.StatusCode);
+
+        var traversalResponse = await client.GetAsync("/api/screenshots/../../index.html");
+        Assert.Equal(HttpStatusCode.NotFound, traversalResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Runtime_configuration_endpoint_does_not_expose_sensitive_settings()
+    {
+        using var client = CreateClient();
+
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = BootstrapPassword });
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var csrfResponse = await client.GetAsync("/api/auth/csrf");
+        Assert.Equal(HttpStatusCode.OK, csrfResponse.StatusCode);
+        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfTokenResponse>();
+        Assert.NotNull(csrf);
+
+        using var changePasswordRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/change-password");
+        changePasswordRequest.Headers.Add("X-CSRF-Token", csrf!.Token);
+        changePasswordRequest.Content = JsonContent.Create(new { currentPassword = BootstrapPassword, newPassword = "new-passw0rd-123!" });
+
+        var changePasswordResponse = await client.SendAsync(changePasswordRequest);
+        Assert.Equal(HttpStatusCode.OK, changePasswordResponse.StatusCode);
+
+        var reloginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = "new-passw0rd-123!" });
+        Assert.Equal(HttpStatusCode.OK, reloginResponse.StatusCode);
+
+        var response = await client.GetAsync("/api/config/runtime");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("environment", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("connectionstrings", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Mutating_request_without_a_session_is_rejected()
     {
         using var client = CreateClient();

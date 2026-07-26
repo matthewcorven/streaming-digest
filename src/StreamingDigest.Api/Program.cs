@@ -624,7 +624,31 @@ app.MapPost("/api/models/verify", async (HttpContext context, ModelDiscoveryServ
         return Results.BadRequest(new { title = "Unsupported model", detail = ex.Message });
     }
 });
-app.MapFallbackToFile("index.html");
+app.MapGet("/{*path}", async context =>
+{
+    if (!ShouldServeSpaFallback(context.Request.Path))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    var webRootPath = app.Environment.WebRootPath;
+    if (string.IsNullOrWhiteSpace(webRootPath))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    var indexPath = Path.Combine(webRootPath, "index.html");
+    if (!File.Exists(indexPath))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    context.Response.ContentType = "text/html; charset=utf-8";
+    await context.Response.SendFileAsync(indexPath);
+});
 
 app.Run();
 
@@ -1007,6 +1031,22 @@ static string BuildDisabledPlaceholder(string serviceName)
 </body>
 </html>
 """;
+}
+
+static bool ShouldServeSpaFallback(PathString path)
+{
+    if (path.StartsWithSegments("/api") ||
+        path.StartsWithSegments("/admin") ||
+        path.StartsWithSegments("/internal") ||
+        path.StartsWithSegments("/grafana") ||
+        path.StartsWithSegments("/prometheus") ||
+        path.StartsWithSegments("/loki") ||
+        path.StartsWithSegments("/tempo"))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
