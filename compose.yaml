@@ -1,25 +1,35 @@
+name: streaming-digest
+
 services:
   postgres:
+    container_name: streaming-digest-postgres
     image: pgvector/pgvector:0.8.5-pg18-trixie
     environment:
-      POSTGRES_DB: streamingdigest
-      POSTGRES_USER: streamingdigest
-      POSTGRES_PASSWORD: streamingdigest
+      POSTGRES_DB: ${POSTGRES_DB:-streamingdigest}
+      POSTGRES_USER: ${POSTGRES_USER:-streamingdigest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streamingdigest}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     networks:
       - streaming-digest-internal
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-streamingdigest} -d ${POSTGRES_DB:-streamingdigest}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   api:
+    container_name: streaming-digest-api
     build:
       context: .
       dockerfile: src/StreamingDigest.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
-      ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__streamingdigest: Host=postgres;Port=5432;Database=streamingdigest;Username=streamingdigest;Password=streamingdigest
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__streamingdigest: Host=postgres;Port=5432;Database=${POSTGRES_DB:-streamingdigest};Username=${POSTGRES_USER:-streamingdigest};Password=${POSTGRES_PASSWORD:-streamingdigest}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       STREAMINGDIGEST_OBSERVABILITY_ENABLED: ${STREAMINGDIGEST_OBSERVABILITY_ENABLED:-true}
       observability__services__grafana__url: http://grafana:3000
@@ -27,18 +37,64 @@ services:
       observability__services__loki__url: http://loki:3100
       observability__services__tempo__url: http://tempo:3200
       observability__services__otelCollector__url: http://otel-collector:4317
+      Scraper__BaseUrl: http://scraper:3000
+      llm__baseUrl: http://ollama:11434
+      notifications__matrix__enabled: ${NOTIFICATIONS_MATRIX_ENABLED:-false}
+      notifications__matrix__homeserverUrl: ${NOTIFICATIONS_MATRIX_HOMESERVER_URL:-https://matrix-client.matrix.org}
+      notifications__matrix__accessToken: ${NOTIFICATIONS_MATRIX_ACCESS_TOKEN:-}
+      notifications__matrix__roomId: ${NOTIFICATIONS_MATRIX_ROOM_ID:-}
+      notifications__matrix__botUserId: ${NOTIFICATIONS_MATRIX_BOT_USER_ID:-}
+      notifications__matrix__dashboardBaseUrl: ${NOTIFICATIONS_MATRIX_DASHBOARD_BASE_URL:-http://localhost:8080}
     depends_on:
-      - postgres
-      - otel-collector
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      scraper:
+        condition: service_started
+      ollama:
+        condition: service_started
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
+    networks:
+      - streaming-digest-internal
+
+  worker:
+    container_name: streaming-digest-worker
+    build:
+      context: .
+      dockerfile: src/StreamingDigest.Worker/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__streamingdigest: Host=postgres;Port=5432;Database=${POSTGRES_DB:-streamingdigest};Username=${POSTGRES_USER:-streamingdigest};Password=${POSTGRES_PASSWORD:-streamingdigest}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      STREAMINGDIGEST_OBSERVABILITY_ENABLED: ${STREAMINGDIGEST_OBSERVABILITY_ENABLED:-true}
+      Scraper__BaseUrl: http://scraper:3000
+      llm__baseUrl: http://ollama:11434
+      notifications__matrix__enabled: ${NOTIFICATIONS_MATRIX_ENABLED:-false}
+      notifications__matrix__homeserverUrl: ${NOTIFICATIONS_MATRIX_HOMESERVER_URL:-https://matrix-client.matrix.org}
+      notifications__matrix__accessToken: ${NOTIFICATIONS_MATRIX_ACCESS_TOKEN:-}
+      notifications__matrix__roomId: ${NOTIFICATIONS_MATRIX_ROOM_ID:-}
+      notifications__matrix__botUserId: ${NOTIFICATIONS_MATRIX_BOT_USER_ID:-}
+      notifications__matrix__dashboardBaseUrl: ${NOTIFICATIONS_MATRIX_DASHBOARD_BASE_URL:-http://localhost:8080}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      scraper:
+        condition: service_started
+      ollama:
+        condition: service_started
     networks:
       - streaming-digest-internal
 
   scraper:
+    container_name: streaming-digest-scraper
     build:
       context: ./src/StreamingDigest.Scraper
     environment:
+      NODE_ENV: production
       PORT: 3000
     networks:
       - streaming-digest-internal
@@ -49,7 +105,20 @@ services:
       retries: 5
       start_period: 10s
 
+  ollama:
+    container_name: streaming-digest-ollama
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    ports:
+      - "127.0.0.1:11434:11434"
+    networks:
+      - streaming-digest-internal
+    volumes:
+      - ollama-data:/root/.ollama
+
   otel-collector:
+    container_name: streaming-digest-otel-collector
     image: otel/opentelemetry-collector-contrib:0.114.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
@@ -61,53 +130,57 @@ services:
       - streaming-digest-internal
 
   prometheus:
+    container_name: streaming-digest-prometheus
     image: prom/prometheus:v2.54.0
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
     volumes:
       - ./compose/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "9091:9090"
+      - "127.0.0.1:9090:9090"
     networks:
       - streaming-digest-internal
 
   grafana:
+    container_name: streaming-digest-grafana
     image: grafana/grafana:11.4.0
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
       - ./compose/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
     networks:
       - streaming-digest-internal
 
   loki:
+    container_name: streaming-digest-loki
     image: grafana/loki:3.2.0
     command: ["-config.file=/etc/loki/local-config.yaml"]
     volumes:
       - ./compose/observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
     ports:
-      - "3101:3100"
+      - "127.0.0.1:3100:3100"
     networks:
       - streaming-digest-internal
 
   tempo:
+    container_name: streaming-digest-tempo
     image: grafana/tempo:2.6.0
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
       - ./compose/observability/tempo.yaml:/etc/tempo.yaml:ro
     ports:
-      - "3201:3200"
+      - "127.0.0.1:3200:3200"
     networks:
       - streaming-digest-internal
 
 volumes:
   postgres-data:
+  ollama-data:
 
 networks:
   streaming-digest-internal:
-    internal: true

@@ -118,6 +118,9 @@ var defaultRetentionDays = StorageRetentionPolicy.ComputeObservabilityRetentionD
 
 if (databaseStatus.Connected)
 {
+    var migrationRunner = new PostgresMigrationRunner(connectionString);
+    await migrationRunner.ApplyAsync();
+
     var seeder = new AppSettingsSeeder(startupLogger);
     await seeder.SeedDefaultsAsync(connectionString, defaultObservabilityEnabled, defaultRetentionDays);
 }

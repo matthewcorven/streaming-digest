@@ -17,6 +17,7 @@
 </ItemGroup>
 
 <ItemGroup>
+  <ProjectReference Include="..\..\src\StreamingDigest.Api\StreamingDigest.Api.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Application\StreamingDigest.Application.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" />
