@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -15,7 +16,9 @@ public sealed record RepositoryMetadata(
     string? Language,
     string? DefaultBranch,
     bool IsPublic,
-    string? LicenseName);
+    string? LicenseName,
+    string? ReadmeContent = null,
+    string? LicenseContent = null);
 
 public sealed record RepositoryMetadataResult(
     RepositoryMetadata? Metadata,
@@ -138,6 +141,9 @@ public sealed class GitHubRepositoryMetadataAdapter : IRepositoryMetadataAdapter
                 return new RepositoryMetadataResult(null, false, false, (int)response.StatusCode, "GitHub metadata payload was empty.");
             }
 
+            var readmeContent = TryFetchRepositoryDocumentContent(detection, "readme");
+            var licenseContent = TryFetchRepositoryDocumentContent(detection, "license");
+
             return new RepositoryMetadataResult(
                 new RepositoryMetadata(
                     detection.CanonicalUrl,
@@ -149,7 +155,9 @@ public sealed class GitHubRepositoryMetadataAdapter : IRepositoryMetadataAdapter
                     repo.Language,
                     repo.DefaultBranch,
                     !repo.IsPrivate,
-                    repo.License?.SpdxId),
+                    repo.License?.SpdxId,
+                    readmeContent,
+                    licenseContent),
                 true,
                 false,
                 (int)response.StatusCode,
@@ -158,6 +166,47 @@ public sealed class GitHubRepositoryMetadataAdapter : IRepositoryMetadataAdapter
         catch (Exception ex)
         {
             return new RepositoryMetadataResult(null, false, false, null, ex.Message);
+        }
+    }
+
+    private string? TryFetchRepositoryDocumentContent(RepositoryHostDetectionResult detection, string documentKind)
+    {
+        var requestUri = $"https://api.github.com/repos/{Uri.EscapeDataString(detection.Owner!)}/{Uri.EscapeDataString(detection.RepositoryName!)}/{documentKind}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("streaming-digest", "1.0"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+
+        try
+        {
+            using var response = _httpClient.Send(request);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var payload = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            var document = JsonSerializer.Deserialize<GitHubDocumentPayload>(payload, JsonOptions);
+            if (document is null || string.IsNullOrWhiteSpace(document.Content))
+            {
+                return null;
+            }
+
+            if (!string.Equals(document.Encoding, "base64", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return Encoding.UTF8.GetString(Convert.FromBase64String(document.Content));
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -180,6 +229,15 @@ public sealed class GitHubRepositoryMetadataAdapter : IRepositoryMetadataAdapter
 
         [JsonPropertyName("license")]
         public GitHubLicensePayload? License { get; set; }
+    }
+
+    private sealed class GitHubDocumentPayload
+    {
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
+
+        [JsonPropertyName("encoding")]
+        public string? Encoding { get; set; }
     }
 
     private sealed class GitHubLicensePayload
