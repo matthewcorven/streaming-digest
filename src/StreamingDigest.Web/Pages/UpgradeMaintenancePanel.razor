@@ -1,9 +1,11 @@
 @page "/admin/upgrade-maintenance"
 
+@using System.Net.Http.Json
 @using StreamingDigest.Web.Models
 @using StreamingDigest.Web.Services
 
 @inject UpgradeMaintenanceSnapshotService SnapshotService
+@inject HttpClient Http
 
 <PageTitle>Upgrade & Maintenance</PageTitle>
 
@@ -31,6 +33,23 @@ else
                     <strong>@uiState.RequiredNextAction</strong>
                 </div>
             </div>
+        </section>
+
+        <section class="admin-actions-card">
+            <div class="card-header">
+                <h2>Operational actions</h2>
+                <span class="status-pill status-neutral">Contextual admin</span>
+            </div>
+            <div class="action-buttons">
+                <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetEmbeddingsReprocessEndpoint(), GetEmbeddingsReprocessLabel()))">Reprocess embeddings</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetMatrixNotificationEndpoint(), GetMatrixNotificationLabel()))">Test Matrix notification</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetEmbeddingServiceEndpoint(), GetEmbeddingServiceLabel()))">Test embedding service</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetAudioToTextEndpoint(), GetAudioToTextLabel()))">Test audio-to-text service</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_feedbackMessage))
+            {
+                <p class="action-feedback @_feedbackClass">@_feedbackMessage</p>
+            }
         </section>
 
         <section class="panel-grid">
@@ -144,10 +163,64 @@ else
 
 @code {
     private UpgradeMaintenanceSnapshot? _snapshot;
+    private bool _isBusy;
+    private string? _feedbackMessage;
+    private string _feedbackClass = "neutral";
 
     protected override async Task OnInitializedAsync()
     {
         _snapshot = await SnapshotService.GetSnapshotAsync();
+    }
+
+    private static string GetEmbeddingsReprocessEndpoint() => "/api/admin/operations/embeddings/reprocess";
+
+    private static string GetMatrixNotificationEndpoint() => "/api/admin/operations/notifications/matrix/test";
+
+    private static string GetEmbeddingServiceEndpoint() => "/api/admin/operations/embeddings/test";
+
+    private static string GetAudioToTextEndpoint() => "/api/admin/operations/audio-to-text/test";
+
+    private static string GetEmbeddingsReprocessLabel() => "Reprocess embeddings";
+
+    private static string GetMatrixNotificationLabel() => "Test Matrix notification";
+
+    private static string GetEmbeddingServiceLabel() => "Test embedding service";
+
+    private static string GetAudioToTextLabel() => "Test audio-to-text service";
+
+    private async Task TriggerActionAsync(string endpoint, string label)
+    {
+        _isBusy = true;
+        _feedbackMessage = $"Dispatching {label.ToLowerInvariant()}...";
+        _feedbackClass = "neutral";
+
+        try
+        {
+            using var response = await Http.PostAsync(endpoint, null);
+            var payload = await response.Content.ReadFromJsonAsync<AdminActionResponse>();
+
+            if (response.IsSuccessStatusCode && payload is not null)
+            {
+                _feedbackMessage = payload.Status is "completed" or "ok"
+                    ? $"{label} completed. {payload.Message}"
+                    : $"{label} accepted. {payload.Message}";
+                _feedbackClass = payload.Status is "completed" or "ok" ? "success" : "pending";
+            }
+            else
+            {
+                _feedbackMessage = $"{label} failed to trigger.";
+                _feedbackClass = "error";
+            }
+        }
+        catch (Exception ex)
+        {
+            _feedbackMessage = $"{label} could not be triggered: {ex.Message}";
+            _feedbackClass = "error";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
     }
 
     private static string FormatTimestamp(string value)
@@ -170,4 +243,10 @@ else
             "blocked" or "failed" => "status-danger",
             _ => "status-neutral"
         };
+
+    private sealed class AdminActionResponse
+    {
+        public string? Status { get; set; }
+        public string? Message { get; set; }
+    }
 }

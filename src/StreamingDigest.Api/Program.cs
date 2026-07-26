@@ -11,6 +11,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using StreamingDigest.Api.Observability;
+using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.Observability;
 using Npgsql;
 using StreamingDigest.Application.Configuration;
@@ -85,10 +86,37 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
+builder.Services.AddSingleton<IAdminOperationsService, AdminOperationsService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 
 var app = builder.Build();
 var authService = app.Services.GetRequiredService<AppAuthService>();
+
+static IResult CreateAdminOperationResponse(AdminActionResult result)
+{
+    if (result.Status is "completed" or "ok")
+    {
+        return Results.Ok(new
+        {
+            operationId = result.OperationId,
+            operationType = result.OperationType,
+            status = result.Status,
+            message = result.Message,
+            target = result.Target,
+            healthStatus = result.HealthStatus
+        });
+    }
+
+    return Results.Accepted($"/api/admin/operations/{result.OperationId}", new
+    {
+        operationId = result.OperationId,
+        operationType = result.OperationType,
+        status = result.Status,
+        message = result.Message,
+        target = result.Target,
+        jobId = result.JobId
+    });
+}
 
 using var startupScope = CorrelationContext.BeginLoggingScope(app.Logger, new Dictionary<string, object?>
 {
@@ -176,6 +204,39 @@ app.MapGet("/api/db-health", () => Results.Ok(new
     serverVersion = databaseStatus.ServerVersion
 }));
 app.MapGet("/api/overview", () => Results.Ok(new { service = "streaming-digest-api", status = "ready" }));
+app.MapGet("/api/admin/operations/{operationId:guid}", async (Guid operationId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+{
+    var operation = await service.GetOperationAsync(operationId, cancellationToken);
+    return operation is null ? Results.NotFound() : Results.Ok(operation);
+});
+app.MapPost("/api/admin/operations/ingestion/run", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.RunIngestionNowAsync(cancellationToken: cancellationToken)));
+app.MapPost("/api/admin/operations/ingestion/channel-backfill", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.RunChannelBackfillAsync(cancellationToken: cancellationToken)));
+app.MapPost("/api/admin/operations/ingestion/runs/{runId}/retry", async (string runId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.RetryFailedIngestionRunAsync(runId, cancellationToken)));
+app.MapPost("/api/admin/operations/videos/{videoId}/retry", async (string videoId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.RetryFailedVideoAsync(videoId, cancellationToken)));
+app.MapPost("/api/admin/operations/links/{linkId}/retry", async (string linkId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.RetryFailedLinkAsync(linkId, cancellationToken)));
+app.MapPost("/api/admin/operations/repositories/{repositoryId}/retry", async (string repositoryId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.RetryFailedRepositoryAsync(repositoryId, cancellationToken)));
+app.MapPost("/api/admin/operations/videos/{videoId}/reprocess", async (string videoId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.ReprocessVideoAsync(videoId, cancellationToken)));
+app.MapPost("/api/admin/operations/repositories/{repositoryId}/reprocess", async (string repositoryId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.ReprocessRepositoryAsync(repositoryId, cancellationToken)));
+app.MapPost("/api/admin/operations/resources/{resourceId}/reprocess", async (string resourceId, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.ReprocessResourceAsync(resourceId, cancellationToken)));
+app.MapPost("/api/admin/operations/embeddings/reprocess", async (string? target, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.ReprocessEmbeddingsAsync(target, cancellationToken)));
+app.MapPost("/api/admin/operations/screenshots/purge", async (string? target, IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.PurgeScreenshotsAsync(target, cancellationToken)));
+app.MapPost("/api/admin/operations/notifications/matrix/test", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.TestMatrixNotificationAsync(cancellationToken)));
+app.MapPost("/api/admin/operations/embeddings/test", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.TestEmbeddingServiceAsync(cancellationToken)));
+app.MapPost("/api/admin/operations/audio-to-text/test", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.TestAudioToTextServiceAsync(cancellationToken)));
 app.MapGet("/api/internal/notifications/matrix/health", (IMatrixNotificationService service) => Results.Ok(new
 {
     status = "ok",
