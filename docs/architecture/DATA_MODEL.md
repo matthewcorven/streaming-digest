@@ -988,6 +988,8 @@ Columns:
 
 `backup_type` values: `full`, `db_only`, `media_only`, `config_only`.
 
+Backup artifact manifests should carry structured metadata for `schemaVersion`, `verificationStatus`, `restoreTarget`, and the backup file name so maintenance operations and restore validation can reason about evidence without opening the archive directly.
+
 ### 3.36 `maintenance_operations`
 
 High-level maintenance operation records for backup, restore validation, migrations, index rebuilds, and derived-data regeneration.
@@ -1006,6 +1008,8 @@ Columns:
 - `summary_json jsonb null`
 - `error_summary text null`
 - `created_at timestamptz not null`
+
+Maintenance operations should record whether restore validation completed successfully and which restore target (for example, `compose-stack`) was exercised so the backup artifact and the maintenance record remain traceable across operator handoffs.
 
 ### 3.37 `digests`
 

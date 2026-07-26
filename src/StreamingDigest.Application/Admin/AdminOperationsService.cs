@@ -79,7 +79,10 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 var manifest = new BackupManifest
                 {
                     CreatedAtUtc = DateTimeOffset.UtcNow.ToString("o"),
-                    BackupFileName = backupFileName
+                    BackupFileName = backupFileName,
+                    SchemaVersion = "1.0.0",
+                    VerificationStatus = "pending",
+                    RestoreTarget = "compose-stack"
                 };
 
                 manifest.Assets.Add(await CreatePostgresDumpAssetAsync(stagingDirectory, cancellationToken));
@@ -90,7 +93,8 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 var manifestPath = Path.Combine(stagingDirectory, "manifest.json");
                 await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions
                 {
-                    WriteIndented = true
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
                 }), cancellationToken);
 
                 if (File.Exists(backupFilePath))
@@ -586,6 +590,12 @@ public sealed class AdminOperationsService : IAdminOperationsService
         public string CreatedAtUtc { get; init; } = string.Empty;
 
         public string BackupFileName { get; init; } = string.Empty;
+
+        public string SchemaVersion { get; init; } = "1.0.0";
+
+        public string VerificationStatus { get; init; } = "pending";
+
+        public string RestoreTarget { get; init; } = "compose-stack";
 
         public List<BackupAssetStatus> Assets { get; init; } = [];
     }
