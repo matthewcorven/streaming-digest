@@ -107,11 +107,12 @@ public sealed class AdminOperationsServiceTests
             var shimDirectory = Path.Combine(tempDirectory, "shims");
             Directory.CreateDirectory(shimDirectory);
             var logPath = Path.Combine(tempDirectory, "psql.log");
+            var restoredSqlPath = Path.Combine(tempDirectory, "restored.sql");
 
             var psqlPath = Path.Combine(shimDirectory, OperatingSystem.IsWindows() ? "psql.cmd" : "psql");
             var shimScript = OperatingSystem.IsWindows()
-                ? "@echo off\r\nsetlocal\r\n> \"%PSQL_LOG_PATH%\" echo %*\r\n"
-                : "#!/bin/sh\nset -eu\nprintf '%s\n' \"$@\" > \"$PSQL_LOG_PATH\"\n";
+                ? "@echo off\r\nsetlocal\r\n> \"%PSQL_LOG_PATH%\" echo %*\r\nset \"sqlFile=\"\r\n:loop\r\nif \"%~1\"==\"\" goto done\r\nif /I \"%~1\"==\"--file\" (\r\n  set \"sqlFile=%~2\"\r\n  goto done\r\n)\r\nshift\r\ngoto loop\r\n:done\r\nif defined sqlFile copy \"%sqlFile%\" \"%PSQL_RESTORED_SQL_PATH%\"\r\n"
+                : "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > \"$PSQL_LOG_PATH\"\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"--file\" ]; then\n    shift\n    cp \"$1\" \"$PSQL_RESTORED_SQL_PATH\"\n    break\n  fi\n  shift\ndone\n";
             await File.WriteAllTextAsync(psqlPath, shimScript);
             if (!OperatingSystem.IsWindows())
             {
@@ -120,6 +121,7 @@ public sealed class AdminOperationsServiceTests
 
             Environment.SetEnvironmentVariable("PATH", $"{shimDirectory}{Path.PathSeparator}{originalPath}");
             Environment.SetEnvironmentVariable("PSQL_LOG_PATH", logPath);
+            Environment.SetEnvironmentVariable("PSQL_RESTORED_SQL_PATH", restoredSqlPath);
 
             var configuration = new ApplicationConfiguration
             {
@@ -165,11 +167,15 @@ public sealed class AdminOperationsServiceTests
             Assert.Contains("--dbname", logContents, StringComparison.Ordinal);
             Assert.Contains("streamingdigest", logContents, StringComparison.Ordinal);
             Assert.Contains("--file", logContents, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(restoredSqlPath));
+            Assert.Equal("CREATE TABLE test(id integer);", await File.ReadAllTextAsync(restoredSqlPath));
         }
         finally
         {
             Environment.SetEnvironmentVariable("PATH", originalPath);
             Environment.SetEnvironmentVariable("PSQL_LOG_PATH", null);
+            Environment.SetEnvironmentVariable("PSQL_RESTORED_SQL_PATH", null);
             if (Directory.Exists(tempDirectory))
             {
                 Directory.Delete(tempDirectory, recursive: true);
