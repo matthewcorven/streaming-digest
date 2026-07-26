@@ -625,8 +625,6 @@ app.MapFallbackToFile("index.html");
 
 app.Run();
 
-sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
-
 static async Task<DatabaseStatus> EnsureDatabaseConnectivityAsync(ILogger logger, string connectionString)
 {
     using var activity = CorrelationContext.BeginOperation("database.connectivity", ActivityKind.Client, new Dictionary<string, object?>
@@ -1018,6 +1016,8 @@ static string BuildDisabledPlaceholder(string serviceName)
 </html>
 """;
 }
+
+sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
 
 public sealed record LoginRequest(string Username, string Password);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
