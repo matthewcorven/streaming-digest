@@ -88,7 +88,7 @@ builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
-builder.Services.AddSingleton<IAdminOperationsService, AdminOperationsService>();
+builder.Services.AddSingleton<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath));
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 
 var app = builder.Build();
@@ -109,6 +109,11 @@ static IResult CreateAdminOperationResponse(AdminActionResult result)
         });
     }
 
+    if (result.Status is "failed" or "error")
+    {
+        return Results.Problem(detail: result.Message, statusCode: StatusCodes.Status500InternalServerError);
+    }
+
     return Results.Accepted($"/api/admin/operations/{result.OperationId}", new
     {
         operationId = result.OperationId,
@@ -118,6 +123,19 @@ static IResult CreateAdminOperationResponse(AdminActionResult result)
         target = result.Target,
         jobId = result.JobId
     });
+}
+
+static string ResolveBackupDirectoryPath(ApplicationConfiguration configuration, string contentRootPath)
+{
+    var configuredPath = configuration.Backup.DestinationPath;
+    if (string.IsNullOrWhiteSpace(configuredPath))
+    {
+        return Path.Combine(contentRootPath, "backups");
+    }
+
+    return Path.IsPathRooted(configuredPath)
+        ? Path.GetFullPath(configuredPath)
+        : Path.GetFullPath(Path.Combine(contentRootPath, configuredPath));
 }
 
 using var startupScope = CorrelationContext.BeginLoggingScope(app.Logger, new Dictionary<string, object?>
@@ -245,6 +263,21 @@ app.MapPost("/api/admin/operations/embeddings/test", async (IAdminOperationsServ
     CreateAdminOperationResponse(await service.TestEmbeddingServiceAsync(cancellationToken)));
 app.MapPost("/api/admin/operations/audio-to-text/test", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
     CreateAdminOperationResponse(await service.TestAudioToTextServiceAsync(cancellationToken)));
+app.MapPost("/api/admin/operations/backup", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.CreateBackupAsync(cancellationToken)));
+app.MapGet("/api/admin/operations/backups/{archiveName}", (string archiveName, ApplicationConfiguration configuration) =>
+{
+    if (archiveName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+    {
+        return Results.BadRequest();
+    }
+
+    var backupDirectoryPath = ResolveBackupDirectoryPath(configuration, builder.Environment.ContentRootPath);
+    var archivePath = Path.Combine(backupDirectoryPath, archiveName);
+    return File.Exists(archivePath)
+        ? Results.File(new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read), "application/zip", archiveName)
+        : Results.NotFound();
+});
 app.MapGet("/api/internal/notifications/matrix/health", (IMatrixNotificationService service) => Results.Ok(new
 {
     status = "ok",

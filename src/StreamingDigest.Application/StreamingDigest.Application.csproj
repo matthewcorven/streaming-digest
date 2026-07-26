@@ -13,6 +13,7 @@
 <ItemGroup>
   <PackageReference Include="JsonSchema.Net" Version="5.0.0" />
   <PackageReference Include="Microsoft.SemanticKernel" Version="1.55.0" />
+  <PackageReference Include="Npgsql" Version="10.0.3" />
 </ItemGroup>
 
 </Project>
