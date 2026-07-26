@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 
 def run_gh(args: List[str]) -> str:
@@ -126,20 +126,37 @@ def fetch_issues(repo: str, state: str, limit: int) -> List[Dict[str, object]]:
     return json.loads(run_gh(command_args))
 
 
-def fetch_pull_requests(repo: str, limit: int) -> List[Dict[str, object]]:
+def fetch_pull_requests(repo: str, state: str, limit: int) -> List[Dict[str, object]]:
     command_args = [
         "pr",
         "list",
         "--repo",
         repo,
         "--state",
-        "open",
+        state,
         "--limit",
         str(limit),
         "--json",
-        "number,title,isDraft",
+        "number,title,isDraft,state,closingIssuesReferences",
     ]
     return json.loads(run_gh(command_args))
+
+
+def collect_linked_issue_numbers(pull_requests: List[Dict[str, object]]) -> Set[int]:
+    linked_issue_numbers: Set[int] = set()
+    for pull_request in pull_requests:
+        for reference in pull_request.get("closingIssuesReferences") or []:
+            if not isinstance(reference, dict):
+                continue
+            number = reference.get("number")
+            if number is None:
+                continue
+            linked_issue_numbers.add(int(number))
+    return linked_issue_numbers
+
+
+def is_issue_available(summary: Dict[str, object], linked_issue_numbers: Set[int]) -> bool:
+    return summary.get("state") == "OPEN" and not summary.get("is_blocked") and int(summary["number"]) not in linked_issue_numbers
 
 
 def build_issue_index(issues: List[Dict[str, object]]) -> Dict[str, Dict[str, object]]:
@@ -339,7 +356,9 @@ def main() -> int:
 
     issue_index = build_issue_index(filtered_issues)
     summaries = build_issue_summaries(filtered_issues, issue_index)
-    available = [issue for issue in summaries if issue["state"] == "OPEN" and not issue["is_blocked"]]
+    pull_requests = fetch_pull_requests(repo, "all", args.limit)
+    linked_issue_numbers = collect_linked_issue_numbers(pull_requests)
+    available = [issue for issue in summaries if is_issue_available(issue, linked_issue_numbers)]
     blocked = [issue for issue in summaries if issue["state"] == "OPEN" and issue["is_blocked"]]
 
     queue_result = {
@@ -359,7 +378,8 @@ def main() -> int:
         open_squad_issues = [issue for issue in open_issues if has_label(issue, "squad")]
         untriaged = [issue for issue in open_squad_issues if not has_member_label(issue)]
         assigned = [issue for issue in open_squad_issues if has_member_label(issue)]
-        pull_requests = fetch_pull_requests(repo, args.limit)
+        pull_requests = fetch_pull_requests(repo, "all", args.limit)
+        open_pull_requests = [pr for pr in pull_requests if pr.get("state") == "OPEN"]
 
         result = {
             **queue_result,
@@ -369,8 +389,8 @@ def main() -> int:
             "untriaged_count": len(untriaged),
             "assigned_count": len(assigned),
             "untriaged": [{"number": int(issue["number"]), "title": str(issue.get("title") or "")} for issue in untriaged],
-            "open_pr_count": len(pull_requests),
-            "draft_pr_count": sum(1 for pr in pull_requests if pr.get("isDraft")),
+            "open_pr_count": len(open_pull_requests),
+            "draft_pr_count": sum(1 for pr in open_pull_requests if pr.get("isDraft")),
         }
     else:
         result = queue_result
