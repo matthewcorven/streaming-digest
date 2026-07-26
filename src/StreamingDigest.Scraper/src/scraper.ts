@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
 
-const SCRAPER_USER_AGENT = 'streaming-digest-scraper/1.0 (+https://github.com/matthewcorven/streaming-digest)';
+const SCRAPER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0';
 const MAX_VISIBLE_TEXT_LENGTH = 200_000;
 
 export interface ScrapeFirstPageRequest {
