@@ -18,6 +18,7 @@ using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.MatrixNotifier;
 
+var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var builder = WebApplication.CreateBuilder(args);
 
 var applicationConfiguration = ApplicationConfigurationLoader.LoadFromDirectory(builder.Environment.ContentRootPath);
@@ -144,6 +145,12 @@ app.Use(async (context, next) =>
         return;
     }
 
+    if (authenticationResult.RequiresPasswordChange && !ShouldAllowPasswordChangeFlow(context.Request))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+
     if (RequiresCsrfProtection(context.Request) && !HasValidCsrfToken(context.Request, authenticationResult.CsrfToken))
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -206,28 +213,36 @@ app.MapGet("/api/internal/ingestion-runs/{ingestionRunId:guid}/notifications", a
 
 app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
 {
-    var requestBody = await JsonSerializer.DeserializeAsync<LoginRequest>(context.Request.Body, cancellationToken: cancellationToken);
-    if (requestBody is null)
+    try
     {
-        return Results.BadRequest(new { error = "The request body is required." });
+        var requestBody = await JsonSerializer.DeserializeAsync<LoginRequest>(context.Request.Body, jsonOptions, cancellationToken);
+        if (requestBody is null)
+        {
+            return Results.BadRequest(new { error = "The request body is required." });
+        }
+
+        var result = await authService.AuthenticateAsync(
+            connectionString,
+            requestBody.Username ?? string.Empty,
+            requestBody.Password ?? string.Empty,
+            context.Connection.RemoteIpAddress?.ToString(),
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            return Results.Json(new { error = result.ErrorMessage }, statusCode: result.StatusCode);
+        }
+
+        context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions());
+        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions());
+
+        return Results.Ok(new { username = result.User!.Username, mustChangePassword = result.User.MustChangePassword });
     }
-
-    var result = await authService.AuthenticateAsync(
-        connectionString,
-        requestBody.Username ?? string.Empty,
-        requestBody.Password ?? string.Empty,
-        context.Connection.RemoteIpAddress?.ToString(),
-        cancellationToken);
-
-    if (!result.Success)
+    catch (Exception ex)
     {
-        return Results.Json(new { error = result.ErrorMessage }, statusCode: result.StatusCode);
+        app.Logger.LogError(ex, "Login request failed.");
+        return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Login failed", detail: ex.Message);
     }
-
-    context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions());
-    context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions());
-
-    return Results.Ok(new { username = result.User!.Username, mustChangePassword = result.User.MustChangePassword });
 });
 app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
 {
@@ -280,7 +295,7 @@ app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthServ
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
-    var requestBody = await JsonSerializer.DeserializeAsync<ChangePasswordRequest>(context.Request.Body, cancellationToken: cancellationToken);
+    var requestBody = await JsonSerializer.DeserializeAsync<ChangePasswordRequest>(context.Request.Body, jsonOptions, cancellationToken);
     if (requestBody is null || string.IsNullOrWhiteSpace(requestBody.CurrentPassword) || string.IsNullOrWhiteSpace(requestBody.NewPassword))
     {
         return Results.BadRequest(new { error = "Both current and new passwords are required." });
@@ -787,10 +802,15 @@ static bool ShouldForwardRequestBody(HttpRequest request)
 static bool RequiresAuthentication(HttpRequest request)
 {
     var path = request.Path.Value ?? string.Empty;
+    if (path.Equals("/api/observability", StringComparison.Ordinal))
+    {
+        return false;
+    }
+
     return path.StartsWith("/api/internal", StringComparison.Ordinal)
         || path.StartsWith("/api/onboarding", StringComparison.Ordinal)
         || path.StartsWith("/api/settings", StringComparison.Ordinal)
-        || path.StartsWith("/api/observability", StringComparison.Ordinal)
+        || path.StartsWith("/api/observability/toggle", StringComparison.Ordinal)
         || path.StartsWith("/api/config", StringComparison.Ordinal)
         || path.StartsWith("/api/auth/me", StringComparison.Ordinal)
         || path.StartsWith("/api/auth/change-password", StringComparison.Ordinal);
@@ -819,12 +839,21 @@ static bool HasValidCsrfToken(HttpRequest request, string? expectedToken)
 
 static bool IsAuthenticated(HttpRequest request)
 {
-    return request.Headers.ContainsKey("X-Test-Auth") || request.Cookies.ContainsKey("auth-session");
+    return request.Cookies.ContainsKey("auth-session");
 }
 
 static bool HasCsrfToken(HttpRequest request)
 {
     return request.Headers.ContainsKey("X-CSRF-Token") || request.Cookies.ContainsKey("csrf-token");
+}
+
+static bool ShouldAllowPasswordChangeFlow(HttpRequest request)
+{
+    var path = request.Path.Value ?? string.Empty;
+    return path.StartsWith("/api/auth/change-password", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/me", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/csrf", StringComparison.Ordinal)
+        || path.StartsWith("/api/auth/logout", StringComparison.Ordinal);
 }
 
 static CookieOptions CreateSessionCookieOptions()

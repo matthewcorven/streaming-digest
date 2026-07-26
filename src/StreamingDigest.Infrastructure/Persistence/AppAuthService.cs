@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
-using System.Text;
-using Konscious.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -18,6 +17,7 @@ public sealed class AppAuthService
     private readonly IConfiguration _configuration;
     private readonly ILogger<AppAuthService> _logger;
     private readonly ConcurrentDictionary<string, List<DateTimeOffset>> _loginAttempts = new();
+    private static readonly PasswordHasher<string> PasswordHasher = new();
 
     public AppAuthService(IConfiguration configuration, ILogger<AppAuthService> logger)
     {
@@ -54,11 +54,6 @@ public sealed class AppAuthService
 
     public async Task<RequestAuthenticationResult> TryAuthenticateRequestAsync(string connectionString, HttpRequest request, CancellationToken cancellationToken = default)
     {
-        if (request.Headers.TryGetValue("X-Test-Auth", out var authHeader) && authHeader.ToString().Contains("true", StringComparison.OrdinalIgnoreCase))
-        {
-            return new RequestAuthenticationResult(true, new AuthenticatedUser(Guid.Empty, "admin", false), string.Empty, false);
-        }
-
         var sessionToken = request.Cookies[SessionCookieName];
         if (string.IsNullOrWhiteSpace(sessionToken))
         {
@@ -92,6 +87,7 @@ public sealed class AppAuthService
         var username = reader.GetString(1);
         var mustChangePassword = reader.GetBoolean(2);
         var csrfToken = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+        await reader.CloseAsync();
 
         await using var updateCommand = new NpgsqlCommand(
             "UPDATE public.app_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE session_token = @sessionToken",
@@ -136,6 +132,7 @@ public sealed class AppAuthService
         var passwordHash = reader.GetString(2);
         var passwordHashAlgorithm = reader.GetString(3);
         var mustChangePassword = reader.GetBoolean(4);
+        await reader.CloseAsync();
 
         var isValidPassword = string.Equals(passwordHashAlgorithm, "argon2id", StringComparison.OrdinalIgnoreCase)
             ? VerifyPassword(password, passwordHash)
@@ -228,6 +225,7 @@ public sealed class AppAuthService
 
         var passwordHash = currentUserReader.GetString(0);
         var passwordHashAlgorithm = currentUserReader.GetString(1);
+        await currentUserReader.CloseAsync();
         if (!string.Equals(passwordHashAlgorithm, "argon2id", StringComparison.OrdinalIgnoreCase) || !VerifyPassword(currentPassword, passwordHash))
         {
             return false;
@@ -308,18 +306,7 @@ public sealed class AppAuthService
 
     private static string HashPassword(string password)
     {
-        var passwordBytes = Encoding.UTF8.GetBytes(password);
-        var salt = RandomNumberGenerator.GetBytes(16);
-        var argon2 = new Argon2id(passwordBytes)
-        {
-            Iterations = 4,
-            MemorySize = 64 * 1024,
-            DegreeOfParallelism = 2,
-            Salt = salt
-        };
-
-        var hash = argon2.GetBytes(32);
-        return $"argon2id$v=19$m=65536,t=4,p=2${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
+        return PasswordHasher.HashPassword(string.Empty, password);
     }
 
     private static bool VerifyPassword(string password, string storedHash)
@@ -329,58 +316,11 @@ public sealed class AppAuthService
             return false;
         }
 
-        var parts = storedHash.Split('$', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 5 || !parts[0].Equals("argon2id", StringComparison.OrdinalIgnoreCase))
+        return PasswordHasher.VerifyHashedPassword(string.Empty, storedHash, password) switch
         {
-            return false;
-        }
-
-        var parameters = parts[2];
-        var iterations = 4;
-        var memorySize = 64 * 1024;
-        var parallelism = 2;
-        foreach (var parameter in parameters.Split(','))
-        {
-            var keyValue = parameter.Split('=', 2);
-            if (keyValue.Length != 2)
-            {
-                continue;
-            }
-
-            switch (keyValue[0].Trim())
-            {
-                case "m":
-                    memorySize = int.Parse(keyValue[1]);
-                    break;
-                case "t":
-                    iterations = int.Parse(keyValue[1]);
-                    break;
-                case "p":
-                    parallelism = int.Parse(keyValue[1]);
-                    break;
-            }
-        }
-
-        try
-        {
-            var salt = Convert.FromBase64String(parts[3]);
-            var expectedHash = Convert.FromBase64String(parts[4]);
-            var passwordBytes = Encoding.UTF8.GetBytes(password);
-            var argon2 = new Argon2id(passwordBytes)
-            {
-                Iterations = iterations,
-                MemorySize = memorySize,
-                DegreeOfParallelism = parallelism,
-                Salt = salt
-            };
-
-            var actualHash = argon2.GetBytes(expectedHash.Length);
-            return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
+            PasswordVerificationResult.Success or PasswordVerificationResult.SuccessRehashNeeded => true,
+            _ => false
+        };
     }
 }
 
