@@ -20,6 +20,17 @@ public sealed class LinkClassificationServiceTests
         Assert.True(result.Confidence > 0.9);
     }
 
+    [Theory]
+    [InlineData("https://gitlab.com/example/project")]
+    [InlineData("https://bitbucket.org/example/project")]
+    public void Classify_returns_code_repository_for_supported_repository_hosts(string url)
+    {
+        var result = _service.Classify(url);
+
+        Assert.Equal(LinkClassification.CodeRepository, result.Classification);
+        Assert.Equal("rule", result.Method);
+    }
+
     [Fact]
     public void Classify_returns_social_for_social_platform_urls()
     {

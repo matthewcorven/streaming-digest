@@ -38,6 +38,8 @@ public sealed class LinkClassificationService : ILinkClassificationService
         PropertyNameCaseInsensitive = true
     };
 
+    private static readonly IRepositoryHostDetectionService RepositoryHostDetectionService = new RepositoryHostDetectionService();
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<LinkClassificationService>? _logger;
     private readonly bool _llmEnabled;
@@ -138,7 +140,7 @@ public sealed class LinkClassificationService : ILinkClassificationService
         var path = uri.AbsolutePath;
         var combined = $"{host} {path} {uri.Query}";
 
-        if (LooksLikeCodeRepository(host, path))
+        if (LooksLikeCodeRepository(uri, host, path))
         {
             return new LinkClassificationResult(LinkClassification.CodeRepository, "rule", 0.95);
         }
@@ -193,10 +195,15 @@ public sealed class LinkClassificationService : ILinkClassificationService
             && uri is not null && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
     }
 
-    private static bool LooksLikeCodeRepository(string host, string path)
+    private static bool LooksLikeCodeRepository(Uri uri, string host, string path)
     {
         var hostLower = host.ToLowerInvariant();
         var pathLower = path.ToLowerInvariant();
+
+        if (RepositoryHostDetectionService.Detect(uri.ToString())?.IsRepositoryUrl == true)
+        {
+            return true;
+        }
 
         return hostLower is "github.com" or "www.github.com"
             || hostLower is "gitlab.com" or "www.gitlab.com"
