@@ -313,9 +313,10 @@ Prerequisites:
 - local model files pulled into Ollama
 - Matrix bot account and room ID prepared; encrypted room readiness is MVP+
 
-Start the stack:
+Create a local environment file from the deployment template and then start the stack:
 
 ```bash
+cp .env.example .env
 docker compose -p streaming-digest up -d
 ```
 

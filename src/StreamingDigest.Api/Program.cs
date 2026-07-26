@@ -132,6 +132,9 @@ await EnsureObservabilityReadinessAsync(app.Logger, observabilityRuntime);
 
 if (databaseStatus.Connected)
 {
+    var migrationRunner = new PostgresMigrationRunner(connectionString);
+    await migrationRunner.ApplyAsync();
+
     var seeder = new AppSettingsSeeder(app.Logger);
     await seeder.SeedDefaultsAsync(connectionString, observabilityRuntime.Enabled, observabilityRuntime.RetentionDays);
 
@@ -672,7 +675,6 @@ static async Task EnsureObservabilityReadinessAsync(ILogger logger, Observabilit
 
     try
     {
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         var probeTargets = new[]
         {
             (Name: "grafana", Url: observabilityRuntime.GrafanaUrl),
@@ -681,26 +683,16 @@ static async Task EnsureObservabilityReadinessAsync(ILogger logger, Observabilit
             (Name: "tempo", Url: observabilityRuntime.TempoUrl)
         };
 
-        foreach (var target in probeTargets)
+        var startupProbe = new ObservabilityStartupProbe();
+        var unreachableServices = await startupProbe.ProbeAsync(probeTargets);
+        if (unreachableServices.Count == 0)
         {
-            var probeUri = new UriBuilder(target.Url)
-            {
-                Path = "/",
-                Query = string.Empty
-            }.Uri;
-
-            using var response = await httpClient.GetAsync(probeUri);
-            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                continue;
-            }
-
-            observabilityRuntime.Ready = false;
-            logger.LogWarning("Observability service {ServiceName} is not yet reachable at {ServiceUrl}", target.Name, target.Url);
+            observabilityRuntime.Ready = true;
             return;
         }
 
-        observabilityRuntime.Ready = true;
+        observabilityRuntime.Ready = false;
+        logger.LogWarning("Observability services are not yet reachable; links will remain hidden until startup completes. Unreachable services: {Services}", string.Join(", ", unreachableServices));
     }
     catch (Exception ex)
     {
