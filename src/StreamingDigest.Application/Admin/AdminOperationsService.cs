@@ -145,6 +145,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
             Directory.CreateDirectory(configTargetDirectory);
 
             using var archive = ZipFile.OpenRead(archivePath);
+            var postgresRestoreMessage = await RestorePostgresDumpAssetAsync(archive, cancellationToken);
             foreach (var entry in archive.Entries)
             {
                 if (string.IsNullOrWhiteSpace(entry.FullName) || entry.FullName.EndsWith('/'))
@@ -152,7 +153,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
                     continue;
                 }
 
-                var entryPath = entry.FullName.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+                var entryPath = NormalizeArchiveEntryPath(entry.FullName);
                 if (entryPath.StartsWith("media", StringComparison.OrdinalIgnoreCase))
                 {
                     var relativePath = ExtractRelativeAssetPath(entryPath, "media");
@@ -192,7 +193,17 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 }
             }
 
-            var message = $"Backup archive '{archiveFileName}' was restored into the configured media, matrix, and config locations.";
+            var messageParts = new List<string>
+            {
+                $"Backup archive '{archiveFileName}' was restored into the configured media, matrix, and config locations."
+            };
+
+            if (!string.IsNullOrWhiteSpace(postgresRestoreMessage))
+            {
+                messageParts.Add(postgresRestoreMessage);
+            }
+
+            var message = string.Join(" ", messageParts);
             return CreateCompletedResult("backup.restore", archiveFileName, message, "healthy");
         }
         catch (Exception ex)
@@ -241,6 +252,11 @@ public sealed class AdminOperationsService : IAdminOperationsService
 
             var dumpPath = Path.Combine(assetDirectory, "postgres.sql");
             var builder = new NpgsqlConnectionStringBuilder(connectionString);
+            var host = builder.Host ?? "localhost";
+            var port = builder.Port.ToString();
+            var username = builder.Username ?? "postgres";
+            var database = builder.Database ?? "postgres";
+            var password = builder.Password ?? string.Empty;
             var processStartInfo = new ProcessStartInfo
             {
                 FileName = executablePath,
@@ -249,20 +265,20 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-
+ 
             processStartInfo.ArgumentList.Add("--format");
             processStartInfo.ArgumentList.Add("plain");
             processStartInfo.ArgumentList.Add("--file");
             processStartInfo.ArgumentList.Add(dumpPath);
             processStartInfo.ArgumentList.Add("--host");
-            processStartInfo.ArgumentList.Add(builder.Host);
+            processStartInfo.ArgumentList.Add(host);
             processStartInfo.ArgumentList.Add("--port");
-            processStartInfo.ArgumentList.Add(builder.Port.ToString());
+            processStartInfo.ArgumentList.Add(port);
             processStartInfo.ArgumentList.Add("--username");
-            processStartInfo.ArgumentList.Add(builder.Username);
+            processStartInfo.ArgumentList.Add(username);
             processStartInfo.ArgumentList.Add("--dbname");
-            processStartInfo.ArgumentList.Add(builder.Database);
-            processStartInfo.Environment["PGPASSWORD"] = builder.Password;
+            processStartInfo.ArgumentList.Add(database);
+            processStartInfo.Environment["PGPASSWORD"] = password;
 
             using var process = new Process { StartInfo = processStartInfo };
             process.Start();
@@ -283,6 +299,87 @@ public sealed class AdminOperationsService : IAdminOperationsService
         }
     }
 
+    private async Task<string?> RestorePostgresDumpAssetAsync(ZipArchive archive, CancellationToken cancellationToken)
+    {
+        var dumpEntry = archive.Entries.FirstOrDefault(entry =>
+            string.Equals(NormalizeArchiveEntryPath(entry.FullName), "postgresql/postgres.sql", StringComparison.OrdinalIgnoreCase));
+
+        if (dumpEntry is null)
+        {
+            return null;
+        }
+
+        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return "PostgreSQL restore skipped: no PostgreSQL connection string configured.";
+        }
+
+        var executablePath = ResolveExecutable("psql");
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return "PostgreSQL restore skipped: psql is not available on the PATH.";
+        }
+
+        var dumpPath = Path.Combine(Path.GetTempPath(), $"streaming-digest-restore-{Guid.NewGuid():N}.sql");
+        try
+        {
+            await using var sourceStream = dumpEntry.Open();
+            await using var destinationStream = File.Create(dumpPath);
+            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+
+            var builder = new NpgsqlConnectionStringBuilder(connectionString);
+            var host = builder.Host ?? "localhost";
+            var port = builder.Port.ToString();
+            var username = builder.Username ?? "postgres";
+            var database = builder.Database ?? "postgres";
+            var password = builder.Password ?? string.Empty;
+            var processStartInfo = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            processStartInfo.ArgumentList.Add("--single-transaction");
+            processStartInfo.ArgumentList.Add("--set");
+            processStartInfo.ArgumentList.Add("ON_ERROR_STOP=1");
+            processStartInfo.ArgumentList.Add("--host");
+            processStartInfo.ArgumentList.Add(host);
+            processStartInfo.ArgumentList.Add("--port");
+            processStartInfo.ArgumentList.Add(port);
+            processStartInfo.ArgumentList.Add("--username");
+            processStartInfo.ArgumentList.Add(username);
+            processStartInfo.ArgumentList.Add("--dbname");
+            processStartInfo.ArgumentList.Add(database);
+            processStartInfo.ArgumentList.Add("--file");
+            processStartInfo.ArgumentList.Add(dumpPath);
+            processStartInfo.Environment["PGPASSWORD"] = password;
+
+            using var process = new Process { StartInfo = processStartInfo };
+            process.Start();
+            var standardError = await process.StandardError.ReadToEndAsync(cancellationToken);
+            var standardOutput = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+
+            if (process.ExitCode != 0)
+            {
+                return $"PostgreSQL restore failed with exit code {process.ExitCode}. {standardError}".Trim();
+            }
+
+            return $"PostgreSQL database restored from '{dumpEntry.FullName}'.";
+        }
+        finally
+        {
+            if (File.Exists(dumpPath))
+            {
+                File.Delete(dumpPath);
+            }
+        }
+    }
+
     private static async Task ExtractArchiveEntryAsync(ZipArchiveEntry entry, string destinationPath, CancellationToken cancellationToken)
     {
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
@@ -295,6 +392,9 @@ public sealed class AdminOperationsService : IAdminOperationsService
         await using var destinationStream = File.Create(destinationPath);
         await sourceStream.CopyToAsync(destinationStream, cancellationToken);
     }
+
+    private static string NormalizeArchiveEntryPath(string entryPath)
+        => entryPath.Replace('\\', '/');
 
     private static string ExtractRelativeAssetPath(string entryPath, string assetName)
     {
@@ -309,7 +409,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
             return string.Empty;
         }
 
-        if (entryPath[prefixLength] != Path.DirectorySeparatorChar)
+        if (entryPath[prefixLength] != '/' && entryPath[prefixLength] != '\\')
         {
             return string.Empty;
         }

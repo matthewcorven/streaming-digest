@@ -93,6 +93,91 @@ public sealed class AdminOperationsServiceTests
     }
 
     [Fact]
+    public async Task RestoreLatestBackupAsync_WithPostgresDumpEntry_RestoresDatabaseViaPsql()
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"streaming-digest-backup-restore-tests-{Guid.NewGuid():N}");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Directory.CreateDirectory(tempDirectory);
+            Directory.CreateDirectory(Path.Combine(tempDirectory, "media"));
+            Directory.CreateDirectory(Path.Combine(tempDirectory, "matrix"));
+            Directory.CreateDirectory(Path.Combine(tempDirectory, "backups"));
+
+            var shimDirectory = Path.Combine(tempDirectory, "shims");
+            Directory.CreateDirectory(shimDirectory);
+            var logPath = Path.Combine(tempDirectory, "psql.log");
+
+            var psqlPath = Path.Combine(shimDirectory, OperatingSystem.IsWindows() ? "psql.cmd" : "psql");
+            var shimScript = OperatingSystem.IsWindows()
+                ? "@echo off\r\nsetlocal\r\n> \"%PSQL_LOG_PATH%\" echo %*\r\n"
+                : "#!/bin/sh\nset -eu\nprintf '%s\n' \"$@\" > \"$PSQL_LOG_PATH\"\n";
+            await File.WriteAllTextAsync(psqlPath, shimScript);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(psqlPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            Environment.SetEnvironmentVariable("PATH", $"{shimDirectory}{Path.PathSeparator}{originalPath}");
+            Environment.SetEnvironmentVariable("PSQL_LOG_PATH", logPath);
+
+            var configuration = new ApplicationConfiguration
+            {
+                Backup = new BackupSettings
+                {
+                    DestinationPath = Path.Combine(tempDirectory, "backups"),
+                    MediaPath = Path.Combine(tempDirectory, "media"),
+                    MatrixPath = Path.Combine(tempDirectory, "matrix"),
+                    IncludeAppSettings = true,
+                    IncludeSecrets = true
+                },
+                ConnectionStrings = new ConnectionStringsSettings
+                {
+                    StreamingDigest = "Host=localhost;Port=5432;Database=streamingdigest;Username=postgres;Password=postgres"
+                }
+            };
+
+            var backupArchivePath = Path.Combine(tempDirectory, "backups", "streaming-digest-backup-20260726-150000.zip");
+            await using (var archiveStream = File.Create(backupArchivePath))
+            {
+                using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: true);
+
+                var postgresEntry = archive.CreateEntry("postgresql/postgres.sql");
+                await using (var postgresEntryStream = postgresEntry.Open())
+                {
+                    await using var postgresWriter = new StreamWriter(postgresEntryStream);
+                    await postgresWriter.WriteAsync("CREATE TABLE test(id integer);");
+                }
+            }
+
+            var service = new AdminOperationsService(configuration, tempDirectory);
+            var result = await service.RestoreLatestBackupAsync();
+
+            Assert.Equal("completed", result.Status);
+            Assert.Equal("backup.restore", result.OperationType);
+            Assert.Contains("PostgreSQL database restored", result.Message, StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(File.Exists(logPath));
+            var logContents = await File.ReadAllTextAsync(logPath);
+            Assert.Contains("--single-transaction", logContents, StringComparison.Ordinal);
+            Assert.Contains("--set", logContents, StringComparison.Ordinal);
+            Assert.Contains("ON_ERROR_STOP=1", logContents, StringComparison.Ordinal);
+            Assert.Contains("--dbname", logContents, StringComparison.Ordinal);
+            Assert.Contains("streamingdigest", logContents, StringComparison.Ordinal);
+            Assert.Contains("--file", logContents, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Environment.SetEnvironmentVariable("PSQL_LOG_PATH", null);
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RestoreLatestBackupAsync_RestoresArchiveContentsIntoConfiguredLocations()
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"streaming-digest-backup-restore-tests-{Guid.NewGuid():N}");
