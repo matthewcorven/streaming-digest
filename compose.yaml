@@ -88,6 +88,10 @@ services:
         condition: service_started
     networks:
       - streaming-digest-internal
+    volumes:
+      - streaming-digest-media:/var/lib/streaming-digest/media
+      - streaming-digest-debug-html:/var/lib/streaming-digest/raw-html
+      - streaming-digest-matrix-state:/var/lib/streaming-digest/matrix
 
   scraper:
     container_name: streaming-digest-scraper
@@ -98,6 +102,9 @@ services:
       PORT: 3000
     networks:
       - streaming-digest-internal
+    volumes:
+      - streaming-digest-media:/var/lib/streaming-digest/media
+      - streaming-digest-debug-html:/var/lib/streaming-digest/raw-html
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -134,6 +141,7 @@ services:
     image: prom/prometheus:v2.54.0
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
     volumes:
+      - streaming-digest-prometheus-data:/prometheus
       - ./compose/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "127.0.0.1:9090:9090"
@@ -147,6 +155,7 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
+      - streaming-digest-grafana-data:/var/lib/grafana
       - ./compose/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
@@ -161,6 +170,7 @@ services:
     image: grafana/loki:3.2.0
     command: ["-config.file=/etc/loki/local-config.yaml"]
     volumes:
+      - streaming-digest-loki-data:/loki
       - ./compose/observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
     ports:
       - "127.0.0.1:3100:3100"
@@ -172,6 +182,7 @@ services:
     image: grafana/tempo:2.6.0
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
+      - streaming-digest-tempo-data:/var/tempo
       - ./compose/observability/tempo.yaml:/etc/tempo.yaml:ro
     ports:
       - "127.0.0.1:3200:3200"
@@ -180,6 +191,13 @@ services:
 
 volumes:
   postgres-data:
+  streaming-digest-media:
+  streaming-digest-debug-html:
+  streaming-digest-matrix-state:
+  streaming-digest-grafana-data:
+  streaming-digest-prometheus-data:
+  streaming-digest-loki-data:
+  streaming-digest-tempo-data:
   ollama-data:
 
 networks:
