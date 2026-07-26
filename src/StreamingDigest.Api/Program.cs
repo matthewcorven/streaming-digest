@@ -86,6 +86,7 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
+builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<IAdminOperationsService, AdminOperationsService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 
@@ -138,6 +139,9 @@ if (databaseStatus.Connected)
     var bootstrapAdminUserService = app.Services.GetRequiredService<BootstrapAdminUserService>();
     await bootstrapAdminUserService.EnsureBootstrapAdminUserAsync(connectionString);
     await authService.EnsureSchemaAsync(connectionString);
+
+    var readinessStateService = app.Services.GetRequiredService<AppReadinessStateService>();
+    await readinessStateService.EnsureSchemaAsync(connectionString);
 }
 
 if (app.Environment.IsDevelopment())
@@ -369,22 +373,36 @@ app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthServ
         : Results.BadRequest(new { error = "The current password is invalid or the new password is too weak." });
 });
 
-app.MapGet("/api/onboarding/status", (HttpContext context) =>
+app.MapGet("/api/onboarding/status", async (HttpContext context, AppReadinessStateService readinessStateService, CancellationToken cancellationToken) =>
     IsAuthenticated(context.Request)
-        ? Results.Ok(new
+        ? Results.Ok(await readinessStateService.GetStatusAsync(connectionString, cancellationToken))
+        : Results.Unauthorized());
+app.MapPost("/api/onboarding/steps/{stepKey}/verify", async (string stepKey, HttpContext context, AppReadinessStateService readinessStateService, CancellationToken cancellationToken) =>
+{
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    OnboardingStepVerificationRequest? request = null;
+    if (context.Request.ContentLength is > 0)
+    {
+        try
         {
-            isCoreSetupComplete = false,
-            isFullyReady = false,
-            steps = Array.Empty<object>()
-        })
-        : Results.Unauthorized());
-app.MapPost("/api/onboarding/steps/{stepKey}/verify", (string stepKey, HttpContext context) =>
+            request = await JsonSerializer.DeserializeAsync<OnboardingStepVerificationRequest>(context.Request.Body, jsonOptions, cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return Results.BadRequest(new { error = "The request body is invalid." });
+        }
+    }
+
+    var result = await readinessStateService.VerifyStepAsync(connectionString, stepKey, request, cancellationToken);
+    return Results.Ok(result);
+});
+app.MapPost("/api/onboarding/complete-core-setup", async (HttpContext context, AppReadinessStateService readinessStateService, CancellationToken cancellationToken) =>
     IsAuthenticated(context.Request)
-        ? Results.Accepted($"/api/operations/{Guid.NewGuid():N}", new { stepKey })
-        : Results.Unauthorized());
-app.MapPost("/api/onboarding/complete-core-setup", (HttpContext context) =>
-    IsAuthenticated(context.Request)
-        ? Results.Ok(new { status = "updated" })
+        ? Results.Ok(await readinessStateService.CompleteCoreSetupAsync(connectionString, cancellationToken))
         : Results.Unauthorized());
 
 app.MapGet("/api/settings", (HttpContext context) =>
