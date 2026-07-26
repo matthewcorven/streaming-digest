@@ -9,4 +9,5 @@ public interface IVideoRepository
     Task AddAsync(Video video, CancellationToken cancellationToken = default);
     Task UpdateAsync(Video video, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid id, bool purgeMedia, CancellationToken cancellationToken = default);
 }

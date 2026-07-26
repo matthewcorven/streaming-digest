@@ -3,7 +3,9 @@ using StreamingDigest.Domain;
 
 namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
-public sealed class VideoRepository(StreamingDigestDbContext context) : IVideoRepository
+public sealed class VideoRepository(
+    StreamingDigestDbContext context,
+    IRetentionCleanupService retentionCleanupService) : IVideoRepository
 {
     public async Task<Video?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         => await context.Videos.FirstOrDefaultAsync(video => video.Id == id, cancellationToken);
@@ -23,12 +25,20 @@ public sealed class VideoRepository(StreamingDigestDbContext context) : IVideoRe
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => DeleteAsync(id, purgeMedia: false, cancellationToken);
+
+    public async Task DeleteAsync(Guid id, bool purgeMedia, CancellationToken cancellationToken = default)
     {
         var video = await context.Videos.FirstOrDefaultAsync(existing => existing.Id == id, cancellationToken);
         if (video is null)
         {
             return;
+        }
+
+        if (purgeMedia)
+        {
+            await retentionCleanupService.PurgeOwnedArtifactsAsync(MediaArtifactOwnerTypes.Video, [id], cancellationToken);
         }
 
         context.Videos.Remove(video);

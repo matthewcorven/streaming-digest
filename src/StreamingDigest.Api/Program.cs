@@ -95,7 +95,7 @@ using var startupScope = CorrelationContext.BeginLoggingScope(app.Logger, new Di
 
 var databaseStatus = await EnsureDatabaseConnectivityAsync(app.Logger, connectionString);
 var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
-var defaultRetentionDays = ComputeRetentionDays();
+var defaultRetentionDays = StorageRetentionPolicy.ComputeObservabilityRetentionDays(StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes());
 var observabilityRuntime = await LoadObservabilityRuntimeAsync(app.Logger, builder.Configuration, builder.Environment, connectionString, databaseStatus.Connected, defaultObservabilityEnabled, defaultRetentionDays);
 await EnsureObservabilityReadinessAsync(app.Logger, observabilityRuntime);
 
@@ -449,28 +449,6 @@ static bool IsLocalhostUrl(IConfiguration configuration)
     return urls.Contains("localhost", StringComparison.OrdinalIgnoreCase)
         || urls.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase)
         || urls.Contains("::1", StringComparison.OrdinalIgnoreCase);
-}
-
-static int ComputeRetentionDays()
-{
-    var drives = DriveInfo.GetDrives().Where(drive => drive.IsReady).ToArray();
-    if (drives.Length == 0)
-    {
-        return 0;
-    }
-
-    var freeSpaceBytes = drives.Select(drive => drive.AvailableFreeSpace).DefaultIfEmpty(0).Max();
-    if (freeSpaceBytes > 5L * 1024 * 1024 * 1024)
-    {
-        return 90;
-    }
-
-    if (freeSpaceBytes > 1L * 1024 * 1024 * 1024)
-    {
-        return 30;
-    }
-
-    return 0;
 }
 
 static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogger logger, IConfiguration configuration, IHostEnvironment environment, string connectionString, bool databaseConnected, bool defaultEnabled, int defaultRetentionDays)

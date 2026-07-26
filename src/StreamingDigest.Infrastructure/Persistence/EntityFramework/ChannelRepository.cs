@@ -3,7 +3,9 @@ using StreamingDigest.Domain;
 
 namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
-public sealed class ChannelRepository(StreamingDigestDbContext context) : IChannelRepository
+public sealed class ChannelRepository(
+    StreamingDigestDbContext context,
+    IRetentionCleanupService retentionCleanupService) : IChannelRepository
 {
     public async Task<Channel?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         => await context.Channels.FirstOrDefaultAsync(channel => channel.Id == id, cancellationToken);
@@ -23,7 +25,10 @@ public sealed class ChannelRepository(StreamingDigestDbContext context) : IChann
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => DeleteAsync(id, purgeMedia: false, cancellationToken);
+
+    public async Task DeleteAsync(Guid id, bool purgeMedia, CancellationToken cancellationToken = default)
     {
         var channel = await context.Channels.FirstOrDefaultAsync(existing => existing.Id == id, cancellationToken);
         if (channel is null)
@@ -31,6 +36,26 @@ public sealed class ChannelRepository(StreamingDigestDbContext context) : IChann
             return;
         }
 
+        var videoIds = await context.Videos
+            .Where(video => video.ChannelId == id)
+            .Select(video => video.Id)
+            .ToListAsync(cancellationToken);
+
+        if (purgeMedia)
+        {
+            if (videoIds.Count > 0)
+            {
+                await retentionCleanupService.PurgeOwnedArtifactsAsync(MediaArtifactOwnerTypes.Video, videoIds, cancellationToken);
+            }
+
+            await retentionCleanupService.PurgeOwnedArtifactsAsync(MediaArtifactOwnerTypes.Channel, [id], cancellationToken);
+        }
+
+        var videos = await context.Videos
+            .Where(video => video.ChannelId == id)
+            .ToListAsync(cancellationToken);
+
+        context.Videos.RemoveRange(videos);
         context.Channels.Remove(channel);
         await context.SaveChangesAsync(cancellationToken);
     }

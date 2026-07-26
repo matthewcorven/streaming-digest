@@ -10,6 +10,9 @@ public class Worker(
     IScreenshotGenerationService screenshotGenerationService,
     IServiceScopeFactory scopeFactory) : BackgroundService
 {
+    private static readonly TimeSpan NotificationDispatchInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RetentionCleanupInterval = TimeSpan.FromHours(1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var inputPath = configuration["screenshots:inputPath"];
@@ -35,6 +38,8 @@ public class Worker(
             }
         }
 
+        var nextRetentionCleanupAt = DateTimeOffset.MinValue;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -46,13 +51,26 @@ public class Worker(
                 {
                     logger.LogDebug("Dispatched {Count} pending outbox messages", dispatchedMessages.Count);
                 }
+
+                var now = DateTimeOffset.UtcNow;
+                if (now >= nextRetentionCleanupAt)
+                {
+                    nextRetentionCleanupAt = now.Add(RetentionCleanupInterval);
+                    var retentionCleanupService = scope.ServiceProvider.GetRequiredService<IRetentionCleanupService>();
+                    var cleanupResult = await retentionCleanupService.RunAsync(stoppingToken);
+                    logger.LogInformation(
+                        "Retention cleanup run complete. Enabled={RetentionEnabled}; RetentionDays={RetentionDays}; DeletedDomainEvents={DeletedDomainEventCount}",
+                        cleanupResult.RetentionEnabled,
+                        cleanupResult.RetentionDays,
+                        cleanupResult.DeletedDomainEventCount);
+                }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Failed to dispatch pending notification outbox messages");
+                logger.LogError(ex, "Worker maintenance loop failed");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            await Task.Delay(NotificationDispatchInterval, stoppingToken);
         }
     }
 }

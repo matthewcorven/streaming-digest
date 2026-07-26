@@ -9,4 +9,5 @@ public interface IChannelRepository
     Task AddAsync(Channel channel, CancellationToken cancellationToken = default);
     Task UpdateAsync(Channel channel, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid id, bool purgeMedia, CancellationToken cancellationToken = default);
 }

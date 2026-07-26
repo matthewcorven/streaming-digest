@@ -46,9 +46,10 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
 
     private static IReadOnlyDictionary<string, object> BuildDefaultSettings(bool? defaultObservabilityEnabled = null, int? defaultRetentionDays = null)
     {
-        var maxBytes = ComputeTempMediaMaxBytes();
+        var freeSpaceBytes = StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes();
+        var maxBytes = StorageRetentionPolicy.ComputeTempMediaMaxBytes(freeSpaceBytes);
         var observabilityEnabled = defaultObservabilityEnabled ?? false;
-        var retentionDays = defaultRetentionDays ?? ComputeRetentionDays();
+        var retentionDays = defaultRetentionDays ?? StorageRetentionPolicy.ComputeObservabilityRetentionDays(freeSpaceBytes);
 
         return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
@@ -74,7 +75,7 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
             ["notifications.matrix.dashboardBaseUrl"] = "http://localhost:8080",
             ["observability.enabled"] = observabilityEnabled,
             ["observability.retentionDays"] = retentionDays,
-            ["observability.retentionWarning"] = retentionDays <= 0,
+            ["observability.retentionWarning"] = StorageRetentionPolicy.HasObservabilityRetentionWarning(retentionDays),
             ["observability.links.grafanaUrl"] = "http://localhost:3000",
             ["observability.links.prometheusUrl"] = "http://localhost:9090",
             ["observability.links.lokiUrl"] = "http://localhost:3100",
@@ -82,39 +83,5 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
             ["observability.links.hangfireUrl"] = "/admin/jobs",
             ["debug.rawHtmlCapture.enabledDefault"] = false
         };
-    }
-
-    private static int ComputeRetentionDays()
-    {
-        var drives = DriveInfo.GetDrives().Where(drive => drive.IsReady).ToArray();
-        if (drives.Length == 0)
-        {
-            return 0;
-        }
-
-        var freeSpaceBytes = drives.Select(drive => drive.AvailableFreeSpace).DefaultIfEmpty(0).Max();
-        if (freeSpaceBytes > 5L * 1024 * 1024 * 1024)
-        {
-            return 90;
-        }
-
-        if (freeSpaceBytes > 1L * 1024 * 1024 * 1024)
-        {
-            return 30;
-        }
-
-        return 0;
-    }
-
-    private static long ComputeTempMediaMaxBytes()
-    {
-        var drives = DriveInfo.GetDrives().Where(drive => drive.IsReady).ToArray();
-        if (drives.Length == 0)
-        {
-            return 1_073_741_824;
-        }
-
-        var freeSpaceBytes = drives.Select(drive => drive.AvailableFreeSpace).DefaultIfEmpty(0).Max();
-        return Math.Max(1_073_741_824, freeSpaceBytes / 2);
     }
 }
