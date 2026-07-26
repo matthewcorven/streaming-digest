@@ -1,41 +1,63 @@
+@using StreamingDigest.Web.Models
 @inject HttpClient Http
 
 @if (isLoaded)
 {
-    @if (isEnabled && isReady)
-    {
-        <section class="observability-panel">
+    <section class="observability-panel">
+        <div class="observability-header">
             <h3>Observability</h3>
-            <p>These dashboards are available now.</p>
-            <ul>
+            @if (isEnabled)
+            {
+                <span class="observability-status @(isReady ? "is-ready" : "is-starting")">
+                    @(isReady ? "Ready" : "Starting")
+                </span>
+            }
+            else
+            {
+                <span class="observability-status is-disabled">Disabled</span>
+            }
+        </div>
+
+        @if (isEnabled && links.Count > 0)
+        {
+            <p class="observability-summary">
+                @(isReady
+                    ? "Open the configured dashboards directly from the app."
+                    : "Observability is enabled. Some services are still coming online, but the configured dashboards are already linked here.")
+            </p>
+
+            <ul class="observability-links" aria-label="Observability dashboards">
                 @foreach (var link in links)
                 {
-                    <li><a href="@link.Url" target="_blank" rel="noopener noreferrer">@link.Label</a></li>
+                    <li>
+                        <a class="observability-link-card" href="@link.Url" target="_blank" rel="noopener noreferrer">
+                            <span class="link-label">@link.Label</span>
+                            <span class="link-description">@link.Description</span>
+                        </a>
+                    </li>
                 }
             </ul>
-        </section>
-    }
-    else if (isEnabled)
-    {
-        <section class="observability-panel">
-            <h3>Observability</h3>
-            <p>Observability is enabled, but the services are still coming online.</p>
-        </section>
-    }
-    else
-    {
-        <section class="observability-panel">
-            <h3>Observability</h3>
-            <p>Observability is currently disabled. Re-enable it from the settings page to see links here.</p>
-        </section>
-    }
+        }
+        else if (isEnabled)
+        {
+            <p class="observability-summary">
+                Observability is enabled, but no dashboard links are configured yet.
+            </p>
+        }
+        else
+        {
+            <p class="observability-summary">
+                Observability is currently disabled. Re-enable it from the settings page to see links here.
+            </p>
+        }
+    </section>
 }
 
 @code {
     private bool isLoaded;
     private bool isEnabled;
     private bool isReady;
-    private IReadOnlyList<(string Label, string Url)> links = Array.Empty<(string Label, string Url)>();
+    private IReadOnlyList<ObservabilityLinkDefinition> links = Array.Empty<ObservabilityLinkDefinition>();
 
     protected override async Task OnInitializedAsync()
     {
@@ -49,13 +71,7 @@
 
             isEnabled = status.Enabled;
             isReady = status.Ready;
-            links = new[]
-            {
-                ("Grafana", status.Services?.Grafana ?? "/grafana"),
-                ("Prometheus", status.Services?.Prometheus ?? "/prometheus"),
-                ("Loki", status.Services?.Loki ?? "/loki"),
-                ("Tempo", status.Services?.Tempo ?? "/tempo")
-            };
+            links = status.Links ?? Array.Empty<ObservabilityLinkDefinition>();
         }
         catch
         {
@@ -72,14 +88,6 @@
     {
         public bool Enabled { get; set; }
         public bool Ready { get; set; }
-        public ObservabilityServices? Services { get; set; }
-    }
-
-    private sealed class ObservabilityServices
-    {
-        public string? Grafana { get; set; }
-        public string? Prometheus { get; set; }
-        public string? Loki { get; set; }
-        public string? Tempo { get; set; }
+        public IReadOnlyList<ObservabilityLinkDefinition>? Links { get; set; }
     }
 }
