@@ -6,7 +6,11 @@ namespace StreamingDigest.Application.Configuration;
 
 public sealed class ApplicationConfiguration
 {
+    public string AppVersion { get; init; } = "0.0.0";
+
     public string ConfigSchemaVersion { get; init; } = "1.0.0";
+
+    public string DeploymentSchemaVersion { get; init; } = "1.0.0";
 
     public AppSettings App { get; init; } = new();
 

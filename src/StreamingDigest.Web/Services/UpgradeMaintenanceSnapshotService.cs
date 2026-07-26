@@ -11,10 +11,10 @@ public sealed class UpgradeMaintenanceSnapshotService
             Versions = new VersionState
             {
                 AppVersion = "v0.8.1",
-                DbSchemaVersion = "db-2026.07.24",
-                ConfigSchemaVersion = "config-2026.07.24",
-                DeploymentSchemaVersion = "deploy-2026.07.24",
-                CompatibilitySummary = "The app build is aligned with the DB and config schema; deployment metadata still needs a manual review."
+                DbSchemaVersion = "006",
+                ConfigSchemaVersion = "1.0.0",
+                DeploymentSchemaVersion = "1.0.0",
+                CompatibilitySummary = "Compose image tags should stay versioned as v0.8.1-deploy.1.0.0 so app and deployment schema changes are applied together."
             },
             Upgrade = new UpgradeState
             {
@@ -30,9 +30,11 @@ public sealed class UpgradeMaintenanceSnapshotService
             },
             MigrationPreview =
             [
-                new MigrationPreviewItem { Label = "DB schema migration", Kind = "Database", Status = "Pending", Details = "Apply the new app settings table and update the migration runner." },
-                new MigrationPreviewItem { Label = "Config schema migration", Kind = "Config", Status = "Pending", Details = "Normalize the observability profile and add the new backup path setting." },
-                new MigrationPreviewItem { Label = "Derived-data invalidation", Kind = "Derived data", Status = "Queued", Details = "Search documents and embeddings are marked stale until the reprocess job completes." }
+                new MigrationPreviewItem { Label = "Safe app-only upgrade", Kind = "Category", Status = "Ready", Details = "No topology changes required; restart services on versioned tags." },
+                new MigrationPreviewItem { Label = "App upgrade with data migration", Kind = "Category", Status = "Pending", Details = "DB/config schema updates are detected and run before workers resume." },
+                new MigrationPreviewItem { Label = "Derived-data regeneration", Kind = "Category", Status = "Queued", Details = "Search documents and embeddings can be regenerated after migration if marked stale." },
+                new MigrationPreviewItem { Label = "Deployment/Compose migration", Kind = "Category", Status = "Pending", Details = "Service or volume topology updates require deployment schema confirmation." },
+                new MigrationPreviewItem { Label = "High-risk infrastructure migration", Kind = "Category", Status = "Blocked", Details = "Backup is required before major DB/volume/infra migrations." }
             ],
             Services =
             [

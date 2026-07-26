@@ -13,7 +13,9 @@ public class ApplicationConfigurationLoaderTests
         {
             WriteConfigFiles(tempDirectory, """
             {
+              "appVersion": "0.8.1",
               "configSchemaVersion": "1.0.0",
+              "deploymentSchemaVersion": "1.0.0",
               "app": {
                 "name": "streaming-digest",
                 "environment": "Development",
@@ -36,6 +38,8 @@ public class ApplicationConfigurationLoaderTests
             var configuration = ApplicationConfigurationLoader.LoadFromDirectory(tempDirectory);
 
             Assert.Equal("1.0.0", configuration.ConfigSchemaVersion);
+            Assert.Equal("0.8.1", configuration.AppVersion);
+            Assert.Equal("1.0.0", configuration.DeploymentSchemaVersion);
             Assert.Equal("streaming-digest", configuration.App.Name);
             Assert.Equal("file", configuration.App.MutableSettingsStore);
             Assert.Equal("Information", configuration.Logging.Level);
@@ -55,7 +59,9 @@ public class ApplicationConfigurationLoaderTests
         {
             WriteConfigFiles(tempDirectory, """
             {
+              "appVersion": "0.8.1",
               "configSchemaVersion": "1.0.0",
+              "deploymentSchemaVersion": "1.0.0",
               "app": {
                 "name": "streaming-digest",
                 "environment": "Development",
@@ -107,9 +113,17 @@ public class ApplicationConfigurationLoaderTests
         {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
-          "required": ["configSchemaVersion", "app", "runtime", "connectionStrings", "logging"],
+          "required": ["appVersion", "configSchemaVersion", "deploymentSchemaVersion", "app", "runtime", "connectionStrings", "logging"],
           "properties": {
+            "appVersion": {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+\\.\\d+$"
+            },
             "configSchemaVersion": {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+\\.\\d+$"
+            },
+            "deploymentSchemaVersion": {
               "type": "string",
               "pattern": "^\\d+\\.\\d+\\.\\d+$"
             },

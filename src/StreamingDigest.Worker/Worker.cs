@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
@@ -8,6 +9,7 @@ namespace StreamingDigest.Worker;
 public class Worker(
     ILogger<Worker> logger,
     IConfiguration configuration,
+    UpgradeCompatibilityEvaluation compatibilityEvaluation,
     WorkerConcurrencySettings workerConcurrencySettings,
     IScreenshotGenerationService screenshotGenerationService,
     IServiceScopeFactory scopeFactory) : BackgroundService
@@ -17,6 +19,20 @@ public class Worker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!compatibilityEvaluation.WorkerCanProcessJobs)
+        {
+            logger.LogError(
+                "Worker job processing remains paused due to compatibility blockers: {Blockers}",
+                string.Join("; ", compatibilityEvaluation.Blockers));
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await Task.Delay(NotificationDispatchInterval, stoppingToken);
+            }
+
+            return;
+        }
+
         logger.LogInformation(
             "Worker runtime concurrency profile active. ScheduledChannels={ScheduledChannels}; ManualChannels={ManualChannels}; BackfillChannels={BackfillChannels}; VideosPerChannel={VideosPerChannel}; Screenshots={Screenshots}; EmbeddingBatchSize={EmbeddingBatchSize}; WebsiteGlobal={WebsiteGlobal}; WebsitePerHost={WebsitePerHost}; RepositoryGlobal={RepositoryGlobal}; RepositoryPerHost={RepositoryPerHost}; Whisper={Whisper}; LlmJobs={LlmJobs}",
             workerConcurrencySettings.ScheduledChannelConcurrency,
