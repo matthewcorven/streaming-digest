@@ -7,6 +7,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Npgsql;
+using StreamingDigest.Application;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
 using StreamingDigest.Application.Screenshots;
@@ -62,6 +63,7 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
+builder.Services.AddSingleton<ILinkClassificationService, LinkClassificationService>();
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {
