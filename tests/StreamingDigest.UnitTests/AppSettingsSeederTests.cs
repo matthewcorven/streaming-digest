@@ -66,6 +66,25 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Seed_defaults_uses_supplied_observability_defaults_when_provided()
+    {
+        var runner = new PostgresMigrationRunner(_connectionString!);
+        await runner.ApplyAsync();
+
+        var seeder = new AppSettingsSeeder();
+        await seeder.SeedDefaultsAsync(_connectionString!, false, 30);
+
+        await using (var connection = new NpgsqlConnection(_connectionString!))
+        {
+            await connection.OpenAsync();
+
+            Assert.Equal("false", await GetSettingValueAsync(connection, "observability.enabled"));
+            Assert.Equal("30", await GetSettingValueAsync(connection, "observability.retentionDays"));
+            Assert.Equal("false", await GetSettingValueAsync(connection, "observability.retentionWarning"));
+        }
+    }
+
     private static async Task<string> GetSettingValueAsync(NpgsqlConnection connection, string key)
     {
         await using var command = new NpgsqlCommand("SELECT value_json::text FROM public.app_settings WHERE key = @key", connection);

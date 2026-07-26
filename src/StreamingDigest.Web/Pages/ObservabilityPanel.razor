@@ -1,0 +1,85 @@
+@inject HttpClient Http
+
+@if (isLoaded)
+{
+    @if (isEnabled && isReady)
+    {
+        <section class="observability-panel">
+            <h3>Observability</h3>
+            <p>These dashboards are available now.</p>
+            <ul>
+                @foreach (var link in links)
+                {
+                    <li><a href="@link.Url" target="_blank" rel="noopener noreferrer">@link.Label</a></li>
+                }
+            </ul>
+        </section>
+    }
+    else if (isEnabled)
+    {
+        <section class="observability-panel">
+            <h3>Observability</h3>
+            <p>Observability is enabled, but the services are still coming online.</p>
+        </section>
+    }
+    else
+    {
+        <section class="observability-panel">
+            <h3>Observability</h3>
+            <p>Observability is currently disabled. Re-enable it from the settings page to see links here.</p>
+        </section>
+    }
+}
+
+@code {
+    private bool isLoaded;
+    private bool isEnabled;
+    private bool isReady;
+    private IReadOnlyList<(string Label, string Url)> links = Array.Empty<(string Label, string Url)>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<ObservabilityStatus>("/api/observability");
+            if (status is null)
+            {
+                return;
+            }
+
+            isEnabled = status.Enabled;
+            isReady = status.Ready;
+            links = new[]
+            {
+                ("Grafana", status.Services?.Grafana ?? "/grafana"),
+                ("Prometheus", status.Services?.Prometheus ?? "/prometheus"),
+                ("Loki", status.Services?.Loki ?? "/loki"),
+                ("Tempo", status.Services?.Tempo ?? "/tempo")
+            };
+        }
+        catch
+        {
+            isEnabled = false;
+            isReady = false;
+        }
+        finally
+        {
+            isLoaded = true;
+        }
+    }
+
+    private sealed class ObservabilityStatus
+    {
+        public bool Enabled { get; set; }
+        public bool Ready { get; set; }
+        public ObservabilityServices? Services { get; set; }
+    }
+
+    private sealed class ObservabilityServices
+    {
+        public string? Grafana { get; set; }
+        public string? Prometheus { get; set; }
+        public string? Loki { get; set; }
+        public string? Tempo { get; set; }
+    }
+}

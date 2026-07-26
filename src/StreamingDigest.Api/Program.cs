@@ -95,6 +95,7 @@ var databaseStatus = await EnsureDatabaseConnectivityAsync(app.Logger, connectio
 var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
 var defaultRetentionDays = ComputeRetentionDays();
 var observabilityRuntime = await LoadObservabilityRuntimeAsync(app.Logger, builder.Configuration, builder.Environment, connectionString, databaseStatus.Connected, defaultObservabilityEnabled, defaultRetentionDays);
+await EnsureObservabilityReadinessAsync(app.Logger, observabilityRuntime);
 
 if (databaseStatus.Connected)
 {
@@ -208,6 +209,7 @@ app.MapGet("/api/settings", (HttpContext context) =>
             values = new Dictionary<string, object?>
             {
                 ["observability.enabled"] = observabilityRuntime.Enabled,
+                ["observability.ready"] = observabilityRuntime.Ready,
                 ["observability.retentionDays"] = observabilityRuntime.RetentionDays,
                 ["observability.retentionWarning"] = observabilityRuntime.RetentionWarning,
                 ["observability.links.grafanaUrl"] = observabilityRuntime.GrafanaUrl,
@@ -237,11 +239,13 @@ app.MapPut("/api/settings", async (HttpContext context, CancellationToken cancel
         {
             await PersistObservabilitySettingAsync(connectionString, app.Logger, true, cancellationToken);
             observabilityRuntime.Enabled = true;
+            await EnsureObservabilityReadinessAsync(app.Logger, observabilityRuntime);
         }
         else if (body is not null && body.TryGetValue("observability.enabled", out enabledValue) && enabledValue.ValueKind == JsonValueKind.False)
         {
             await PersistObservabilitySettingAsync(connectionString, app.Logger, false, cancellationToken);
             observabilityRuntime.Enabled = false;
+            observabilityRuntime.Ready = false;
         }
     }
     catch (Exception ex)
@@ -254,6 +258,7 @@ app.MapPut("/api/settings", async (HttpContext context, CancellationToken cancel
 app.MapGet("/api/observability", () => Results.Ok(new
 {
     enabled = observabilityRuntime.Enabled,
+    ready = observabilityRuntime.Ready,
     mode = observabilityRuntime.Enabled ? "enabled" : "disabled",
     retentionDays = observabilityRuntime.RetentionDays,
     retentionWarning = observabilityRuntime.RetentionWarning,
@@ -275,6 +280,14 @@ app.MapPost("/api/observability/toggle/{enabled:bool}", async (bool enabled, Htt
 
     await PersistObservabilitySettingAsync(connectionString, app.Logger, enabled, cancellationToken);
     observabilityRuntime.Enabled = enabled;
+    if (enabled)
+    {
+        await EnsureObservabilityReadinessAsync(app.Logger, observabilityRuntime);
+    }
+    else
+    {
+        observabilityRuntime.Ready = false;
+    }
 
     return Results.Ok(new { enabled, mode = enabled ? "enabled" : "disabled" });
 });
@@ -408,7 +421,22 @@ static bool ResolveDefaultObservabilityEnabled(IConfiguration configuration, IHo
         return environmentEnabled;
     }
 
-    return environment.IsDevelopment() ? true : fallbackEnabled;
+    return environment.IsDevelopment() || IsLocalhostUrl(configuration) ? true : fallbackEnabled;
+}
+
+static bool IsLocalhostUrl(IConfiguration configuration)
+{
+    var urls = string.Join(";", new[]
+    {
+        configuration["urls"],
+        configuration["ASPNETCORE_URLS"],
+        Environment.GetEnvironmentVariable("ASPNETCORE_URLS"),
+        Environment.GetEnvironmentVariable("urls")
+    }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    return urls.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+        || urls.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+        || urls.Contains("::1", StringComparison.OrdinalIgnoreCase);
 }
 
 static int ComputeRetentionDays()
@@ -474,6 +502,53 @@ static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogg
         TempoUrl = tempoUrl,
         OtelCollectorUrl = otelCollectorUrl
     };
+}
+
+static async Task EnsureObservabilityReadinessAsync(ILogger logger, ObservabilityRuntimeState observabilityRuntime)
+{
+    if (!observabilityRuntime.Enabled)
+    {
+        observabilityRuntime.Ready = false;
+        return;
+    }
+
+    try
+    {
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        var probeTargets = new[]
+        {
+            (Name: "grafana", Url: observabilityRuntime.GrafanaUrl),
+            (Name: "prometheus", Url: observabilityRuntime.PrometheusUrl),
+            (Name: "loki", Url: observabilityRuntime.LokiUrl),
+            (Name: "tempo", Url: observabilityRuntime.TempoUrl)
+        };
+
+        foreach (var target in probeTargets)
+        {
+            var probeUri = new UriBuilder(target.Url)
+            {
+                Path = "/",
+                Query = string.Empty
+            }.Uri;
+
+            using var response = await httpClient.GetAsync(probeUri);
+            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                continue;
+            }
+
+            observabilityRuntime.Ready = false;
+            logger.LogWarning("Observability service {ServiceName} is not yet reachable at {ServiceUrl}", target.Name, target.Url);
+            return;
+        }
+
+        observabilityRuntime.Ready = true;
+    }
+    catch (Exception ex)
+    {
+        observabilityRuntime.Ready = false;
+        logger.LogWarning(ex, "Observability services are not yet reachable; links will remain hidden until startup completes");
+    }
 }
 
 static async Task PersistObservabilitySettingAsync(string connectionString, ILogger logger, bool enabled, CancellationToken cancellationToken)
@@ -672,6 +747,7 @@ public sealed record DatabaseStatus(bool Connected, string DatabaseName, string 
 public sealed class ObservabilityRuntimeState
 {
     public bool Enabled { get; set; }
+    public bool Ready { get; set; }
     public int RetentionDays { get; set; }
     public bool RetentionWarning { get; set; }
     public string GrafanaUrl { get; set; } = string.Empty;

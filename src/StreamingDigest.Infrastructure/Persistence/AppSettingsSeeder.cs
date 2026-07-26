@@ -47,7 +47,7 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
     private static IReadOnlyDictionary<string, object> BuildDefaultSettings(bool? defaultObservabilityEnabled = null, int? defaultRetentionDays = null)
     {
         var maxBytes = ComputeTempMediaMaxBytes();
-        var observabilityEnabled = defaultObservabilityEnabled ?? true;
+        var observabilityEnabled = defaultObservabilityEnabled ?? false;
         var retentionDays = defaultRetentionDays ?? ComputeRetentionDays();
 
         return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
