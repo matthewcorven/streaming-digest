@@ -76,6 +76,29 @@ test('scrapeFirstPage extracts visible text and metadata from a rendered page', 
   }
 });
 
+test('scrapeFirstPage enforces per-host rate limiting', async () => {
+  const server = await createTestServer((request, response) => {
+    if (request.url === '/robots.txt') {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.end('User-agent: *\nDisallow: /\n');
+      return;
+    }
+
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<html><body>Rate-limited page</body></html>');
+  });
+
+  try {
+    const startedAt = Date.now();
+    await scrapeFirstPage({ url: `${server.baseUrl}/first`, rateLimitDelayMs: 80, respectRobotsTxt: true });
+    await scrapeFirstPage({ url: `${server.baseUrl}/second`, rateLimitDelayMs: 80, respectRobotsTxt: true });
+    const elapsedMs = Date.now() - startedAt;
+    assert.ok(elapsedMs >= 70, `expected rate limiting delay, measured ${elapsedMs}ms`);
+  } finally {
+    await server.close();
+  }
+});
+
 test('scrapeFirstPage respects robots.txt exclusions', async () => {
   const server = await createTestServer((request, response) => {
     if (request.url === '/robots.txt') {

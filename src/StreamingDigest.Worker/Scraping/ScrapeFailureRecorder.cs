@@ -20,6 +20,7 @@ public sealed class ScrapeFailureRecorder(
             request.RespectRobotsTxt,
             request.DebugCaptureRawHtml,
             request.TimeoutSeconds,
+            request.RateLimitDelayMs,
             ExceptionType = exception.GetType().FullName,
             exception.Message
         };

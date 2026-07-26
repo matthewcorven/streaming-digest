@@ -58,7 +58,7 @@ public sealed class ScrapeFailureRecorderTests : IDisposable
         {
             BaseAddress = new Uri("https://scraper.internal")
         };
-        var client = new ScraperClient(httpClient, _recorder, new WorkerOperationConcurrencyController(new WorkerConcurrencySettings()));
+        var client = new ScraperClient(httpClient, _recorder, new WorkerOperationConcurrencyController(new WorkerConcurrencySettings()), new ApplicationConfiguration());
         var request = new ScrapeFirstPageRequest("https://example.com/failed");
 
         await Assert.ThrowsAsync<HttpRequestException>(() => client.ScrapeFirstPageAsync(request));

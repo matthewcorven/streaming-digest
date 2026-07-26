@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Json.Schema;
@@ -15,6 +16,8 @@ public sealed class ApplicationConfiguration
     public AppSettings App { get; init; } = new();
 
     public RuntimeSettings Runtime { get; init; } = new();
+
+    public ScrapingSettings Scraping { get; init; } = new();
 
     public BackupSettings Backup { get; init; } = new();
 
@@ -39,6 +42,55 @@ public sealed class RuntimeSettings
     public string DefaultTheme { get; init; } = "system";
 
     public int PaginationPageSize { get; init; } = 25;
+}
+
+public sealed class ScrapingSettings
+{
+    public bool RespectRobotsTxtByDefault { get; init; } = true;
+
+    public int RateLimitDelayMs { get; init; } = 1000;
+
+    public List<ScrapingDomainOverride> DomainOverrides { get; init; } = new();
+}
+
+public sealed class ScrapingDomainOverride
+{
+    public string Domain { get; init; } = string.Empty;
+
+    public bool RespectRobotsTxt { get; init; } = true;
+}
+
+public static class ScrapingPolicyResolver
+{
+    public static bool ShouldRespectRobotsTxt(string? url, ScrapingSettings? settings)
+    {
+        if (settings is null)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return settings.RespectRobotsTxtByDefault;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsedUrl))
+        {
+            return settings.RespectRobotsTxtByDefault;
+        }
+
+        foreach (var domainOverride in settings.DomainOverrides.Where(overrideEntry => !string.IsNullOrWhiteSpace(overrideEntry.Domain)))
+        {
+            var domain = domainOverride.Domain.Trim();
+            if (string.Equals(parsedUrl.Host, domain, StringComparison.OrdinalIgnoreCase) ||
+                parsedUrl.Host.EndsWith($".{domain}", StringComparison.OrdinalIgnoreCase))
+            {
+                return domainOverride.RespectRobotsTxt;
+            }
+        }
+
+        return settings.RespectRobotsTxtByDefault;
+    }
 }
 
 public sealed class ConnectionStringsSettings
