@@ -40,3 +40,9 @@ public sealed record AdminActionStatus(
     string? HealthStatus,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public interface IAdminOperationStore
+{
+    Task PersistOperationAsync(AdminActionStatus operation, CancellationToken cancellationToken = default);
+    Task<AdminActionStatus?> GetOperationAsync(Guid operationId, CancellationToken cancellationToken = default);
+}
