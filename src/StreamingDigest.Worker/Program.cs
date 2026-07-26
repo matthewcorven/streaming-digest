@@ -77,6 +77,7 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
 builder.Services.AddScoped<IScrapeFailureRecorder, ScrapeFailureRecorder>();
 builder.Services.AddHttpClient<ScraperClient>(client =>
 {
@@ -96,7 +97,7 @@ using var startupScope = CorrelationContext.BeginLoggingScope(host.Services.GetR
 var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
 var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
-var defaultRetentionDays = ComputeRetentionDays();
+var defaultRetentionDays = StorageRetentionPolicy.ComputeObservabilityRetentionDays(StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes());
 
 if (databaseStatus.Connected)
 {
@@ -170,28 +171,6 @@ static bool ResolveDefaultObservabilityEnabled(IConfiguration configuration, IHo
     }
 
     return environment.IsDevelopment() ? true : fallbackEnabled;
-}
-
-static int ComputeRetentionDays()
-{
-    var drives = DriveInfo.GetDrives().Where(drive => drive.IsReady).ToArray();
-    if (drives.Length == 0)
-    {
-        return 0;
-    }
-
-    var freeSpaceBytes = drives.Select(drive => drive.AvailableFreeSpace).DefaultIfEmpty(0).Max();
-    if (freeSpaceBytes > 5L * 1024 * 1024 * 1024)
-    {
-        return 90;
-    }
-
-    if (freeSpaceBytes > 1L * 1024 * 1024 * 1024)
-    {
-        return 30;
-    }
-
-    return 0;
 }
 
 public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);
