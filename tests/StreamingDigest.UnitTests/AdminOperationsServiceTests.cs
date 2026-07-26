@@ -41,6 +41,81 @@ public sealed class AdminOperationsServiceTests
     }
 
     [Fact]
+    public async Task GetOperationAsync_UsesInjectedStoreWhenOperationIsNotCached()
+    {
+        var store = new TestAdminOperationStore();
+        var service = new AdminOperationsService(operationStore: store);
+
+        var operationId = Guid.NewGuid();
+        var persistedOperation = new AdminActionStatus(
+            operationId,
+            "custom.batch",
+            "accepted",
+            "tracked by injected store",
+            "batch-1",
+            null,
+            null,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+
+        await store.PersistOperationAsync(persistedOperation);
+
+        var operation = await service.GetOperationAsync(operationId);
+
+        Assert.NotNull(operation);
+        Assert.Equal(persistedOperation.OperationType, operation!.OperationType);
+        Assert.Equal(persistedOperation.Message, operation.Message);
+    }
+
+    [Fact]
+    public async Task RetryFailedIngestionRunAsync_WithInvalidRunId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedIngestionRunAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.ingestionRun", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RetryFailedVideoAsync_WithInvalidVideoId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedVideoAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.video", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RetryFailedLinkAsync_WithInvalidLinkId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedLinkAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.link", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RetryFailedRepositoryAsync_WithInvalidRepositoryId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedRepositoryAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.repository", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task CreateBackupAsync_CreatesArchiveAndManifest()
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"streaming-digest-backup-tests-{Guid.NewGuid():N}");
@@ -268,5 +343,19 @@ public sealed class AdminOperationsServiceTests
                 Directory.Delete(tempDirectory, recursive: true);
             }
         }
+    }
+
+    private sealed class TestAdminOperationStore : IAdminOperationStore
+    {
+        private readonly Dictionary<Guid, AdminActionStatus> _operations = new();
+
+        public Task PersistOperationAsync(AdminActionStatus operation, CancellationToken cancellationToken = default)
+        {
+            _operations[operation.OperationId] = operation;
+            return Task.CompletedTask;
+        }
+
+        public Task<AdminActionStatus?> GetOperationAsync(Guid operationId, CancellationToken cancellationToken = default)
+            => Task.FromResult<AdminActionStatus?>(_operations.TryGetValue(operationId, out var operation) ? operation : null);
     }
 }
