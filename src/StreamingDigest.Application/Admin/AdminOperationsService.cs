@@ -38,19 +38,51 @@ public sealed class AdminOperationsService : IAdminOperationsService
 
     public async Task<AdminActionResult> RetryFailedIngestionRunAsync(string runId, CancellationToken cancellationToken = default)
     {
+        if (!Guid.TryParse(runId, out var parsedRunId))
+        {
+            return await CreateResultAsync("retry.ingestionRun", runId, "failed", $"Ingestion run id '{runId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
         var result = await CreateAcceptedResultAsync("retry.ingestionRun", runId, $"Retry queued for ingestion run '{runId}'.", cancellationToken);
-        await TryRetryFailedRunAsync(result.OperationId, runId, cancellationToken);
+        await TryRetryFailedRunAsync(result.OperationId, parsedRunId, cancellationToken);
         return result;
     }
 
     public async Task<AdminActionResult> RetryFailedVideoAsync(string videoId, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("retry.video", videoId, $"Retry queued for video '{videoId}'.", cancellationToken);
+    {
+        if (!Guid.TryParse(videoId, out var parsedVideoId))
+        {
+            return await CreateResultAsync("retry.video", videoId, "failed", $"Video id '{videoId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        var result = await CreateAcceptedResultAsync("retry.video", videoId, $"Retry queued for video '{videoId}'.", cancellationToken);
+        await TryRetryFailedEntityAsync(result.OperationId, "retry.video", "video", parsedVideoId, videoId, cancellationToken);
+        return result;
+    }
 
     public async Task<AdminActionResult> RetryFailedLinkAsync(string linkId, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("retry.link", linkId, $"Retry queued for link '{linkId}'.", cancellationToken);
+    {
+        if (!Guid.TryParse(linkId, out var parsedLinkId))
+        {
+            return await CreateResultAsync("retry.link", linkId, "failed", $"Link id '{linkId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        var result = await CreateAcceptedResultAsync("retry.link", linkId, $"Retry queued for link '{linkId}'.", cancellationToken);
+        await TryRetryFailedEntityAsync(result.OperationId, "retry.link", "link", parsedLinkId, linkId, cancellationToken);
+        return result;
+    }
 
     public async Task<AdminActionResult> RetryFailedRepositoryAsync(string repositoryId, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("retry.repository", repositoryId, $"Retry queued for repository '{repositoryId}'.", cancellationToken);
+    {
+        if (!Guid.TryParse(repositoryId, out var parsedRepositoryId))
+        {
+            return await CreateResultAsync("retry.repository", repositoryId, "failed", $"Repository id '{repositoryId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        var result = await CreateAcceptedResultAsync("retry.repository", repositoryId, $"Retry queued for repository '{repositoryId}'.", cancellationToken);
+        await TryRetryFailedEntityAsync(result.OperationId, "retry.repository", "repository", parsedRepositoryId, repositoryId, cancellationToken);
+        return result;
+    }
 
     public async Task<AdminActionResult> ReprocessVideoAsync(string videoId, CancellationToken cancellationToken = default)
         => await CreateAcceptedResultAsync("reprocess.video", videoId, $"Reprocess queued for video '{videoId}'.", cancellationToken);
@@ -663,13 +695,8 @@ public sealed class AdminOperationsService : IAdminOperationsService
         }
     }
 
-    private async Task TryRetryFailedRunAsync(Guid operationId, string runIdText, CancellationToken cancellationToken)
+    private async Task TryRetryFailedRunAsync(Guid operationId, Guid runId, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(runIdText, out var runId))
-        {
-            return;
-        }
-
         var connectionString = _configuration.ConnectionStrings.StreamingDigest;
         if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
         {
@@ -683,17 +710,18 @@ public sealed class AdminOperationsService : IAdminOperationsService
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
             var now = DateTimeOffset.UtcNow;
-            await PersistOperationAsync(CreateOperationStatus(operationId, "retry.ingestionRun", "accepted", $"Retry queued for ingestion run '{runIdText}'.", runIdText, null, null, now, now), cancellationToken);
+            await PersistOperationAsync(CreateOperationStatus(operationId, "retry.ingestionRun", "accepted", $"Retry queued for ingestion run '{runId}'.", runId.ToString(), null, null, now, now), cancellationToken);
 
             await using (var operationCommand = new NpgsqlCommand("""
                 INSERT INTO public.operations (
-                    id, operation_type, status, requested_by, related_entity_type, related_entity_id, started_at, created_at, updated_at
+                    id, operation_type, status, requested_by, related_entity_type, related_entity_id, started_at, summary_json, created_at, updated_at
                 )
                 VALUES (
-                    @id, @operation_type, @status, @requested_by, @related_entity_type, @related_entity_id, @started_at, @created_at, @updated_at
+                    @id, @operation_type, @status, @requested_by, @related_entity_type, @related_entity_id, @started_at, @summary_json::jsonb, @created_at, @updated_at
                 )
                 ON CONFLICT (id) DO UPDATE
                 SET status = EXCLUDED.status,
+                    summary_json = EXCLUDED.summary_json,
                     updated_at = EXCLUDED.updated_at
                 """, connection, transaction))
             {
@@ -704,11 +732,18 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 operationCommand.Parameters.AddWithValue("related_entity_type", "ingestion_run");
                 operationCommand.Parameters.AddWithValue("related_entity_id", runId);
                 operationCommand.Parameters.AddWithValue("started_at", now);
+                operationCommand.Parameters.AddWithValue("summary_json", new JsonObject
+                {
+                    ["retryScope"] = "ingestion_run",
+                    ["ingestionRunId"] = runId,
+                    ["queuedAtUtc"] = now
+                }.ToJsonString());
                 operationCommand.Parameters.AddWithValue("created_at", now);
                 operationCommand.Parameters.AddWithValue("updated_at", now);
                 await operationCommand.ExecuteNonQueryAsync(cancellationToken);
             }
 
+            List<RetryQueueRow> queuedRetryRows = [];
             await using (var retryItemsCommand = new NpgsqlCommand("""
                 UPDATE public.ingestion_items
                 SET operation_id = @operation_id,
@@ -722,11 +757,28 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 WHERE ingestion_run_id = @ingestion_run_id
                     AND is_retryable = true
                     AND status IN ('failed', 'deferred')
+                RETURNING id, ingestion_run_id, item_type, item_id, stage, attempt, retry_count
                 """, connection, transaction))
             {
                 retryItemsCommand.Parameters.AddWithValue("operation_id", operationId);
                 retryItemsCommand.Parameters.AddWithValue("ingestion_run_id", runId);
-                await retryItemsCommand.ExecuteNonQueryAsync(cancellationToken);
+                await using var reader = await retryItemsCommand.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    queuedRetryRows.Add(new RetryQueueRow(
+                        reader.GetGuid(0),
+                        reader.GetGuid(1),
+                        reader.GetString(2),
+                        reader.IsDBNull(3) ? null : reader.GetGuid(3),
+                        reader.GetString(4),
+                        reader.GetInt32(5),
+                        reader.GetInt32(6)));
+                }
+            }
+
+            foreach (var retryRow in queuedRetryRows)
+            {
+                await InsertRetryDomainEventAsync(connection, transaction, operationId, retryRow, "ingestion_run", runId.ToString(), now, cancellationToken);
             }
 
             await using (var runCommand = new NpgsqlCommand("""
@@ -741,12 +793,195 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 await runCommand.ExecuteNonQueryAsync(cancellationToken);
             }
 
+            await using (var updateSummaryCommand = new NpgsqlCommand("""
+                UPDATE public.operations
+                SET summary_json = @summary_json::jsonb,
+                    updated_at = @updated_at
+                WHERE id = @id
+                """, connection, transaction))
+            {
+                updateSummaryCommand.Parameters.AddWithValue("id", operationId);
+                updateSummaryCommand.Parameters.AddWithValue("summary_json", new JsonObject
+                {
+                    ["retryScope"] = "ingestion_run",
+                    ["ingestionRunId"] = runId,
+                    ["queuedItemCount"] = queuedRetryRows.Count,
+                    ["queuedAtUtc"] = now
+                }.ToJsonString());
+                updateSummaryCommand.Parameters.AddWithValue("updated_at", now);
+                await updateSummaryCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             await transaction.CommitAsync(cancellationToken);
         }
         catch
         {
             // Keep retry operation accepted responses available even when persistence is unavailable.
         }
+    }
+
+    private async Task TryRetryFailedEntityAsync(
+        Guid operationId,
+        string operationType,
+        string itemType,
+        Guid itemId,
+        string itemIdText,
+        CancellationToken cancellationToken)
+    {
+        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
+        if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+            var now = DateTimeOffset.UtcNow;
+            await PersistOperationAsync(CreateOperationStatus(operationId, operationType, "accepted", $"Retry queued for {itemType} '{itemIdText}'.", itemIdText, null, null, now, now), cancellationToken);
+
+            await using (var operationCommand = new NpgsqlCommand("""
+                INSERT INTO public.operations (
+                    id, operation_type, status, requested_by, related_entity_type, related_entity_id, started_at, summary_json, created_at, updated_at
+                )
+                VALUES (
+                    @id, @operation_type, @status, @requested_by, @related_entity_type, @related_entity_id, @started_at, @summary_json::jsonb, @created_at, @updated_at
+                )
+                ON CONFLICT (id) DO UPDATE
+                SET status = EXCLUDED.status,
+                    summary_json = EXCLUDED.summary_json,
+                    updated_at = EXCLUDED.updated_at
+                """, connection, transaction))
+            {
+                operationCommand.Parameters.AddWithValue("id", operationId);
+                operationCommand.Parameters.AddWithValue("operation_type", operationType);
+                operationCommand.Parameters.AddWithValue("status", "accepted");
+                operationCommand.Parameters.AddWithValue("requested_by", "admin");
+                operationCommand.Parameters.AddWithValue("related_entity_type", itemType);
+                operationCommand.Parameters.AddWithValue("related_entity_id", itemId);
+                operationCommand.Parameters.AddWithValue("started_at", now);
+                operationCommand.Parameters.AddWithValue("summary_json", new JsonObject
+                {
+                    ["retryScope"] = itemType,
+                    ["requestedEntityId"] = itemId,
+                    ["queuedAtUtc"] = now
+                }.ToJsonString());
+                operationCommand.Parameters.AddWithValue("created_at", now);
+                operationCommand.Parameters.AddWithValue("updated_at", now);
+                await operationCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            List<RetryQueueRow> queuedRetryRows = [];
+            await using (var retryItemsCommand = new NpgsqlCommand("""
+                UPDATE public.ingestion_items
+                SET operation_id = @operation_id,
+                    status = 'pending',
+                    attempt = attempt + 1,
+                    retry_count = retry_count + 1,
+                    error_summary = NULL,
+                    next_retry_at = NULL,
+                    deferred_until = NULL,
+                    deferment_reason = NULL
+                WHERE item_type = @item_type
+                    AND item_id = @item_id
+                    AND is_retryable = true
+                    AND status IN ('failed', 'deferred')
+                RETURNING id, ingestion_run_id, item_type, item_id, stage, attempt, retry_count
+                """, connection, transaction))
+            {
+                retryItemsCommand.Parameters.AddWithValue("operation_id", operationId);
+                retryItemsCommand.Parameters.AddWithValue("item_type", itemType);
+                retryItemsCommand.Parameters.AddWithValue("item_id", itemId);
+                await using var reader = await retryItemsCommand.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    queuedRetryRows.Add(new RetryQueueRow(
+                        reader.GetGuid(0),
+                        reader.GetGuid(1),
+                        reader.GetString(2),
+                        reader.IsDBNull(3) ? null : reader.GetGuid(3),
+                        reader.GetString(4),
+                        reader.GetInt32(5),
+                        reader.GetInt32(6)));
+                }
+            }
+
+            foreach (var retryRow in queuedRetryRows)
+            {
+                await InsertRetryDomainEventAsync(connection, transaction, operationId, retryRow, itemType, itemIdText, now, cancellationToken);
+            }
+
+            await using (var updateSummaryCommand = new NpgsqlCommand("""
+                UPDATE public.operations
+                SET summary_json = @summary_json::jsonb,
+                    updated_at = @updated_at
+                WHERE id = @id
+                """, connection, transaction))
+            {
+                updateSummaryCommand.Parameters.AddWithValue("id", operationId);
+                updateSummaryCommand.Parameters.AddWithValue("summary_json", new JsonObject
+                {
+                    ["retryScope"] = itemType,
+                    ["requestedEntityId"] = itemId,
+                    ["queuedItemCount"] = queuedRetryRows.Count,
+                    ["queuedAtUtc"] = now
+                }.ToJsonString());
+                updateSummaryCommand.Parameters.AddWithValue("updated_at", now);
+                await updateSummaryCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            // Keep retry operation accepted responses available even when persistence is unavailable.
+        }
+    }
+
+    private static async Task InsertRetryDomainEventAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid operationId,
+        RetryQueueRow retryRow,
+        string retryScope,
+        string scopeTarget,
+        DateTimeOffset timestamp,
+        CancellationToken cancellationToken)
+    {
+        var details = new JsonObject
+        {
+            ["retryScope"] = retryScope,
+            ["scopeTarget"] = scopeTarget,
+            ["itemType"] = retryRow.ItemType,
+            ["itemId"] = retryRow.ItemId,
+            ["stage"] = retryRow.Stage,
+            ["attempt"] = retryRow.Attempt,
+            ["retryCount"] = retryRow.RetryCount
+        };
+
+        await using var eventCommand = new NpgsqlCommand("""
+            INSERT INTO public.domain_events (
+                id, event_type, severity, entity_type, entity_id, ingestion_run_id, operation_id, message, details_json, created_at, updated_at
+            )
+            VALUES (
+                @id, @event_type, @severity, @entity_type, @entity_id, @ingestion_run_id, @operation_id, @message, @details_json::jsonb, @created_at, @updated_at
+            )
+            """, connection, transaction);
+        eventCommand.Parameters.AddWithValue("id", Guid.NewGuid());
+        eventCommand.Parameters.AddWithValue("event_type", "ingestion.item.retry_queued");
+        eventCommand.Parameters.AddWithValue("severity", "info");
+        eventCommand.Parameters.AddWithValue("entity_type", "ingestion_item");
+        eventCommand.Parameters.AddWithValue("entity_id", retryRow.IngestionItemId);
+        eventCommand.Parameters.AddWithValue("ingestion_run_id", retryRow.IngestionRunId);
+        eventCommand.Parameters.AddWithValue("operation_id", operationId);
+        eventCommand.Parameters.AddWithValue("message", $"Retry queued for {retryRow.ItemType} stage '{retryRow.Stage}'.");
+        eventCommand.Parameters.AddWithValue("details_json", details.ToJsonString());
+        eventCommand.Parameters.AddWithValue("created_at", timestamp);
+        eventCommand.Parameters.AddWithValue("updated_at", timestamp);
+        await eventCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<List<(Guid ChannelId, string ExternalKey)>> LoadRunChannelsAsync(
@@ -842,4 +1077,13 @@ public sealed class AdminOperationsService : IAdminOperationsService
         string Status,
         string? Path,
         string? Details);
+
+    private sealed record RetryQueueRow(
+        Guid IngestionItemId,
+        Guid IngestionRunId,
+        string ItemType,
+        Guid? ItemId,
+        string Stage,
+        int Attempt,
+        int RetryCount);
 }

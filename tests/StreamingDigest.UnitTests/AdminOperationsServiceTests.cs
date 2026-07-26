@@ -68,6 +68,54 @@ public sealed class AdminOperationsServiceTests
     }
 
     [Fact]
+    public async Task RetryFailedIngestionRunAsync_WithInvalidRunId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedIngestionRunAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.ingestionRun", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RetryFailedVideoAsync_WithInvalidVideoId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedVideoAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.video", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RetryFailedLinkAsync_WithInvalidLinkId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedLinkAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.link", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RetryFailedRepositoryAsync_WithInvalidRepositoryId_ReturnsFailedResult()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.RetryFailedRepositoryAsync("not-a-guid");
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("retry.repository", result.OperationType);
+        Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task CreateBackupAsync_CreatesArchiveAndManifest()
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"streaming-digest-backup-tests-{Guid.NewGuid():N}");
