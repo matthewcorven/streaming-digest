@@ -48,18 +48,18 @@ public sealed class StreamingDigestDbContextTests : IAsyncLifetime
                 Id = Guid.NewGuid(),
                 YoutubeChannelId = "UC123456",
                 NameOriginal = "Test Channel",
-                ProfileUrl = "https://youtube.com/@testchannel",
-                SourceUrl = "https://youtube.com/channel/UC123456"
+                ProfileUrl = "HTTPS://YouTube.com/@testchannel/?utm_source=feed",
+                SourceUrl = "https://m.youtube.com/c/testchannel?view=videos"
             };
 
             var video = new Video(Guid.NewGuid(), "Initial title")
             {
                 ChannelId = channel.Id,
-                PlatformVideoUrl = "https://youtube.com/watch?v=abc123",
+                PlatformVideoUrl = "https://youtu.be/abc123?si=share",
                 PlatformVideoId = "abc123",
                 YoutubeVideoId = "abc123",
                 AuthorOriginal = "Test author",
-                VideoUrl = "https://youtube.com/watch?v=abc123"
+                VideoUrl = "https://m.youtube.com/watch?v=abc123&feature=share&utm_campaign=test"
             };
 
             var digest = new Digest(digestRunId, "standard")
@@ -82,6 +82,10 @@ public sealed class StreamingDigestDbContextTests : IAsyncLifetime
             Assert.Equal("Test Channel", persistedChannel.NameOriginal);
             Assert.Equal("Initial title", persistedVideo.Title);
             Assert.Equal("standard", persistedDigest.RunType);
+            Assert.Equal("https://www.youtube.com/@testchannel", persistedChannel.ProfileUrl);
+            Assert.Equal("https://www.youtube.com/channel/UC123456", persistedChannel.SourceUrl);
+            Assert.Equal("https://www.youtube.com/watch", persistedVideo.PlatformVideoUrl);
+            Assert.Equal("https://www.youtube.com/watch?v=abc123", persistedVideo.VideoUrl);
 
             persistedChannel.NameOverride = "Updated name";
             persistedChannel.LastIngestionStatus = "success";
