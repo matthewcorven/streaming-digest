@@ -1,0 +1,40 @@
+@page "/settings"
+
+<PageTitle>Settings</PageTitle>
+
+<div class="page-shell">
+    <section class="hero-card">
+        <div>
+            <p class="eyebrow">Admin</p>
+            <h1>Settings</h1>
+            <p>Configure the operator experience, onboarding readiness, and the services that power ingestion.</p>
+        </div>
+        <a class="secondary-button" href="/ingestion">Review ingestion runs</a>
+    </section>
+
+    <section class="card-grid">
+        <article class="card">
+            <div class="card-header">
+                <h2>Authentication</h2>
+                <span class="status-pill status-ready">Configured</span>
+            </div>
+            <p class="card-body">Login and route protection are wired to the new shell. The demo account remains simple and easy to exercise.</p>
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <h2>Ingestion defaults</h2>
+                <span class="status-pill status-neutral">Defaults</span>
+            </div>
+            <p class="card-body">Daily runs, stale-index warnings, and retry backoff values are visible in the shell and ready for the next API integration.</p>
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <h2>Observability</h2>
+                <span class="status-pill status-warning">Needs attention</span>
+            </div>
+            <p class="card-body">The workbench surfaces the core health checks that should be expanded once the live ingestion endpoints are connected.</p>
+        </article>
+    </section>
+</div>

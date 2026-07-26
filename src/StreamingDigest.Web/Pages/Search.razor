@@ -1,0 +1,40 @@
+@page "/search"
+
+<PageTitle>Search</PageTitle>
+
+<div class="page-shell">
+    <section class="hero-card">
+        <div>
+            <p class="eyebrow">Search</p>
+            <h1>Search across your digest</h1>
+            <p>Find the best cluster, artifact, and note for any topic. The query state stays in the URL so it is easy to share and return to.</p>
+        </div>
+        <div class="hero-actions">
+            <a class="primary-button" href="/channels">Review channels</a>
+            <a class="secondary-button" href="/ingestion">Inspect runs</a>
+        </div>
+    </section>
+
+    <section class="card-grid">
+        <article class="card">
+            <div class="card-header">
+                <h2>Latest query</h2>
+                <span class="status-pill status-ready">Ready</span>
+            </div>
+            <p class="card-body">"Best clips from the last week"</p>
+            <div class="chip-row">
+                <span class="chip">Top 3 results</span>
+                <span class="chip">Auto-clustered</span>
+                <span class="chip">Pinned notes</span>
+            </div>
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <h2>Result quality</h2>
+                <span class="status-pill status-neutral">Stable</span>
+            </div>
+            <p class="card-body">The latest recall run surfaced the intended cluster in the top 3 results for the representative query set.</p>
+        </article>
+    </section>
+</div>

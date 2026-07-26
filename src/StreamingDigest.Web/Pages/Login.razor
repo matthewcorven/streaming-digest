@@ -1,0 +1,77 @@
+@page "/login"
+@layout PublicLayout
+@inject AuthenticationService AuthenticationService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Login</PageTitle>
+
+<div class="login-page">
+    <div class="login-card">
+        <div class="brand-block">
+            <div class="brand-mark">◉</div>
+            <h1>Stream Digest</h1>
+            <p>Your video knowledge base, tuned for search and operations.</p>
+        </div>
+
+        <EditForm Model="_model" OnValidSubmit="HandleLoginAsync">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <InputText id="username" class="form-control" @bind-Value="_model.Username" />
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <div class="password-field">
+                    <InputText id="password" class="form-control" type="@(_showPassword ? "text" : "password")" @bind-Value="_model.Password" />
+                    <button class="password-toggle" type="button" @onclick="TogglePasswordVisibility">
+                        @(_showPassword ? "Hide" : "Show")
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_errorMessage))
+            {
+                <div class="login-error">@_errorMessage</div>
+            }
+
+            <button class="primary-button" type="submit">Sign in</button>
+        </EditForm>
+
+        <p class="helper-text">Demo access: use admin/admin or demo/demo.</p>
+    </div>
+</div>
+
+@code {
+    private readonly LoginModel _model = new() { Username = "admin", Password = "admin" };
+    private bool _showPassword;
+    private string? _errorMessage;
+
+    protected override void OnInitialized()
+    {
+        if (AuthenticationService.IsAuthenticated)
+        {
+            NavigationManager.NavigateTo("/dashboard");
+        }
+    }
+
+    private async Task HandleLoginAsync()
+    {
+        _errorMessage = null;
+
+        if (await AuthenticationService.LoginAsync(_model.Username, _model.Password))
+        {
+            NavigationManager.NavigateTo("/dashboard");
+            return;
+        }
+
+        _errorMessage = "Invalid username or password. Try admin/admin or demo/demo.";
+    }
+
+    private void TogglePasswordVisibility() => _showPassword = !_showPassword;
+
+    private sealed class LoginModel
+    {
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}
