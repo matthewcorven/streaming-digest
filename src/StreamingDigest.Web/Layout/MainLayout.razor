@@ -1,16 +1,126 @@
 ﻿@inherits LayoutComponentBase
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+@implements IDisposable
+@inject AuthenticationService AuthenticationService
+@inject NavigationManager NavigationManager
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+@if (!AuthenticationService.IsAuthenticated)
+{
+    <div class="loading-state">Redirecting to login…</div>
+}
+else
+{
+    <div class="app-shell">
+        <aside class="sidebar @(IsNavOpen ? "open" : "collapsed")">
+            <a class="brand" href="/dashboard" @onclick="CloseNav">
+                <span class="brand-mark">◉</span>
+                <span>Stream Digest</span>
+            </a>
+
+            <nav class="sidebar-nav">
+                <NavLink class="nav-link" href="/dashboard" Match="NavLinkMatch.All" @onclick="CloseNav">
+                    <span class="nav-icon">◉</span>
+                    <span>Dashboard</span>
+                </NavLink>
+                <NavLink class="nav-link" href="/search" Match="NavLinkMatch.All" @onclick="CloseNav">
+                    <span class="nav-icon">⌕</span>
+                    <span>Search</span>
+                </NavLink>
+                <NavLink class="nav-link" href="/channels" Match="NavLinkMatch.All" @onclick="CloseNav">
+                    <span class="nav-icon">▶</span>
+                    <span>Channels</span>
+                </NavLink>
+                <NavLink class="nav-link" href="/ingestion" Match="NavLinkMatch.All" @onclick="CloseNav">
+                    <span class="nav-icon">▣</span>
+                    <span>Ingestion</span>
+                </NavLink>
+                <NavLink class="nav-link" href="/settings" Match="NavLinkMatch.All" @onclick="CloseNav">
+                    <span class="nav-icon">⚙</span>
+                    <span>Settings</span>
+                </NavLink>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-card">
+                    <span class="status-dot"></span>
+                    <div>
+                        <strong>Core ready</strong>
+                        <p>Shell, search, and ingestion routes are live.</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="main-pane">
+            <header class="topbar">
+                <button class="icon-button" type="button" @onclick="ToggleNav">☰</button>
+                <div class="page-title-wrap">
+                    <p class="eyebrow">Operations</p>
+                    <h1>@CurrentPageTitle</h1>
+                </div>
+                <div class="topbar-actions">
+                    <span class="user-pill">@AuthenticationService.CurrentUser</span>
+                    <button class="secondary-button" type="button" @onclick="HandleLogout">Logout</button>
+                </div>
+            </header>
+
+            <main class="content-area">
+                @Body
+            </main>
         </div>
+    </div>
+}
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+@code {
+    private bool IsNavOpen = true;
+
+    protected override void OnInitialized()
+    {
+        AuthenticationService.Changed += StateHasChanged;
+
+        if (!AuthenticationService.IsAuthenticated && !IsPublicRoute())
+        {
+            NavigationManager.NavigateTo("/login", true);
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthenticationService.Changed -= StateHasChanged;
+    }
+
+    private void ToggleNav() => IsNavOpen = !IsNavOpen;
+
+    private void CloseNav() => IsNavOpen = false;
+
+    private void HandleLogout()
+    {
+        AuthenticationService.Logout();
+        NavigationManager.NavigateTo("/login", true);
+    }
+
+    private string CurrentPageTitle
+    {
+        get
+        {
+            var route = GetRelativePath();
+            return route switch
+            {
+                "" or "dashboard" => "Dashboard",
+                "search" => "Search",
+                "channels" => "Channels",
+                "ingestion" => "Ingestion runs",
+                "settings" => "Settings",
+                _ when route.StartsWith("ingestion/runs/", StringComparison.OrdinalIgnoreCase) => "Ingestion run",
+                _ => "Streaming Digest"
+            };
+        }
+    }
+
+    private string GetRelativePath() => NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', 2)[0].Split('#', 2)[0];
+
+    private bool IsPublicRoute()
+    {
+        var route = GetRelativePath();
+        return string.Equals(route, "login", StringComparison.OrdinalIgnoreCase);
+    }
+}

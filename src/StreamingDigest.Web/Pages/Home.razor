@@ -1,4 +1,44 @@
 ﻿@page "/"
+@page "/dashboard"
 
-<UpgradeMaintenancePanel />
-<ObservabilityPanel />
+<PageTitle>Dashboard</PageTitle>
+
+<div class="page-shell">
+    <section class="hero-card">
+        <div>
+            <p class="eyebrow">Overview</p>
+            <h1>Welcome back</h1>
+            <p>Keep an eye on the search loop, ingestion health, and the channels that feed your digest.</p>
+        </div>
+        <div class="hero-actions">
+            <a class="primary-button" href="/search">Open search</a>
+            <a class="secondary-button" href="/ingestion">Review runs</a>
+        </div>
+    </section>
+
+    <section class="card-grid">
+        <article class="card">
+            <div class="card-header">
+                <h2>Pending review</h2>
+                <span class="status-pill status-warning">3 items</span>
+            </div>
+            <p class="card-body">The latest runs still need operator confirmation before one of the clusters can be promoted.</p>
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <h2>Active ingestion</h2>
+                <span class="status-pill status-ready">Healthy</span>
+            </div>
+            <p class="card-body">Two channels are currently processing content and one is waiting for retry.</p>
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <h2>Search quality</h2>
+                <span class="status-pill status-neutral">Stable</span>
+            </div>
+            <p class="card-body">The latest search run surfaced the expected clusters with no critical degrades.</p>
+        </article>
+    </section>
+</div>
