@@ -1,6 +1,5 @@
 @page "/ingestion"
 @using System.Net.Http.Json
-@inject IIngestionRunDetailFixtureService FixtureService
 @inject HttpClient Http
 
 <PageTitle>Ingestion runs</PageTitle>
@@ -11,7 +10,7 @@
             <p class="eyebrow">Operations</p>
             <h1>Ingestion runs</h1>
         </div>
-        <p class="page-description">These fixtures exercise the new ingestion run detail experience, including deferments, retries, and completed-run immutability messaging.</p>
+        <p class="page-description">Recent ingestion runs, with live status pulled from persisted run and item records.</p>
     </div>
 
     <section class="admin-actions-card">
@@ -32,24 +31,39 @@
         }
     </section>
 
-    <div class="fixture-grid">
-        @foreach (var fixture in FixtureService.GetFixtures())
+    @if (_runs.Count == 0)
+    {
+        <section class="section-card">
+            <p class="muted">No ingestion runs are recorded yet. Run ingestion now to create the first run record.</p>
+        </section>
+    }
+    else
+    {
+        <div class="fixture-grid">
+        @foreach (var run in _runs)
         {
-            <a class="fixture-card" href="@($"/ingestion/runs/{fixture.Id}")">
+            <a class="fixture-card" href="@($"/ingestion/runs/{run.Id}")">
                 <div class="fixture-card-header">
-                    <h2>@fixture.Title</h2>
-                    <span class="status-pill">@fixture.StatusText</span>
+                    <h2>@run.Title</h2>
+                    <span class="status-pill">@run.StatusText</span>
                 </div>
-                <p>@fixture.Subtitle</p>
+                <p>@run.Subtitle</p>
             </a>
         }
-    </div>
+        </div>
+    }
 </div>
 
 @code {
+    private readonly List<IngestionRunFixtureSummary> _runs = [];
     private bool _isBusy;
     private string? _feedbackMessage;
     private string _feedbackClass = "neutral";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRunsAsync();
+    }
 
     private string GetRunIngestionEndpoint() => "/api/admin/operations/ingestion/run";
 
@@ -76,6 +90,7 @@
                     ? $"{label} completed. {payload.Message}"
                     : $"{label} accepted. {payload.Message}";
                 _feedbackClass = payload.Status is "completed" or "ok" ? "success" : "pending";
+                await LoadRunsAsync();
             }
             else
             {
@@ -91,6 +106,23 @@
         finally
         {
             _isBusy = false;
+        }
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        try
+        {
+            var runs = await Http.GetFromJsonAsync<List<IngestionRunFixtureSummary>>("/api/internal/ingestion-runs");
+            _runs.Clear();
+            if (runs is not null)
+            {
+                _runs.AddRange(runs);
+            }
+        }
+        catch
+        {
+            _runs.Clear();
         }
     }
 

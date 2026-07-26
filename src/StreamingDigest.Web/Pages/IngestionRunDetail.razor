@@ -1,6 +1,5 @@
 @page "/ingestion/runs/{RunId}"
 @using System.Net.Http.Json
-@inject IIngestionRunDetailFixtureService FixtureService
 @inject HttpClient Http
 
 <PageTitle>@(CurrentRun?.Title ?? "Ingestion run")</PageTitle>
@@ -11,7 +10,7 @@
         <div class="empty-state">
             <h1>Run not found</h1>
             <p>@ErrorMessage</p>
-            <a class="action-link" href="/ingestion">Browse fixtures</a>
+            <a class="action-link" href="/ingestion">Browse runs</a>
         </div>
     }
     else
@@ -228,24 +227,34 @@
     private string? _statusMessage;
     private string _statusClass = "neutral";
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
+        if (string.IsNullOrWhiteSpace(RunId))
+        {
+            CurrentRun = null;
+            ErrorMessage = "No run id was supplied.";
+            return;
+        }
+
         try
         {
-            if (string.IsNullOrWhiteSpace(RunId))
+            using var response = await Http.GetAsync($"/api/internal/ingestion-runs/{RunId}");
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 CurrentRun = null;
-                ErrorMessage = "No run id was supplied.";
+                ErrorMessage = $"No run was found for ingestion run '{RunId}'.";
                 return;
             }
 
-            CurrentRun = FixtureService.GetRun(RunId);
-            ErrorMessage = string.Empty;
+            CurrentRun = await response.Content.ReadFromJsonAsync<IngestionRunDetailViewModel>();
+            ErrorMessage = CurrentRun is null
+                ? $"No run was found for ingestion run '{RunId}'."
+                : string.Empty;
         }
-        catch (KeyNotFoundException ex)
+        catch (Exception ex)
         {
             CurrentRun = null;
-            ErrorMessage = ex.Message;
+            ErrorMessage = $"Could not load ingestion run '{RunId}': {ex.Message}";
         }
     }
 

@@ -12,6 +12,9 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     public DbSet<DomainEvent> DomainEvents => Set<DomainEvent>();
     public DbSet<MediaArtifact> MediaArtifacts => Set<MediaArtifact>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<OperationRecord> Operations => Set<OperationRecord>();
+    public DbSet<IngestionRun> IngestionRuns => Set<IngestionRun>();
+    public DbSet<IngestionItem> IngestionItems => Set<IngestionItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -22,6 +25,9 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
         modelBuilder.ApplyConfiguration(new DomainEventConfiguration());
         modelBuilder.ApplyConfiguration(new MediaArtifactConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new OperationRecordConfiguration());
+        modelBuilder.ApplyConfiguration(new IngestionRunConfiguration());
+        modelBuilder.ApplyConfiguration(new IngestionItemConfiguration());
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
