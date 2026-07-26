@@ -100,15 +100,16 @@ public sealed class BootstrapAdminUserService
     private static string CreatePasswordHash(string password)
     {
         var passwordBytes = Encoding.UTF8.GetBytes(password);
+        var salt = RandomNumberGenerator.GetBytes(16);
         var argon2 = new Argon2id(passwordBytes)
         {
             Iterations = 4,
             MemorySize = 64 * 1024,
             DegreeOfParallelism = 2,
-            Salt = RandomNumberGenerator.GetBytes(16)
+            Salt = salt
         };
 
         var hash = argon2.GetBytes(32);
-        return Convert.ToHexString(hash);
+        return $"argon2id$v=19$m=65536,t=4,p=2${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
     }
 }

@@ -168,8 +168,9 @@ Response:
 
 Notes:
 
-- Rate limited.
-- Sets secure HTTP-only auth cookie.
+- Rate limited; repeated failures from the same identity/IP are throttled for 10 minutes after 5 failures.
+- Sets a secure HTTP-only `auth-session` cookie plus a `csrf-token` cookie for subsequent mutating requests.
+- The response body includes the current `csrf_token` value for convenience; clients should also read the `csrf-token` cookie.
 
 ### POST `/api/auth/logout`
 
@@ -188,7 +189,7 @@ Response:
 
 ### GET `/api/auth/csrf`
 
-Returns or refreshes the CSRF token used by mutating endpoints. Exact cookie/header mechanics are implementation-defined but must be documented for the Blazor client.
+Returns or refreshes the CSRF token used by mutating endpoints. The implementation issues a `csrf-token` cookie and returns the same value in the response body. Mutating requests must send that value in the `X-CSRF-Token` header.
 
 ### POST `/api/auth/change-password`
 

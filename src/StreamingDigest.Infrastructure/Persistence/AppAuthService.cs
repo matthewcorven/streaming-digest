@@ -93,6 +93,8 @@ public sealed class AppAuthService
         var mustChangePassword = reader.GetBoolean(2);
         var csrfToken = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
 
+        await reader.CloseAsync();
+
         await using var updateCommand = new NpgsqlCommand(
             "UPDATE public.app_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE session_token = @sessionToken",
             connection);
@@ -136,6 +138,8 @@ public sealed class AppAuthService
         var passwordHash = reader.GetString(2);
         var passwordHashAlgorithm = reader.GetString(3);
         var mustChangePassword = reader.GetBoolean(4);
+
+        await reader.CloseAsync();
 
         var isValidPassword = string.Equals(passwordHashAlgorithm, "argon2id", StringComparison.OrdinalIgnoreCase)
             ? VerifyPassword(password, passwordHash)
@@ -228,6 +232,8 @@ public sealed class AppAuthService
 
         var passwordHash = currentUserReader.GetString(0);
         var passwordHashAlgorithm = currentUserReader.GetString(1);
+        await currentUserReader.CloseAsync();
+
         if (!string.Equals(passwordHashAlgorithm, "argon2id", StringComparison.OrdinalIgnoreCase) || !VerifyPassword(currentPassword, passwordHash))
         {
             return false;
