@@ -87,6 +87,7 @@ builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNp
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
+builder.Services.AddSingleton<ModelDiscoveryService>();
 builder.Services.AddSingleton<IAdminOperationsService, AdminOperationsService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 
@@ -537,21 +538,89 @@ app.MapPost("/api/config/validate", (HttpContext context) =>
         ? Results.Ok(new { valid = true, warnings = Array.Empty<string>() })
         : Results.Unauthorized());
 
-app.MapGet("/api/models/options", (HttpContext context) =>
+app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService modelDiscoveryService) =>
     IsAuthenticated(context.Request)
         ? Results.Ok(new
         {
-            models = new[]
+            models = modelDiscoveryService.GetSupportedModels().Select(model => new
             {
-                new { id = "gpt-4o-mini", family = "llm", status = "available" },
-                new { id = "text-embedding-3-small", family = "embedding", status = "available" }
-            }
+                id = model.Id,
+                family = model.Family,
+                status = model.Status,
+                label = model.Label,
+                installCommand = model.InstallCommand,
+                mountPath = model.MountPath
+            })
         })
         : Results.Unauthorized());
-app.MapPost("/api/models/download", (HttpContext context) =>
-    IsAuthenticated(context.Request)
-        ? Results.Accepted("/api/models/download", new { status = "queued" })
-        : Results.Unauthorized());
+app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
+{
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    ModelDiscoveryRequest? request;
+    try
+    {
+        request = await JsonSerializer.DeserializeAsync<ModelDiscoveryRequest>(context.Request.Body, jsonOptions, cancellationToken);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { title = "Invalid request", detail = "The model discovery request body could not be parsed." });
+    }
+
+    try
+    {
+        var result = await modelDiscoveryService.QueueDownloadAsync(connectionString, request?.ModelKind, request?.ModelId, cancellationToken);
+        return Results.Accepted(result.StatusUrl, new
+        {
+            status = result.Status,
+            operationId = result.OperationId,
+            statusUrl = result.StatusUrl,
+            modelKind = result.ModelKind,
+            modelId = result.ModelId
+        });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { title = "Unsupported model", detail = ex.Message });
+    }
+});
+app.MapPost("/api/models/verify", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
+{
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    ModelDiscoveryRequest? request;
+    try
+    {
+        request = await JsonSerializer.DeserializeAsync<ModelDiscoveryRequest>(context.Request.Body, jsonOptions, cancellationToken);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { title = "Invalid request", detail = "The model verification request body could not be parsed." });
+    }
+
+    try
+    {
+        var result = await modelDiscoveryService.VerifyModelAsync(connectionString, request?.ModelKind, request?.ModelId, cancellationToken);
+        return Results.Ok(new
+        {
+            status = result.Status,
+            modelKind = result.ModelKind,
+            modelId = result.ModelId,
+            verified = result.Verified,
+            message = result.Message
+        });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { title = "Unsupported model", detail = ex.Message });
+    }
+});
 app.MapFallbackToFile("index.html");
 
 app.Run();
@@ -947,6 +1016,8 @@ static string BuildDisabledPlaceholder(string serviceName)
 </html>
 """;
 }
+
+sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
 
 public sealed record LoginRequest(string Username, string Password);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);

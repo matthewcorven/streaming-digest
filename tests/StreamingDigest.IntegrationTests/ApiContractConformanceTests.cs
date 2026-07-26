@@ -1,26 +1,59 @@
+using System.Diagnostics;
 using System.Net;
-using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Npgsql;
+using StreamingDigest.Infrastructure.Persistence;
 using Xunit.Abstractions;
 
 namespace StreamingDigest.IntegrationTests;
 
-public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ApiContractConformanceTests : IAsyncLifetime
 {
-    private readonly WebApplicationFactory<Program> _factory;
-    private readonly ITestOutputHelper _output;
+    private const string ImageName = "pgvector/pgvector:0.8.5-pg18-trixie";
+    private const string DatabaseName = "postgres";
+    private const string Username = "postgres";
+    private const string Password = "postgres";
+    private const string BootstrapUsername = "admin";
+    private const string BootstrapPassword = "admin";
 
-    public ApiContractConformanceTests(WebApplicationFactory<Program> factory, ITestOutputHelper output)
+    private readonly string _containerName = $"streaming-digest-contract-tests-{Guid.NewGuid():N}";
+    private readonly int _hostPort = GetAvailablePort();
+    private readonly ITestOutputHelper _output;
+    private string? _connectionString;
+    private WebApplicationFactory<Program>? _factory;
+
+    public ApiContractConformanceTests(ITestOutputHelper output)
     {
-        _factory = factory;
         _output = output;
+    }
+
+    public async Task InitializeAsync()
+    {
+        await StartPostgresContainerAsync();
+        _connectionString = $"Host=127.0.0.1;Port={_hostPort};Database={DatabaseName};Username={Username};Password={Password};SslMode=Disable";
+        await WaitForPostgresAsync();
+
+        var runner = new PostgresMigrationRunner(_connectionString);
+        await runner.ApplyAsync();
+
+        _factory = new ContractConformanceWebApplicationFactory(_connectionString);
+        _ = _factory.Server;
+    }
+
+    public async Task DisposeAsync()
+    {
+        _factory?.Dispose();
+        await StopPostgresContainerAsync();
     }
 
     private static readonly HashSet<string> KnownPendingRoutes = new(StringComparer.Ordinal)
     {
-        "POST /api/models/verify",
         "POST /api/models/activate-embedding-model",
         "POST /api/models/activate-llm-model",
         "POST /api/models/activate-audio-model"
@@ -35,7 +68,7 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
     [MemberData(nameof(ContractCatalog))]
     public async Task MvpCatalogEntries_AreImplementedOrTrackedAsPending(ApiContractCatalogEntry entry)
     {
-        using var client = _factory.CreateClient();
+        using var client = CreateClient();
 
         var unauthenticatedResponse = await SendProbeAsync(client, entry, authenticated: false, includeCsrf: false);
         var implemented = unauthenticatedResponse.StatusCode is not HttpStatusCode.NotFound and not HttpStatusCode.MethodNotAllowed;
@@ -68,7 +101,7 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task MvpContractHarness_ReportsImplementedVsPendingCounts()
     {
-        using var client = _factory.CreateClient();
+        using var client = CreateClient();
         var catalog = LoadMvpCatalog();
         var implemented = 0;
         var pending = 0;
@@ -92,9 +125,53 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
     }
 
     [Fact]
+    public async Task ModelDiscoveryEndpoints_ReturnStructuredModelCatalogAndAcceptedDownloadState()
+    {
+        using var client = CreateClient();
+        using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        Assert.True(loginResponse.IsSuccessStatusCode);
+
+        var optionsResponse = await client.GetFromJsonAsync<ModelOptionsResponse>("/api/models/options");
+        Assert.NotNull(optionsResponse);
+        Assert.NotNull(optionsResponse.Models);
+        Assert.Contains(optionsResponse.Models, model => model.Id == "llama3.1:8b" && model.Family == "llm");
+        Assert.Contains(optionsResponse.Models, model => model.Id == "bge-m3" && model.Family == "embedding");
+
+        using var downloadRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
+        downloadRequest.Content = JsonContent.Create(new { modelKind = "llm", modelId = "llama3.1:8b" });
+        using var downloadResponse = await client.SendAsync(downloadRequest);
+
+        Assert.Equal(HttpStatusCode.Accepted, downloadResponse.StatusCode);
+        var downloadPayload = await downloadResponse.Content.ReadFromJsonAsync<ModelDownloadResponse>();
+        Assert.NotNull(downloadPayload);
+        Assert.Equal("queued", downloadPayload.Status);
+        Assert.Equal("llm", downloadPayload.ModelKind);
+        Assert.Equal("llama3.1:8b", downloadPayload.ModelId);
+    }
+
+    [Fact]
+    public async Task ModelVerificationEndpoint_ReturnsVerifiedState()
+    {
+        using var client = CreateClient();
+        using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        Assert.True(loginResponse.IsSuccessStatusCode);
+
+        using var verifyRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/verify");
+        verifyRequest.Content = JsonContent.Create(new { modelKind = "embedding", modelId = "bge-m3" });
+        using var verifyResponse = await client.SendAsync(verifyRequest);
+
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
+        var verifyPayload = await verifyResponse.Content.ReadFromJsonAsync<ModelVerificationResponse>();
+        Assert.NotNull(verifyPayload);
+        Assert.True(verifyPayload.Verified);
+        Assert.Equal("embedding", verifyPayload.ModelKind);
+        Assert.Equal("bge-m3", verifyPayload.ModelId);
+    }
+
+    [Fact]
     public async Task PendingRouteList_MatchesCurrentHarnessExpectations()
     {
-        using var client = _factory.CreateClient();
+        using var client = CreateClient();
         var catalog = LoadMvpCatalog();
         var actualPendingRoutes = new List<string>();
 
@@ -109,7 +186,6 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
 
         var expectedPendingRoutes = new[]
         {
-            "POST /api/models/verify",
             "POST /api/models/activate-embedding-model",
             "POST /api/models/activate-llm-model",
             "POST /api/models/activate-audio-model"
@@ -119,6 +195,139 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
         var expectedOrdered = expectedPendingRoutes.OrderBy(route => route, StringComparer.Ordinal).ToArray();
 
         Assert.Equal(expectedOrdered, actualOrdered);
+    }
+
+    private HttpClient CreateClient()
+    {
+        return _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+            BaseAddress = new Uri("https://localhost")
+        });
+    }
+
+    private async Task StartPostgresContainerAsync()
+    {
+        var dockerArgs = new[]
+        {
+            "run",
+            "--rm",
+            "-d",
+            "--name",
+            _containerName,
+            "-e",
+            $"POSTGRES_USER={Username}",
+            "-e",
+            $"POSTGRES_PASSWORD={Password}",
+            "-e",
+            $"POSTGRES_DB={DatabaseName}",
+            "-p",
+            $"{_hostPort}:5432",
+            ImageName
+        };
+
+        var containerId = await RunProcessAsync("docker", dockerArgs);
+        if (string.IsNullOrWhiteSpace(containerId))
+        {
+            throw new InvalidOperationException("Docker did not return a container id for the PostgreSQL contract test container.");
+        }
+    }
+
+    private async Task StopPostgresContainerAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_containerName))
+        {
+            return;
+        }
+
+        try
+        {
+            await RunProcessAsync("docker", new[] { "rm", "-f", _containerName });
+        }
+        catch
+        {
+            // Best effort cleanup.
+        }
+    }
+
+    private async Task WaitForPostgresAsync()
+    {
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            try
+            {
+                await using var connection = new NpgsqlConnection(_connectionString!);
+                await connection.OpenAsync();
+                return;
+            }
+            catch (Exception)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+        }
+
+        throw new TimeoutException("Timed out waiting for the PostgreSQL contract test container to become ready.");
+    }
+
+    private static async Task<string> RunProcessAsync(string fileName, IReadOnlyCollection<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start process '{fileName}'.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Process '{fileName}' exited with code {process.ExitCode}: {stderr}");
+        }
+
+        return stdout.Trim();
+    }
+
+    private static int GetAvailablePort()
+    {
+        using var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
+    private sealed class ContractConformanceWebApplicationFactory(string connectionString) : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Development");
+            builder.UseSetting("ConnectionStrings:streamingdigest", connectionString);
+            builder.UseSetting("ConnectionStrings:postgres", connectionString);
+            builder.ConfigureAppConfiguration((_, configBuilder) =>
+            {
+                configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:streamingdigest"] = connectionString,
+                    ["ConnectionStrings:postgres"] = connectionString,
+                    ["BOOTSTRAP_ADMIN_USERNAME"] = BootstrapUsername,
+                    ["BOOTSTRAP_ADMIN_PASSWORD"] = BootstrapPassword
+                });
+            });
+        }
     }
 
     private static IReadOnlyList<ApiContractCatalogEntry> LoadMvpCatalog()
@@ -209,16 +418,55 @@ public sealed class ApiContractConformanceTests : IClassFixture<WebApplicationFa
 
         if (!request.Method.Equals(HttpMethod.Get))
         {
-            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+            request.Content = CreateProbeContent(entry.Path);
         }
 
         return await client.SendAsync(request);
+    }
+
+    private static StringContent CreateProbeContent(string path)
+    {
+        if (path.StartsWith("/api/auth/login", StringComparison.Ordinal))
+        {
+            return new StringContent("{\"username\":\"admin\",\"password\":\"admin\"}", Encoding.UTF8, "application/json");
+        }
+
+        return new StringContent("{}", Encoding.UTF8, "application/json");
     }
 
     private static string SubstituteRouteParameters(string path)
     {
         return Regex.Replace(path, @"\{[^}]+\}", "sample", RegexOptions.CultureInvariant);
     }
+}
+
+public sealed class ModelOptionsResponse
+{
+    public ModelOption[]? Models { get; set; }
+}
+
+public sealed class ModelOption
+{
+    public string? Id { get; set; }
+    public string? Family { get; set; }
+    public string? Status { get; set; }
+    public string? Label { get; set; }
+}
+
+public sealed class ModelDownloadResponse
+{
+    public string? Status { get; set; }
+    public string? ModelKind { get; set; }
+    public string? ModelId { get; set; }
+}
+
+public sealed class ModelVerificationResponse
+{
+    public string? Status { get; set; }
+    public string? ModelKind { get; set; }
+    public string? ModelId { get; set; }
+    public bool Verified { get; set; }
+    public string? Message { get; set; }
 }
 
 public sealed record ApiContractCatalogEntry(string Method, string Path, ContractAuthBehavior AuthBehavior)

@@ -82,12 +82,12 @@
                 {
                     <li>
                         <div class="list-title-row">
-                            <strong>@model.Id</strong>
+                            <strong>@model.Label</strong>
                             <span class="status-pill @GetStatusClass(model.Status)">@model.Status</span>
                         </div>
                         <div class="meta-row">
-                            <span>@model.Family</span>
-                            <button class="secondary-button compact" type="button" disabled="@_isBusy" @onclick="() => QueueModelDownloadAsync(model.Id)">Queue download</button>
+                            <span>@model.Family · @model.Id</span>
+                            <button class="secondary-button compact" type="button" disabled="@_isBusy" @onclick="() => QueueModelDownloadAsync(model)">Queue download</button>
                         </div>
                     </li>
                 }
@@ -212,8 +212,9 @@
         }
     }
 
-    private async Task QueueModelDownloadAsync(string modelId)
+    private async Task QueueModelDownloadAsync(ModelOption model)
     {
+        var modelId = model.Id ?? "model";
         _isBusy = true;
         _statusTone = "neutral";
         _statusMessage = $"Queueing {modelId} download…";
@@ -224,7 +225,7 @@
 
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
             request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-            request.Content = JsonContent.Create(new { modelId });
+            request.Content = JsonContent.Create(new { modelKind = model.Family, modelId });
 
             using var response = await Http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
@@ -329,6 +330,7 @@
         public string? Id { get; set; }
         public string? Family { get; set; }
         public string? Status { get; set; }
+        public string? Label { get; set; }
     }
 
     private sealed class CsrfResponse
