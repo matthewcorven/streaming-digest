@@ -8,7 +8,7 @@ BEGIN
                 v.title_original,
                 v.description_original,
                 to_tsvector('english', coalesce(v.title_original, '') || ' ' || coalesce(v.description_original, '')) AS search_vector,
-                NULL::vector AS embedding_vector
+                NULL::vector(384) AS embedding_vector
             FROM public.videos AS v;
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_video_search_documents_id ON public.video_search_documents (id);
@@ -18,7 +18,7 @@ BEGIN
                 ON public.video_search_documents
                 USING hnsw (embedding_vector vector_cosine_ops);
 
-            CREATE OR REPLACE FUNCTION public.search_videos(query_text text, query_vector vector DEFAULT NULL::vector, limit_count integer DEFAULT 10)
+            CREATE OR REPLACE FUNCTION public.search_videos(query_text text, query_vector vector(384) DEFAULT NULL::vector(384), limit_count integer DEFAULT 10)
             RETURNS TABLE (
                 video_id uuid,
                 title text,

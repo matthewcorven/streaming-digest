@@ -10,7 +10,7 @@ namespace StreamingDigest.UnitTests;
 
 public sealed class BootstrapAdminUserServiceTests : IAsyncLifetime
 {
-    private const string ImageName = "postgres:16-alpine";
+    private const string ImageName = "pgvector/pgvector:0.8.5-pg18-trixie";
     private const string DatabaseName = "postgres";
     private const string Username = "postgres";
     private const string Password = "postgres";
