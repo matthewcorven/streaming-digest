@@ -46,6 +46,7 @@ else
                 <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetEmbeddingServiceEndpoint(), GetEmbeddingServiceLabel()))">Test embedding service</button>
                 <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetAudioToTextEndpoint(), GetAudioToTextLabel()))">Test audio-to-text service</button>
                 <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetBackupEndpoint(), GetBackupLabel()))">Create backup archive</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetRestoreEndpoint(), GetRestoreLabel()))">Restore latest backup</button>
             </div>
             @if (!string.IsNullOrWhiteSpace(_feedbackMessage))
             {
@@ -187,16 +188,20 @@ else
     private static string GetAudioToTextEndpoint() => "/api/admin/operations/audio-to-text/test";
  
     private static string GetBackupEndpoint() => "/api/admin/operations/backup";
- 
+
+    private static string GetRestoreEndpoint() => "/api/admin/operations/restore";
+  
     private static string GetEmbeddingsReprocessLabel() => "Reprocess embeddings";
- 
+  
     private static string GetMatrixNotificationLabel() => "Test Matrix notification";
- 
+  
     private static string GetEmbeddingServiceLabel() => "Test embedding service";
- 
+  
     private static string GetAudioToTextLabel() => "Test audio-to-text service";
- 
+  
     private static string GetBackupLabel() => "Create backup archive";
+
+    private static string GetRestoreLabel() => "Restore latest backup";
 
     private async Task TriggerActionAsync(string endpoint, string label)
     {

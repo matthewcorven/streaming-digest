@@ -116,6 +116,91 @@ public sealed class AdminOperationsService : IAdminOperationsService
         }
     }
 
+    public async Task<AdminActionResult> RestoreLatestBackupAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var backupDirectory = ResolveConfiguredDirectoryPath(_configuration.Backup.DestinationPath);
+            if (!Directory.Exists(backupDirectory))
+            {
+                return CreateResult("backup.restore", null, "failed", $"Backup directory '{backupDirectory}' does not exist.", "error");
+            }
+
+            var archivePath = Directory.EnumerateFiles(backupDirectory, "*.zip", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
+                .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(archivePath))
+            {
+                return CreateResult("backup.restore", null, "failed", $"No backup archives were found in '{backupDirectory}'.", "error");
+            }
+
+            var archiveFileName = Path.GetFileName(archivePath);
+            var restoreTargetDirectory = ResolveConfiguredDirectoryPath(_configuration.Backup.MediaPath);
+            var matrixTargetDirectory = ResolveConfiguredDirectoryPath(_configuration.Backup.MatrixPath);
+            var configTargetDirectory = ResolveConfiguredDirectoryPath(_contentRootPath ?? Directory.GetCurrentDirectory());
+
+            Directory.CreateDirectory(restoreTargetDirectory);
+            Directory.CreateDirectory(matrixTargetDirectory);
+            Directory.CreateDirectory(configTargetDirectory);
+
+            using var archive = ZipFile.OpenRead(archivePath);
+            foreach (var entry in archive.Entries)
+            {
+                if (string.IsNullOrWhiteSpace(entry.FullName) || entry.FullName.EndsWith('/'))
+                {
+                    continue;
+                }
+
+                var entryPath = entry.FullName.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+                if (entryPath.StartsWith("media", StringComparison.OrdinalIgnoreCase))
+                {
+                    var relativePath = ExtractRelativeAssetPath(entryPath, "media");
+                    if (string.IsNullOrWhiteSpace(relativePath))
+                    {
+                        continue;
+                    }
+
+                    var destinationPath = Path.Combine(restoreTargetDirectory, relativePath);
+                    await ExtractArchiveEntryAsync(entry, destinationPath, cancellationToken);
+                    continue;
+                }
+
+                if (entryPath.StartsWith("matrix", StringComparison.OrdinalIgnoreCase))
+                {
+                    var relativePath = ExtractRelativeAssetPath(entryPath, "matrix");
+                    if (string.IsNullOrWhiteSpace(relativePath))
+                    {
+                        continue;
+                    }
+
+                    var destinationPath = Path.Combine(matrixTargetDirectory, relativePath);
+                    await ExtractArchiveEntryAsync(entry, destinationPath, cancellationToken);
+                    continue;
+                }
+
+                if (entryPath.StartsWith("config", StringComparison.OrdinalIgnoreCase))
+                {
+                    var relativePath = ExtractRelativeAssetPath(entryPath, "config");
+                    if (string.IsNullOrWhiteSpace(relativePath))
+                    {
+                        continue;
+                    }
+
+                    var destinationPath = Path.Combine(configTargetDirectory, relativePath);
+                    await ExtractArchiveEntryAsync(entry, destinationPath, cancellationToken);
+                }
+            }
+
+            var message = $"Backup archive '{archiveFileName}' was restored into the configured media, matrix, and config locations.";
+            return CreateCompletedResult("backup.restore", archiveFileName, message, "healthy");
+        }
+        catch (Exception ex)
+        {
+            return CreateResult("backup.restore", null, "failed", $"Backup restore failed: {ex.Message}", "error");
+        }
+    }
+
     public Task<AdminActionStatus?> GetOperationAsync(Guid operationId, CancellationToken cancellationToken = default)
     {
         if (_operations.TryGetValue(operationId, out var operation))
@@ -196,6 +281,40 @@ public sealed class AdminOperationsService : IAdminOperationsService
         {
             return new BackupAssetStatus("postgresql", "error", null, ex.Message);
         }
+    }
+
+    private static async Task ExtractArchiveEntryAsync(ZipArchiveEntry entry, string destinationPath, CancellationToken cancellationToken)
+    {
+        var destinationDirectory = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            Directory.CreateDirectory(destinationDirectory);
+        }
+
+        await using var sourceStream = entry.Open();
+        await using var destinationStream = File.Create(destinationPath);
+        await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+    }
+
+    private static string ExtractRelativeAssetPath(string entryPath, string assetName)
+    {
+        if (!entryPath.StartsWith(assetName, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        var prefixLength = assetName.Length;
+        if (entryPath.Length <= prefixLength)
+        {
+            return string.Empty;
+        }
+
+        if (entryPath[prefixLength] != Path.DirectorySeparatorChar)
+        {
+            return string.Empty;
+        }
+
+        return entryPath[(prefixLength + 1)..];
     }
 
     private BackupAssetStatus CreateDirectoryAsset(string assetName, string sourcePath, string stagingDirectory)

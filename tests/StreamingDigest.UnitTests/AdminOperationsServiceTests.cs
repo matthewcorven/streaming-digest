@@ -91,4 +91,80 @@ public sealed class AdminOperationsServiceTests
             }
         }
     }
+
+    [Fact]
+    public async Task RestoreLatestBackupAsync_RestoresArchiveContentsIntoConfiguredLocations()
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"streaming-digest-backup-restore-tests-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(tempDirectory);
+            Directory.CreateDirectory(Path.Combine(tempDirectory, "media"));
+            Directory.CreateDirectory(Path.Combine(tempDirectory, "matrix"));
+            Directory.CreateDirectory(Path.Combine(tempDirectory, "backups"));
+
+            var configuration = new ApplicationConfiguration
+            {
+                Backup = new BackupSettings
+                {
+                    DestinationPath = Path.Combine(tempDirectory, "backups"),
+                    MediaPath = Path.Combine(tempDirectory, "media"),
+                    MatrixPath = Path.Combine(tempDirectory, "matrix"),
+                    IncludeAppSettings = true,
+                    IncludeSecrets = true
+                }
+            };
+
+            var backupArchivePath = Path.Combine(tempDirectory, "backups", "streaming-digest-backup-20260726-150000.zip");
+            await using (var archiveStream = File.Create(backupArchivePath))
+            {
+                using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: true);
+
+                var mediaEntry = archive.CreateEntry("media/screenshot.png");
+                await using (var mediaEntryStream = mediaEntry.Open())
+                {
+                    await using var mediaWriter = new StreamWriter(mediaEntryStream);
+                    await mediaWriter.WriteAsync("restored media");
+                }
+
+                var matrixEntry = archive.CreateEntry("matrix/room.json");
+                await using (var matrixEntryStream = matrixEntry.Open())
+                {
+                    await using var matrixWriter = new StreamWriter(matrixEntryStream);
+                    await matrixWriter.WriteAsync("restored matrix");
+                }
+
+                var configEntry = archive.CreateEntry("config/appsettings.json");
+                await using (var configEntryStream = configEntry.Open())
+                {
+                    await using var configWriter = new StreamWriter(configEntryStream);
+                    await configWriter.WriteAsync("{\"configSchemaVersion\":\"2.0.0\"}");
+                }
+            }
+
+            var service = new AdminOperationsService(configuration, tempDirectory);
+            var result = await service.RestoreLatestBackupAsync();
+
+            Assert.Equal("completed", result.Status);
+            Assert.Equal("backup.restore", result.OperationType);
+
+            var restoredMediaPath = Path.Combine(tempDirectory, "media", "screenshot.png");
+            var restoredMatrixPath = Path.Combine(tempDirectory, "matrix", "room.json");
+            var restoredConfigPath = Path.Combine(tempDirectory, "appsettings.json");
+
+            Assert.True(File.Exists(restoredMediaPath));
+            Assert.True(File.Exists(restoredMatrixPath));
+            Assert.True(File.Exists(restoredConfigPath));
+            Assert.Equal("restored media", await File.ReadAllTextAsync(restoredMediaPath));
+            Assert.Equal("restored matrix", await File.ReadAllTextAsync(restoredMatrixPath));
+            Assert.Equal("{\"configSchemaVersion\":\"2.0.0\"}", await File.ReadAllTextAsync(restoredConfigPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
 }

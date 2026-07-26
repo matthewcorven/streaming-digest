@@ -265,6 +265,8 @@ app.MapPost("/api/admin/operations/audio-to-text/test", async (IAdminOperationsS
     CreateAdminOperationResponse(await service.TestAudioToTextServiceAsync(cancellationToken)));
 app.MapPost("/api/admin/operations/backup", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
     CreateAdminOperationResponse(await service.CreateBackupAsync(cancellationToken)));
+app.MapPost("/api/admin/operations/restore", async (IAdminOperationsService service, CancellationToken cancellationToken) =>
+    CreateAdminOperationResponse(await service.RestoreLatestBackupAsync(cancellationToken)));
 app.MapGet("/api/admin/operations/backups/{archiveName}", (string archiveName, ApplicationConfiguration configuration) =>
 {
     if (archiveName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
