@@ -121,6 +121,33 @@ test('scrapeFirstPage respects robots.txt exclusions', async () => {
   }
 });
 
+test('scrapeFirstPage preserves the requested URL and skips browser work when robots disallow', async () => {
+  let browserWasRequested = false;
+  const server = await createTestServer((request, response) => {
+    if (request.url === '/robots.txt') {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.end('User-agent: *\nDisallow: /blocked\n');
+      return;
+    }
+
+    browserWasRequested = true;
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<html><body>Should not be scraped</body></html>');
+  });
+
+  try {
+    const requestedUrl = `${server.baseUrl}/blocked`;
+    const response = await scrapeFirstPage({ url: requestedUrl });
+    assert.equal(response.requestedUrl, requestedUrl);
+    assert.equal(response.finalUrl, requestedUrl);
+    assert.equal(response.exclusionReason, 'robots-txt');
+    assert.equal(response.visibleText, '');
+    assert.equal(browserWasRequested, false);
+  } finally {
+    await server.close();
+  }
+});
+
 test('scrapeFirstPage blocks all paths for robots disallow root', async () => {
   const server = await createTestServer((request, response) => {
     if (request.url === '/robots.txt') {
