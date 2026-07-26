@@ -5,7 +5,7 @@ using StreamingDigest.Application.Observability;
 
 namespace StreamingDigest.Worker.Scraping;
 
-public sealed class ScraperClient(HttpClient httpClient)
+public sealed class ScraperClient(HttpClient httpClient, IScrapeFailureRecorder scrapeFailureRecorder)
 {
     public async Task<ScrapeFirstPageResponse> ScrapeFirstPageAsync(ScrapeFirstPageRequest request, CancellationToken cancellationToken = default)
     {
@@ -18,10 +18,18 @@ public sealed class ScraperClient(HttpClient httpClient)
                 activity?.SetTag("scraper.debug_capture_raw_html", request.DebugCaptureRawHtml.ToString());
                 activity?.SetTag("scraper.timeout_seconds", request.TimeoutSeconds.ToString());
 
-                using var response = await httpClient.PostAsJsonAsync("/internal/scrape/first-page", request, cancellationToken);
-                response.EnsureSuccessStatusCode();
-                var payload = await response.Content.ReadFromJsonAsync<ScrapeFirstPageResponse>(cancellationToken: cancellationToken);
-                return payload ?? throw new InvalidOperationException("The scraper returned an empty payload.");
+                try
+                {
+                    using var response = await httpClient.PostAsJsonAsync("/internal/scrape/first-page", request, cancellationToken);
+                    response.EnsureSuccessStatusCode();
+                    var payload = await response.Content.ReadFromJsonAsync<ScrapeFirstPageResponse>(cancellationToken: cancellationToken);
+                    return payload ?? throw new InvalidOperationException("The scraper returned an empty payload.");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    await scrapeFailureRecorder.RecordFailureAsync(request, ex, cancellationToken);
+                    throw;
+                }
             },
             new Dictionary<string, object?>
             {

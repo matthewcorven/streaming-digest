@@ -22,6 +22,7 @@
   <ProjectReference Include="..\..\src\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Web\StreamingDigest.Web.csproj" />
+  <ProjectReference Include="..\..\src\StreamingDigest.Worker\StreamingDigest.Worker.csproj" />
 </ItemGroup>
 
 <ItemGroup>
