@@ -7,7 +7,7 @@ namespace StreamingDigest.Infrastructure.Persistence;
 
 public sealed class AppSettingsSeeder(ILogger? logger = null)
 {
-    public async Task SeedDefaultsAsync(string connectionString, CancellationToken cancellationToken = default)
+    public async Task SeedDefaultsAsync(string connectionString, bool? defaultObservabilityEnabled = null, int? defaultRetentionDays = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -19,7 +19,7 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            foreach (var setting in BuildDefaultSettings())
+            foreach (var setting in BuildDefaultSettings(defaultObservabilityEnabled, defaultRetentionDays))
             {
                 try
                 {
@@ -44,9 +44,11 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
         }
     }
 
-    private static IReadOnlyDictionary<string, object> BuildDefaultSettings()
+    private static IReadOnlyDictionary<string, object> BuildDefaultSettings(bool? defaultObservabilityEnabled = null, int? defaultRetentionDays = null)
     {
         var maxBytes = ComputeTempMediaMaxBytes();
+        var observabilityEnabled = defaultObservabilityEnabled ?? false;
+        var retentionDays = defaultRetentionDays ?? ComputeRetentionDays();
 
         return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
@@ -70,11 +72,38 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
             ["notifications.matrix.onScheduledRuns"] = true,
             ["notifications.matrix.onBackfillRuns"] = false,
             ["notifications.matrix.dashboardBaseUrl"] = "http://localhost:8080",
-            ["observability.enabled"] = true,
+            ["observability.enabled"] = observabilityEnabled,
+            ["observability.retentionDays"] = retentionDays,
+            ["observability.retentionWarning"] = retentionDays <= 0,
             ["observability.links.grafanaUrl"] = "http://localhost:3000",
+            ["observability.links.prometheusUrl"] = "http://localhost:9090",
+            ["observability.links.lokiUrl"] = "http://localhost:3100",
+            ["observability.links.tempoUrl"] = "http://localhost:3200",
             ["observability.links.hangfireUrl"] = "/admin/jobs",
             ["debug.rawHtmlCapture.enabledDefault"] = false
         };
+    }
+
+    private static int ComputeRetentionDays()
+    {
+        var drives = DriveInfo.GetDrives().Where(drive => drive.IsReady).ToArray();
+        if (drives.Length == 0)
+        {
+            return 0;
+        }
+
+        var freeSpaceBytes = drives.Select(drive => drive.AvailableFreeSpace).DefaultIfEmpty(0).Max();
+        if (freeSpaceBytes > 5L * 1024 * 1024 * 1024)
+        {
+            return 90;
+        }
+
+        if (freeSpaceBytes > 1L * 1024 * 1024 * 1024)
+        {
+            return 30;
+        }
+
+        return 0;
     }
 
     private static long ComputeTempMediaMaxBytes()

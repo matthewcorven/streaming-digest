@@ -94,11 +94,13 @@ using var startupScope = CorrelationContext.BeginLoggingScope(host.Services.GetR
 
 var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
+var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
+var defaultRetentionDays = ComputeRetentionDays();
 
 if (databaseStatus.Connected)
 {
     var seeder = new AppSettingsSeeder(startupLogger);
-    await seeder.SeedDefaultsAsync(connectionString);
+    await seeder.SeedDefaultsAsync(connectionString, defaultObservabilityEnabled, defaultRetentionDays);
 }
 
 var scraperClient = host.Services.GetRequiredService<ScraperClient>();
@@ -151,6 +153,44 @@ static void ConfigureOtlpExporter(OtlpExporterOptions options)
 
     options.Protocol = OtlpExportProtocol.Grpc;
     options.Endpoint = new Uri(endpoint);
+}
+
+static bool ResolveDefaultObservabilityEnabled(IConfiguration configuration, IHostEnvironment environment, bool fallbackEnabled)
+{
+    if (bool.TryParse(configuration["observability:enabled"], out var configuredEnabled))
+    {
+        return configuredEnabled;
+    }
+
+    var overrideValue = Environment.GetEnvironmentVariable("STREAMINGDIGEST_OBSERVABILITY_ENABLED");
+    if (bool.TryParse(overrideValue, out var environmentEnabled))
+    {
+        return environmentEnabled;
+    }
+
+    return environment.IsDevelopment() ? true : fallbackEnabled;
+}
+
+static int ComputeRetentionDays()
+{
+    var drives = DriveInfo.GetDrives().Where(drive => drive.IsReady).ToArray();
+    if (drives.Length == 0)
+    {
+        return 0;
+    }
+
+    var freeSpaceBytes = drives.Select(drive => drive.AvailableFreeSpace).DefaultIfEmpty(0).Max();
+    if (freeSpaceBytes > 5L * 1024 * 1024 * 1024)
+    {
+        return 90;
+    }
+
+    if (freeSpaceBytes > 1L * 1024 * 1024 * 1024)
+    {
+        return 30;
+    }
+
+    return 0;
 }
 
 public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);
