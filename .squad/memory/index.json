@@ -28,5 +28,25 @@
     "status": "active",
     "createdAt": "2026-07-25T21:55:35.159Z",
     "updatedAt": "2026-07-25T21:55:35.159Z"
+  },
+  {
+    "id": "cd0465be-e136-485d-9d55-603265339657",
+    "class": "DECISION",
+    "loadGuidance": "ALWAYS",
+    "title": "Queue helper excludes linked-PR issues",
+    "path": ".squad/decisions/inbox/squad-coordinator-queue-helper-excludes-linked-pr-issues-cd0465be.md",
+    "status": "active",
+    "createdAt": "2026-07-26T13:26:21.611Z",
+    "updatedAt": "2026-07-26T13:26:21.611Z"
+  },
+  {
+    "id": "2c2deb47-1774-4e5d-ab73-2b401aee64cc",
+    "class": "POLICY",
+    "loadGuidance": "ALWAYS",
+    "title": "Implementation delegation protocol",
+    "path": ".squad/memory/policy-inbox/squad-coordinator-implementation-delegation-protocol-2c2deb47.md",
+    "status": "active",
+    "createdAt": "2026-07-26T13:33:48.203Z",
+    "updatedAt": "2026-07-26T13:33:48.203Z"
   }
 ]
