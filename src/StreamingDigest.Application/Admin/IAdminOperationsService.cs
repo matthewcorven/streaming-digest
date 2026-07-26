@@ -16,6 +16,8 @@ public interface IAdminOperationsService
     Task<AdminActionResult> TestMatrixNotificationAsync(CancellationToken cancellationToken = default);
     Task<AdminActionResult> TestEmbeddingServiceAsync(CancellationToken cancellationToken = default);
     Task<AdminActionResult> TestAudioToTextServiceAsync(CancellationToken cancellationToken = default);
+    Task<AdminActionResult> CreateBackupAsync(CancellationToken cancellationToken = default);
+    Task<AdminActionResult> RestoreLatestBackupAsync(CancellationToken cancellationToken = default);
     Task<AdminActionStatus?> GetOperationAsync(Guid operationId, CancellationToken cancellationToken = default);
 }
 

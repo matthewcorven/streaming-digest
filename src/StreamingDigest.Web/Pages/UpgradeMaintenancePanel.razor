@@ -45,10 +45,16 @@ else
                 <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetMatrixNotificationEndpoint(), GetMatrixNotificationLabel()))">Test Matrix notification</button>
                 <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetEmbeddingServiceEndpoint(), GetEmbeddingServiceLabel()))">Test embedding service</button>
                 <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetAudioToTextEndpoint(), GetAudioToTextLabel()))">Test audio-to-text service</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetBackupEndpoint(), GetBackupLabel()))">Create backup archive</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetRestoreEndpoint(), GetRestoreLabel()))">Restore latest backup</button>
             </div>
             @if (!string.IsNullOrWhiteSpace(_feedbackMessage))
             {
                 <p class="action-feedback @_feedbackClass">@_feedbackMessage</p>
+                @if (!string.IsNullOrWhiteSpace(_downloadUrl))
+                {
+                    <a class="secondary-link" href="@_downloadUrl" target="_blank" rel="noopener">Download archive</a>
+                }
             }
         </section>
 
@@ -165,6 +171,7 @@ else
     private UpgradeMaintenanceSnapshot? _snapshot;
     private bool _isBusy;
     private string? _feedbackMessage;
+    private string? _downloadUrl;
     private string _feedbackClass = "neutral";
 
     protected override async Task OnInitializedAsync()
@@ -179,19 +186,28 @@ else
     private static string GetEmbeddingServiceEndpoint() => "/api/admin/operations/embeddings/test";
 
     private static string GetAudioToTextEndpoint() => "/api/admin/operations/audio-to-text/test";
+ 
+    private static string GetBackupEndpoint() => "/api/admin/operations/backup";
 
+    private static string GetRestoreEndpoint() => "/api/admin/operations/restore";
+  
     private static string GetEmbeddingsReprocessLabel() => "Reprocess embeddings";
-
+  
     private static string GetMatrixNotificationLabel() => "Test Matrix notification";
-
+  
     private static string GetEmbeddingServiceLabel() => "Test embedding service";
-
+  
     private static string GetAudioToTextLabel() => "Test audio-to-text service";
+  
+    private static string GetBackupLabel() => "Create backup archive";
+
+    private static string GetRestoreLabel() => "Restore latest backup";
 
     private async Task TriggerActionAsync(string endpoint, string label)
     {
         _isBusy = true;
         _feedbackMessage = $"Dispatching {label.ToLowerInvariant()}...";
+        _downloadUrl = null;
         _feedbackClass = "neutral";
 
         try
@@ -201,6 +217,9 @@ else
 
             if (response.IsSuccessStatusCode && payload is not null)
             {
+                _downloadUrl = payload.OperationType is "backup.create" && !string.IsNullOrWhiteSpace(payload.Target)
+                    ? $"/api/admin/operations/backups/{Uri.EscapeDataString(payload.Target)}"
+                    : null;
                 _feedbackMessage = payload.Status is "completed" or "ok"
                     ? $"{label} completed. {payload.Message}"
                     : $"{label} accepted. {payload.Message}";
@@ -246,7 +265,9 @@ else
 
     private sealed class AdminActionResponse
     {
+        public string? OperationType { get; set; }
         public string? Status { get; set; }
         public string? Message { get; set; }
+        public string? Target { get; set; }
     }
 }

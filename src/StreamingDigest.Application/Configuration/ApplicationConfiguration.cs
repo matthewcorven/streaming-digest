@@ -12,6 +12,8 @@ public sealed class ApplicationConfiguration
 
     public RuntimeSettings Runtime { get; init; } = new();
 
+    public BackupSettings Backup { get; init; } = new();
+
     public ConnectionStringsSettings ConnectionStrings { get; init; } = new();
 
     public LoggingSettings Logging { get; init; } = new();
@@ -43,6 +45,19 @@ public sealed class ConnectionStringsSettings
 public sealed class LoggingSettings
 {
     public string Level { get; init; } = "Information";
+}
+
+public sealed class BackupSettings
+{
+    public string DestinationPath { get; init; } = "/var/backups/streaming-digest";
+
+    public string MediaPath { get; init; } = "/var/lib/streaming-digest/media";
+
+    public string MatrixPath { get; init; } = "/var/lib/streaming-digest/matrix";
+
+    public bool IncludeAppSettings { get; init; } = true;
+
+    public bool IncludeSecrets { get; init; } = true;
 }
 
 public static class ApplicationConfigurationLoader
