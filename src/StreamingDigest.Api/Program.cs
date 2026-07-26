@@ -81,6 +81,7 @@ var connectionString = builder.Configuration.GetConnectionString("streamingdiges
     ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
 
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 
 var app = builder.Build();
@@ -101,6 +102,9 @@ if (databaseStatus.Connected)
 {
     var seeder = new AppSettingsSeeder(app.Logger);
     await seeder.SeedDefaultsAsync(connectionString, observabilityRuntime.Enabled, observabilityRuntime.RetentionDays);
+
+    var bootstrapAdminUserService = app.Services.GetRequiredService<BootstrapAdminUserService>();
+    await bootstrapAdminUserService.EnsureBootstrapAdminUserAsync(connectionString);
 }
 
 if (app.Environment.IsDevelopment())
