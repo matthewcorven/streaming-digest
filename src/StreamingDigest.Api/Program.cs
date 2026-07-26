@@ -289,11 +289,28 @@ await EnsureObservabilityReadinessAsync(app.Logger, observabilityRuntime);
 
 if (databaseStatus.Connected)
 {
+    var compatibilityStateService = new UpgradeCompatibilityStateService(app.Logger);
+    var compatibilityStateBeforeMigration = await compatibilityStateService.ReadVersionStateAsync(connectionString);
     var migrationRunner = new PostgresMigrationRunner(connectionString);
     await migrationRunner.ApplyAsync();
 
     var seeder = new AppSettingsSeeder(app.Logger);
     await seeder.SeedDefaultsAsync(connectionString, observabilityRuntime.Enabled, observabilityRuntime.RetentionDays);
+    await compatibilityStateService.PersistRuntimeStateAsync(connectionString, applicationConfiguration, PostgresMigrationRunner.CurrentSchemaVersion);
+    var compatibilityStateAfterMigration = await compatibilityStateService.ReadVersionStateAsync(connectionString);
+    var compatibilityEvaluation = compatibilityStateService.Evaluate(
+        applicationConfiguration,
+        compatibilityStateBeforeMigration,
+        compatibilityStateAfterMigration,
+        PostgresMigrationRunner.CurrentSchemaVersion);
+
+    app.Logger.LogInformation(
+        "Upgrade compatibility category {Category} ({RiskLevel}). Compose tag {ComposeTag}. Backup recommended={BackupRecommended}; backup required={BackupRequired}",
+        compatibilityEvaluation.Category,
+        compatibilityEvaluation.RiskLevel,
+        compatibilityEvaluation.ComposeTag,
+        compatibilityEvaluation.BackupRecommended,
+        compatibilityEvaluation.BackupRequired);
 
     var bootstrapAdminUserService = app.Services.GetRequiredService<BootstrapAdminUserService>();
     await bootstrapAdminUserService.EnsureBootstrapAdminUserAsync(connectionString);

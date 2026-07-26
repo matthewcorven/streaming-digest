@@ -40,6 +40,9 @@ else
                 <h2>Operational actions</h2>
                 <span class="status-pill status-neutral">Contextual admin</span>
             </div>
+            <p class="pre-migration-backup-note">
+                Backup guidance: create a backup before DB/config/deployment migrations; backup is required for high-risk infrastructure migrations.
+            </p>
             <div class="action-buttons">
                 <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetEmbeddingsReprocessEndpoint(), GetEmbeddingsReprocessLabel()))">Reprocess embeddings</button>
                 <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetMatrixNotificationEndpoint(), GetMatrixNotificationLabel()))">Test Matrix notification</button>

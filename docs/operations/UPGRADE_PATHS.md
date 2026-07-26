@@ -31,6 +31,8 @@ Streaming Digest should track four compatibility versions so the UI and startup 
 | `configSchemaVersion` | JSON config file | Config migrator | Identifies config-file compatibility | If older, auto-migrate defaultable changes; if invalid/newer, enter maintenance/setup error state |
 | `deploymentSchemaVersion` | JSON config or generated deployment metadata | Compose/deployment generation | Identifies service/volume/profile compatibility | If older than app requires, show deployment migration required and block dependent services |
 
+For image rollouts, keep Compose tags versioned with both software and deployment schema identity (for example, `ghcr.io/<org>/streaming-digest-api:v{appVersion}-deploy.{deploymentSchemaVersion}` and the matching worker tag). This prevents app-only tag bumps from skipping required deployment migrations.
+
 ## 3. A: App/service changes only
 
 App/service-only upgrades keep the same container topology, mounted volumes, public/internal ports, Compose project name, service names, and external dependency set.

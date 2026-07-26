@@ -75,17 +75,48 @@ var startupLoggerFactory = LoggerFactory.Create(logging =>
 var startupLogger = startupLoggerFactory.CreateLogger("Startup");
 var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
 var hangfireStorage = CreateHangfireStorage(startupLogger, connectionString, databaseStatus.Connected);
+var compatibilityStateService = new UpgradeCompatibilityStateService(startupLogger);
+UpgradeCompatibilityEvaluation compatibilityEvaluation;
+UpgradeVersionState? compatibilityStateBeforeMigration = null;
+UpgradeVersionState? compatibilityStateAfterMigration = null;
 
 if (!databaseStatus.Connected)
 {
     startupLogger.LogWarning("Hangfire PostgreSQL connectivity is unavailable; the worker will use in-memory storage for this startup.");
+    compatibilityEvaluation = compatibilityStateService.BuildDatabaseUnavailableEvaluation();
+}
+else
+{
+    compatibilityStateBeforeMigration = await compatibilityStateService.ReadVersionStateAsync(connectionString);
+    var migrationRunner = new PostgresMigrationRunner(connectionString);
+    await migrationRunner.ApplyAsync();
+
+    var seeder = new AppSettingsSeeder(startupLogger);
+    await seeder.SeedDefaultsAsync(connectionString, ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false), StorageRetentionPolicy.ComputeObservabilityRetentionDays(StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes()));
+
+    await compatibilityStateService.PersistRuntimeStateAsync(connectionString, applicationConfiguration, PostgresMigrationRunner.CurrentSchemaVersion);
+    compatibilityStateAfterMigration = await compatibilityStateService.ReadVersionStateAsync(connectionString);
+    compatibilityEvaluation = compatibilityStateService.Evaluate(
+        applicationConfiguration,
+        compatibilityStateBeforeMigration,
+        compatibilityStateAfterMigration,
+        PostgresMigrationRunner.CurrentSchemaVersion);
 }
 
 builder.Services.AddHangfire(config => config.UseStorage(hangfireStorage));
-builder.Services.AddHangfireServer(options =>
+if (compatibilityEvaluation.WorkerCanProcessJobs)
 {
-    options.WorkerCount = Math.Max(1, Environment.ProcessorCount / 2);
-});
+    builder.Services.AddHangfireServer(options =>
+    {
+        options.WorkerCount = Math.Max(1, Environment.ProcessorCount / 2);
+    });
+}
+else
+{
+    startupLogger.LogWarning("Worker compatibility gate is blocking job processing. {Summary}", compatibilityEvaluation.Summary);
+}
+
+builder.Services.AddSingleton(compatibilityEvaluation);
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
@@ -139,14 +170,15 @@ using var startupScope = CorrelationContext.BeginLoggingScope(host.Services.GetR
 
 var defaultObservabilityEnabled = ResolveDefaultObservabilityEnabled(builder.Configuration, builder.Environment, false);
 var defaultRetentionDays = StorageRetentionPolicy.ComputeObservabilityRetentionDays(StorageRetentionPolicy.GetMaximumReadyDriveFreeSpaceBytes());
-
-if (databaseStatus.Connected)
+if (compatibilityStateBeforeMigration is not null && compatibilityStateAfterMigration is not null)
 {
-    var migrationRunner = new PostgresMigrationRunner(connectionString);
-    await migrationRunner.ApplyAsync();
-
-    var seeder = new AppSettingsSeeder(startupLogger);
-    await seeder.SeedDefaultsAsync(connectionString, defaultObservabilityEnabled, defaultRetentionDays);
+    startupLogger.LogInformation(
+        "Upgrade compatibility category {Category} ({RiskLevel}). Compose tag {ComposeTag}. Backup recommended={BackupRecommended}; backup required={BackupRequired}",
+        compatibilityEvaluation.Category,
+        compatibilityEvaluation.RiskLevel,
+        compatibilityEvaluation.ComposeTag,
+        compatibilityEvaluation.BackupRecommended,
+        compatibilityEvaluation.BackupRequired);
 }
 
 await WorkerConcurrencySettingsLoader.LoadAsync(connectionString, databaseStatus.Connected, startupLogger, workerConcurrencySettings);
