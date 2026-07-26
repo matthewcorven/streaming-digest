@@ -18,7 +18,8 @@ public sealed record RepositoryMetadata(
     bool IsPublic,
     string? LicenseName,
     string? ReadmeContent = null,
-    string? LicenseContent = null);
+    string? LicenseContent = null,
+    string? DeepWikiUrl = null);
 
 public sealed record RepositoryMetadataResult(
     RepositoryMetadata? Metadata,
@@ -157,7 +158,8 @@ public sealed class GitHubRepositoryMetadataAdapter : IRepositoryMetadataAdapter
                     !repo.IsPrivate,
                     repo.License?.SpdxId,
                     readmeContent,
-                    licenseContent),
+                    licenseContent,
+                    TryFetchDeepWikiUrl(detection)),
                 true,
                 false,
                 (int)response.StatusCode,
@@ -203,6 +205,42 @@ public sealed class GitHubRepositoryMetadataAdapter : IRepositoryMetadataAdapter
             }
 
             return Encoding.UTF8.GetString(Convert.FromBase64String(document.Content));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private string? TryFetchDeepWikiUrl(RepositoryHostDetectionResult detection)
+    {
+        if (detection.Owner is null || detection.RepositoryName is null)
+        {
+            return null;
+        }
+
+        var deepWikiUrl = $"https://deepwiki.com/{Uri.EscapeDataString(detection.Owner)}/{Uri.EscapeDataString(detection.RepositoryName)}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, deepWikiUrl);
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("streaming-digest", "1.0"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+
+        try
+        {
+            using var response = _httpClient.Send(request);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests || !response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var payload = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return null;
+            }
+
+            return payload.Contains("index your code", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : deepWikiUrl;
         }
         catch
         {

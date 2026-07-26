@@ -13,8 +13,15 @@ public sealed class RepositoryMetadataServiceTests
         var handler = new StubHttpMessageHandler((request, _) =>
         {
             Assert.Equal(HttpMethod.Get, request.Method);
-            Assert.Contains("api.github.com/repos/matthewcorven/streaming-digest", request.RequestUri?.ToString() ?? string.Empty);
             Assert.Contains("streaming-digest", request.Headers.UserAgent.ToString());
+
+            if (request.RequestUri?.Host == "deepwiki.com")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><h1>DeepWiki fixture</h1><p>reachable page</p></body></html>", Encoding.UTF8, "text/html")
+                };
+            }
 
             if (request.RequestUri?.AbsolutePath.EndsWith("/readme") == true)
             {
@@ -31,6 +38,8 @@ public sealed class RepositoryMetadataServiceTests
                     Content = new StringContent("{\"content\":\"TUlU\",\"encoding\":\"base64\"}", Encoding.UTF8, "application/json")
                 };
             }
+
+            Assert.Contains("api.github.com/repos/matthewcorven/streaming-digest", request.RequestUri?.ToString() ?? string.Empty);
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -55,6 +64,7 @@ public sealed class RepositoryMetadataServiceTests
         Assert.Equal("MIT", result.Metadata.LicenseName);
         Assert.Equal("# Mine Note README", result.Metadata.ReadmeContent);
         Assert.Equal("MIT", result.Metadata.LicenseContent);
+        Assert.Equal("https://deepwiki.com/matthewcorven/streaming-digest", result.Metadata.DeepWikiUrl);
     }
 
     [Fact]
@@ -62,6 +72,14 @@ public sealed class RepositoryMetadataServiceTests
     {
         var handler = new StubHttpMessageHandler((request, _) =>
         {
+            if (request.RequestUri?.Host == "deepwiki.com")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><h1>DeepWiki fixture</h1><p>reachable page</p></body></html>", Encoding.UTF8, "text/html")
+                };
+            }
+
             if (request.RequestUri?.AbsolutePath.EndsWith("/readme") == true)
             {
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -93,6 +111,14 @@ public sealed class RepositoryMetadataServiceTests
     {
         var handler = new StubHttpMessageHandler((request, _) =>
         {
+            if (request.RequestUri?.Host == "deepwiki.com")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><h1>DeepWiki fixture</h1><p>reachable page</p></body></html>", Encoding.UTF8, "text/html")
+                };
+            }
+
             if (request.RequestUri?.AbsolutePath.EndsWith("/readme") == true)
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
@@ -123,6 +149,44 @@ public sealed class RepositoryMetadataServiceTests
         Assert.NotNull(result.Metadata);
         Assert.Null(result.Metadata!.ReadmeContent);
         Assert.Null(result.Metadata.LicenseContent);
+    }
+
+    [Fact]
+    public void Fetch_ignores_placeholder_deepwiki_pages()
+    {
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            if (request.RequestUri?.Host == "deepwiki.com")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><h1>Index your code</h1><p>placeholder</p></body></html>", Encoding.UTF8, "text/html")
+                };
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/readme") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/license") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"description\":\"Streaming Digest\",\"stargazers_count\":42,\"language\":\"C#\",\"default_branch\":\"main\",\"private\":false,\"license\":{\"spdx_id\":\"MIT\"}}", Encoding.UTF8, "application/json")
+            };
+        });
+        var httpClient = new HttpClient(handler);
+        var service = new RepositoryMetadataService(new RepositoryHostDetectionService(), httpClient);
+
+        var result = service.Fetch("https://github.com/matthewcorven/streaming-digest");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage ?? "Repository metadata fetch unexpectedly failed.");
+        Assert.NotNull(result.Metadata);
+        Assert.Null(result.Metadata!.DeepWikiUrl);
     }
 
     [Fact]
