@@ -568,68 +568,17 @@ static async Task PersistObservabilitySettingAsync(string connectionString, ILog
 
 static async Task<bool> ReadBoolSettingAsync(NpgsqlConnection connection, string key, bool fallback)
 {
-    await using var command = new NpgsqlCommand("SELECT value_json FROM public.app_settings WHERE key = @key", connection);
-    command.Parameters.AddWithValue("key", key);
-    await using var reader = await command.ExecuteReaderAsync();
-    if (await reader.ReadAsync())
-    {
-        var json = reader.GetString(0);
-        if (bool.TryParse(json, out var value))
-        {
-            return value;
-        }
-
-        if (JsonDocument.Parse(json).RootElement.ValueKind == JsonValueKind.True)
-        {
-            return true;
-        }
-
-        if (JsonDocument.Parse(json).RootElement.ValueKind == JsonValueKind.False)
-        {
-            return false;
-        }
-    }
-
-    return fallback;
+    return await AppSettingReader.ReadBoolAsync(connection, key, fallback);
 }
 
 static async Task<int> ReadIntSettingAsync(NpgsqlConnection connection, string key, int fallback)
 {
-    await using var command = new NpgsqlCommand("SELECT value_json FROM public.app_settings WHERE key = @key", connection);
-    command.Parameters.AddWithValue("key", key);
-    await using var reader = await command.ExecuteReaderAsync();
-    if (await reader.ReadAsync())
-    {
-        var json = reader.GetString(0);
-        if (int.TryParse(json, out var value))
-        {
-            return value;
-        }
-
-        if (JsonDocument.Parse(json).RootElement.ValueKind == JsonValueKind.Number && JsonDocument.Parse(json).RootElement.TryGetInt32(out var intValue))
-        {
-            return intValue;
-        }
-    }
-
-    return fallback;
+    return await AppSettingReader.ReadIntAsync(connection, key, fallback);
 }
 
 static async Task<string> ReadStringSettingAsync(NpgsqlConnection connection, string key, string fallback)
 {
-    await using var command = new NpgsqlCommand("SELECT value_json FROM public.app_settings WHERE key = @key", connection);
-    command.Parameters.AddWithValue("key", key);
-    await using var reader = await command.ExecuteReaderAsync();
-    if (await reader.ReadAsync())
-    {
-        var json = reader.GetString(0);
-        if (!string.IsNullOrWhiteSpace(json))
-        {
-            return JsonSerializer.Deserialize<string>(json) ?? fallback;
-        }
-    }
-
-    return fallback;
+    return await AppSettingReader.ReadStringAsync(connection, key, fallback);
 }
 
 static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, IHttpClientFactory httpClientFactory, ObservabilityRuntimeState observabilityRuntime, string serviceName, string upstreamBaseUrl, CancellationToken cancellationToken)

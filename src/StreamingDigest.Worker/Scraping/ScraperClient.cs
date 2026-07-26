@@ -1,11 +1,15 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
+using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
 
 namespace StreamingDigest.Worker.Scraping;
 
-public sealed class ScraperClient(HttpClient httpClient, IScrapeFailureRecorder scrapeFailureRecorder)
+public sealed class ScraperClient(
+    HttpClient httpClient,
+    IScrapeFailureRecorder scrapeFailureRecorder,
+    WorkerOperationConcurrencyController concurrencyController)
 {
     public async Task<ScrapeFirstPageResponse> ScrapeFirstPageAsync(ScrapeFirstPageRequest request, CancellationToken cancellationToken = default)
     {
@@ -20,10 +24,16 @@ public sealed class ScraperClient(HttpClient httpClient, IScrapeFailureRecorder 
 
                 try
                 {
-                    using var response = await httpClient.PostAsJsonAsync("/internal/scrape/first-page", request, cancellationToken);
-                    response.EnsureSuccessStatusCode();
-                    var payload = await response.Content.ReadFromJsonAsync<ScrapeFirstPageResponse>(cancellationToken: cancellationToken);
-                    return payload ?? throw new InvalidOperationException("The scraper returned an empty payload.");
+                    return await concurrencyController.RunWebsiteScrapeAsync(
+                        request.Url,
+                        async () =>
+                        {
+                            using var response = await httpClient.PostAsJsonAsync("/internal/scrape/first-page", request, cancellationToken);
+                            response.EnsureSuccessStatusCode();
+                            var payload = await response.Content.ReadFromJsonAsync<ScrapeFirstPageResponse>(cancellationToken: cancellationToken);
+                            return payload ?? throw new InvalidOperationException("The scraper returned an empty payload.");
+                        },
+                        cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

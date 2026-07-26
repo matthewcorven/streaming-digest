@@ -1,3 +1,4 @@
+using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Screenshots;
 using StreamingDigest.UnitTests.Fixtures;
 
@@ -6,6 +7,7 @@ namespace StreamingDigest.UnitTests;
 public class ScreenshotGenerationServiceTests
 {
     private readonly FixtureLoader _fixtureLoader = new();
+    private readonly WorkerOperationConcurrencyController _concurrencyController = new(new WorkerConcurrencySettings());
 
     [Fact]
     public async Task GenerateAsync_WithFixtureAndTempOutput_CreatesWebpFile()
@@ -24,7 +26,7 @@ public class ScreenshotGenerationServiceTests
             File.SetUnixFileMode(ffmpegShimPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
-        var service = new ScreenshotGenerationService();
+        var service = new ScreenshotGenerationService(_concurrencyController);
         var result = await service.GenerateAsync(new ScreenshotGenerationRequest(inputPath, outputPath, OffsetSeconds: 1, FfmpegPath: ffmpegShimPath));
 
         try
@@ -46,7 +48,7 @@ public class ScreenshotGenerationServiceTests
     [Fact]
     public async Task GenerateAsync_WithMissingInput_ReturnsFailureResult()
     {
-        var service = new ScreenshotGenerationService();
+        var service = new ScreenshotGenerationService(_concurrencyController);
         var result = await service.GenerateAsync(new ScreenshotGenerationRequest("/does/not/exist.mp4", "/tmp/thumbnail.webp"));
 
         Assert.False(result.Succeeded);

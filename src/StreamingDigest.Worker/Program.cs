@@ -21,6 +21,10 @@ var builder = Host.CreateApplicationBuilder(args);
 var applicationConfiguration = ApplicationConfigurationLoader.LoadFromDirectory(builder.Environment.ContentRootPath);
 builder.Services.AddSingleton(applicationConfiguration);
 
+var workerConcurrencySettings = new WorkerConcurrencySettings();
+builder.Services.AddSingleton(workerConcurrencySettings);
+builder.Services.AddSingleton<WorkerOperationConcurrencyController>();
+
 builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(options =>
 {
@@ -104,6 +108,9 @@ if (databaseStatus.Connected)
     var seeder = new AppSettingsSeeder(startupLogger);
     await seeder.SeedDefaultsAsync(connectionString, defaultObservabilityEnabled, defaultRetentionDays);
 }
+
+await WorkerConcurrencySettingsLoader.LoadAsync(connectionString, databaseStatus.Connected, startupLogger, workerConcurrencySettings);
+WorkerConcurrencySettingsLoader.LogResolvedSettings(startupLogger, workerConcurrencySettings);
 
 var scraperClient = host.Services.GetRequiredService<ScraperClient>();
 var scraperHealthy = await scraperClient.IsHealthyAsync();

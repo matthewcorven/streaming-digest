@@ -71,11 +71,24 @@ Columns:
 Important settings:
 
 - `ingestion.defaultMaxAgeDays`, default `30`
-- `ingestion.defaultConcurrency`, default `1` or `2`
+- `ingestion.defaultConcurrency`, default `1` as the legacy fallback for per-run channel limits
+- `ingestion.channels.scheduledConcurrency`, default `1`
+- `ingestion.channels.manualConcurrency`, default `1`
+- `ingestion.channels.backfillConcurrency`, default `1`
+- `ingestion.videos.perChannelConcurrency`, default `1`
 - `ingestion.maxSegmentsPerVideo`, default `60`
 - `ingestion.defaultScheduleLocalTime`, default `06:00`
 - `ingestion.tempMedia.maxBytes`, default to 50% of first-run free disk bytes
 - `screenshots.offsetSeconds`, default `5`
+- `screenshots.concurrency`, default `1`
+- `embeddings.batchSize`, default `16`
+- `embeddings.workerConcurrency`, default `1`
+- `scraping.website.globalConcurrency`, default `2`
+- `scraping.website.perHostConcurrency`, default `1`
+- `repositories.api.globalConcurrency`, default `2`
+- `repositories.api.perHostConcurrency`, default `1`
+- `whisper.globalConcurrency`, default `1`
+- `llm.jobs.globalConcurrency`, default `1`
 - `search.textWeight`
 - `search.vectorWeight`
 - `search.highSignalThresholdPercent`, default `80`

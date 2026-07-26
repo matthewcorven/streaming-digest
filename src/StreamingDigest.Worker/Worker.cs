@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
@@ -7,6 +8,7 @@ namespace StreamingDigest.Worker;
 public class Worker(
     ILogger<Worker> logger,
     IConfiguration configuration,
+    WorkerConcurrencySettings workerConcurrencySettings,
     IScreenshotGenerationService screenshotGenerationService,
     IServiceScopeFactory scopeFactory) : BackgroundService
 {
@@ -15,6 +17,21 @@ public class Worker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        logger.LogInformation(
+            "Worker runtime concurrency profile active. ScheduledChannels={ScheduledChannels}; ManualChannels={ManualChannels}; BackfillChannels={BackfillChannels}; VideosPerChannel={VideosPerChannel}; Screenshots={Screenshots}; EmbeddingBatchSize={EmbeddingBatchSize}; WebsiteGlobal={WebsiteGlobal}; WebsitePerHost={WebsitePerHost}; RepositoryGlobal={RepositoryGlobal}; RepositoryPerHost={RepositoryPerHost}; Whisper={Whisper}; LlmJobs={LlmJobs}",
+            workerConcurrencySettings.ScheduledChannelConcurrency,
+            workerConcurrencySettings.ManualChannelConcurrency,
+            workerConcurrencySettings.BackfillChannelConcurrency,
+            workerConcurrencySettings.VideoPerChannelConcurrency,
+            workerConcurrencySettings.ScreenshotConcurrency,
+            workerConcurrencySettings.EmbeddingBatchSize,
+            workerConcurrencySettings.WebsiteScrapeGlobalConcurrency,
+            workerConcurrencySettings.WebsiteScrapePerHostConcurrency,
+            workerConcurrencySettings.RepositoryApiGlobalConcurrency,
+            workerConcurrencySettings.RepositoryApiPerHostConcurrency,
+            workerConcurrencySettings.WhisperGlobalConcurrency,
+            workerConcurrencySettings.LlmJobGlobalConcurrency);
+
         var inputPath = configuration["screenshots:inputPath"];
         var outputPath = configuration["screenshots:outputPath"];
 
