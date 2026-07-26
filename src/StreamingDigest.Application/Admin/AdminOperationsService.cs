@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Npgsql;
 using StreamingDigest.Application.Configuration;
 
@@ -19,14 +20,26 @@ public sealed class AdminOperationsService : IAdminOperationsService
         _contentRootPath = contentRootPath;
     }
 
-    public Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
-        => Task.FromResult(CreateAcceptedResult("ingestion.run", target, "Manual ingestion has been queued for the target scope."));
+    public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
+    {
+        var result = CreateAcceptedResult("ingestion.run", target, "Manual ingestion has been queued for the target scope.");
+        await TryPersistIngestionRunAsync(result.OperationId, "manual", target, cancellationToken);
+        return result;
+    }
 
-    public Task<AdminActionResult> RunChannelBackfillAsync(string? channelId = null, CancellationToken cancellationToken = default)
-        => Task.FromResult(CreateAcceptedResult("ingestion.backfill", channelId, "Channel backfill has been queued."));
+    public async Task<AdminActionResult> RunChannelBackfillAsync(string? channelId = null, CancellationToken cancellationToken = default)
+    {
+        var result = CreateAcceptedResult("ingestion.backfill", channelId, "Channel backfill has been queued.");
+        await TryPersistIngestionRunAsync(result.OperationId, "backfill", channelId, cancellationToken);
+        return result;
+    }
 
-    public Task<AdminActionResult> RetryFailedIngestionRunAsync(string runId, CancellationToken cancellationToken = default)
-        => Task.FromResult(CreateAcceptedResult("retry.ingestionRun", runId, $"Retry queued for ingestion run '{runId}'."));
+    public async Task<AdminActionResult> RetryFailedIngestionRunAsync(string runId, CancellationToken cancellationToken = default)
+    {
+        var result = CreateAcceptedResult("retry.ingestionRun", runId, $"Retry queued for ingestion run '{runId}'.");
+        await TryRetryFailedRunAsync(result.OperationId, runId, cancellationToken);
+        return result;
+    }
 
     public Task<AdminActionResult> RetryFailedVideoAsync(string videoId, CancellationToken cancellationToken = default)
         => Task.FromResult(CreateAcceptedResult("retry.video", videoId, $"Retry queued for video '{videoId}'."));
@@ -533,6 +546,228 @@ public sealed class AdminOperationsService : IAdminOperationsService
         }
 
         return Path.GetFullPath(Path.Combine(_contentRootPath ?? Directory.GetCurrentDirectory(), configuredPath));
+    }
+
+    private async Task TryPersistIngestionRunAsync(Guid operationId, string runType, string? target, CancellationToken cancellationToken)
+    {
+        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
+        if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+            var now = DateTimeOffset.UtcNow;
+            var runId = Guid.NewGuid();
+            var channels = await LoadRunChannelsAsync(connection, transaction, target, cancellationToken);
+
+            await using (var operationCommand = new NpgsqlCommand("""
+                INSERT INTO public.operations (
+                    id, operation_type, status, requested_by, related_entity_type, started_at, created_at, updated_at
+                )
+                VALUES (
+                    @id, @operation_type, @status, @requested_by, @related_entity_type, @started_at, @created_at, @updated_at
+                )
+                ON CONFLICT (id) DO UPDATE
+                SET status = EXCLUDED.status,
+                    updated_at = EXCLUDED.updated_at
+                """, connection, transaction))
+            {
+                operationCommand.Parameters.AddWithValue("id", operationId);
+                operationCommand.Parameters.AddWithValue("operation_type", $"ingestion.{runType}");
+                operationCommand.Parameters.AddWithValue("status", "accepted");
+                operationCommand.Parameters.AddWithValue("requested_by", "admin");
+                operationCommand.Parameters.AddWithValue("related_entity_type", "ingestion_run");
+                operationCommand.Parameters.AddWithValue("started_at", now);
+                operationCommand.Parameters.AddWithValue("created_at", now);
+                operationCommand.Parameters.AddWithValue("updated_at", now);
+                await operationCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            var summary = new JsonObject
+            {
+                ["seededItemCount"] = channels.Count,
+                ["seededAtUtc"] = now
+            };
+
+            await using (var runCommand = new NpgsqlCommand("""
+                INSERT INTO public.ingestion_runs (
+                    id, operation_id, run_type, triggered_by, status, started_at, channels_checked,
+                    new_videos_found, videos_ingested, videos_failed, videos_skipped,
+                    transcripts_found, transcripts_missing, repositories_found, summary_json, created_at
+                )
+                VALUES (
+                    @id, @operation_id, @run_type, @triggered_by, @status, @started_at, @channels_checked,
+                    0, 0, 0, 0, 0, 0, 0, @summary_json::jsonb, @created_at
+                )
+                """, connection, transaction))
+            {
+                runCommand.Parameters.AddWithValue("id", runId);
+                runCommand.Parameters.AddWithValue("operation_id", operationId);
+                runCommand.Parameters.AddWithValue("run_type", runType);
+                runCommand.Parameters.AddWithValue("triggered_by", "admin");
+                runCommand.Parameters.AddWithValue("status", "in_progress");
+                runCommand.Parameters.AddWithValue("started_at", now);
+                runCommand.Parameters.AddWithValue("channels_checked", channels.Count);
+                runCommand.Parameters.AddWithValue("summary_json", summary.ToJsonString());
+                runCommand.Parameters.AddWithValue("created_at", now);
+                await runCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            foreach (var channel in channels)
+            {
+                await using var itemCommand = new NpgsqlCommand("""
+                    INSERT INTO public.ingestion_items (
+                        id, ingestion_run_id, operation_id, item_type, item_id, external_key, idempotency_key,
+                        stage, status, attempt, retry_count, max_attempts, is_retryable, created_at
+                    )
+                    VALUES (
+                        @id, @ingestion_run_id, @operation_id, @item_type, @item_id, @external_key, @idempotency_key,
+                        @stage, @status, 0, 0, 7, true, @created_at
+                    )
+                    """, connection, transaction);
+                itemCommand.Parameters.AddWithValue("id", Guid.NewGuid());
+                itemCommand.Parameters.AddWithValue("ingestion_run_id", runId);
+                itemCommand.Parameters.AddWithValue("operation_id", operationId);
+                itemCommand.Parameters.AddWithValue("item_type", "channel");
+                itemCommand.Parameters.AddWithValue("item_id", channel.ChannelId);
+                itemCommand.Parameters.AddWithValue("external_key", channel.ExternalKey);
+                itemCommand.Parameters.AddWithValue("idempotency_key", $"ingestion:{runId:N}:{channel.ChannelId:N}");
+                itemCommand.Parameters.AddWithValue("stage", "metadata");
+                itemCommand.Parameters.AddWithValue("status", "pending");
+                itemCommand.Parameters.AddWithValue("created_at", now);
+                await itemCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            // Keep admin action responses available even when persistence is unavailable.
+        }
+    }
+
+    private async Task TryRetryFailedRunAsync(Guid operationId, string runIdText, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(runIdText, out var runId))
+        {
+            return;
+        }
+
+        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
+        if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+            var now = DateTimeOffset.UtcNow;
+            await using (var operationCommand = new NpgsqlCommand("""
+                INSERT INTO public.operations (
+                    id, operation_type, status, requested_by, related_entity_type, related_entity_id, started_at, created_at, updated_at
+                )
+                VALUES (
+                    @id, @operation_type, @status, @requested_by, @related_entity_type, @related_entity_id, @started_at, @created_at, @updated_at
+                )
+                ON CONFLICT (id) DO UPDATE
+                SET status = EXCLUDED.status,
+                    updated_at = EXCLUDED.updated_at
+                """, connection, transaction))
+            {
+                operationCommand.Parameters.AddWithValue("id", operationId);
+                operationCommand.Parameters.AddWithValue("operation_type", "retry.ingestionRun");
+                operationCommand.Parameters.AddWithValue("status", "accepted");
+                operationCommand.Parameters.AddWithValue("requested_by", "admin");
+                operationCommand.Parameters.AddWithValue("related_entity_type", "ingestion_run");
+                operationCommand.Parameters.AddWithValue("related_entity_id", runId);
+                operationCommand.Parameters.AddWithValue("started_at", now);
+                operationCommand.Parameters.AddWithValue("created_at", now);
+                operationCommand.Parameters.AddWithValue("updated_at", now);
+                await operationCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await using (var retryItemsCommand = new NpgsqlCommand("""
+                UPDATE public.ingestion_items
+                SET operation_id = @operation_id,
+                    status = 'pending',
+                    attempt = attempt + 1,
+                    retry_count = retry_count + 1,
+                    error_summary = NULL,
+                    next_retry_at = NULL,
+                    deferred_until = NULL,
+                    deferment_reason = NULL
+                WHERE ingestion_run_id = @ingestion_run_id
+                    AND is_retryable = true
+                    AND status IN ('failed', 'deferred')
+                """, connection, transaction))
+            {
+                retryItemsCommand.Parameters.AddWithValue("operation_id", operationId);
+                retryItemsCommand.Parameters.AddWithValue("ingestion_run_id", runId);
+                await retryItemsCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await using (var runCommand = new NpgsqlCommand("""
+                UPDATE public.ingestion_runs
+                SET operation_id = @operation_id,
+                    status = 'in_progress'
+                WHERE id = @id
+                """, connection, transaction))
+            {
+                runCommand.Parameters.AddWithValue("operation_id", operationId);
+                runCommand.Parameters.AddWithValue("id", runId);
+                await runCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            // Keep retry operation accepted responses available even when persistence is unavailable.
+        }
+    }
+
+    private static async Task<List<(Guid ChannelId, string ExternalKey)>> LoadRunChannelsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string? target,
+        CancellationToken cancellationToken)
+    {
+        var channels = new List<(Guid ChannelId, string ExternalKey)>();
+        var commandText = """
+            SELECT id, youtube_channel_id
+            FROM public.channels
+            WHERE is_paused = false
+            """;
+
+        var hasTarget = !string.IsNullOrWhiteSpace(target);
+        if (hasTarget)
+        {
+            commandText += " AND (id::text = @target OR youtube_channel_id = @target)";
+        }
+
+        await using var command = new NpgsqlCommand(commandText, connection, transaction);
+        if (hasTarget)
+        {
+            command.Parameters.AddWithValue("target", target!.Trim());
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            channels.Add((reader.GetGuid(0), reader.GetString(1)));
+        }
+
+        return channels;
     }
 
     private AdminActionResult CreateAcceptedResult(string operationType, string? target, string message)
