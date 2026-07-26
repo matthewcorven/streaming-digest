@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dapper;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using StreamingDigest.Application.Configuration;
 
 namespace StreamingDigest.Infrastructure.Persistence;
 
@@ -51,7 +52,7 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
         var observabilityEnabled = defaultObservabilityEnabled ?? false;
         var retentionDays = defaultRetentionDays ?? StorageRetentionPolicy.ComputeObservabilityRetentionDays(freeSpaceBytes);
 
-        return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        var defaults = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
             ["ingestion.defaultMaxAgeDays"] = 30,
             ["ingestion.defaultConcurrency"] = 1,
@@ -83,5 +84,12 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
             ["observability.links.hangfireUrl"] = "/admin/jobs",
             ["debug.rawHtmlCapture.enabledDefault"] = false
         };
+
+        foreach (var setting in WorkerConcurrencySettings.CreateSeedDefaults())
+        {
+            defaults[setting.Key] = setting.Value;
+        }
+
+        return defaults;
     }
 }

@@ -3,6 +3,7 @@ using System.Net.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using StreamingDigest.Application.Configuration;
 using StreamingDigest.Domain;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.Worker.Scraping;
@@ -57,7 +58,7 @@ public sealed class ScrapeFailureRecorderTests : IDisposable
         {
             BaseAddress = new Uri("https://scraper.internal")
         };
-        var client = new ScraperClient(httpClient, _recorder);
+        var client = new ScraperClient(httpClient, _recorder, new WorkerOperationConcurrencyController(new WorkerConcurrencySettings()));
         var request = new ScrapeFirstPageRequest("https://example.com/failed");
 
         await Assert.ThrowsAsync<HttpRequestException>(() => client.ScrapeFirstPageAsync(request));

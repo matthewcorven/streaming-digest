@@ -86,20 +86,7 @@ public sealed class RetentionCleanupService(
 
         try
         {
-            await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT value_json::text FROM public.app_settings WHERE key = @key LIMIT 1";
-
-            var keyParameter = command.CreateParameter();
-            keyParameter.ParameterName = "@key";
-            keyParameter.Value = RetentionSettingKey;
-            command.Parameters.Add(keyParameter);
-
-            var rawValue = await command.ExecuteScalarAsync(cancellationToken);
-            return rawValue switch
-            {
-                string stringValue when int.TryParse(stringValue, out var retentionDays) => retentionDays,
-                _ => 0
-            };
+            return await AppSettingReader.ReadIntAsync(connection, RetentionSettingKey, 0, cancellationToken);
         }
         finally
         {

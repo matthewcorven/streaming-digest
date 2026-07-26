@@ -1,8 +1,11 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using StreamingDigest.Application.Configuration;
 using StreamingDigest.Infrastructure.Persistence;
+using StreamingDigest.Worker;
 
 namespace StreamingDigest.UnitTests;
 
@@ -63,6 +66,29 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
             Assert.Equal("0.99", await GetSettingValueAsync(connection, "search.textWeight"));
             Assert.Equal("false", await GetSettingValueAsync(connection, "observability.enabled"));
             Assert.Equal("false", await GetSettingValueAsync(connection, "debug.rawHtmlCapture.enabledDefault"));
+
+            var expectedConcurrencyDefaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [WorkerConcurrencySettings.DefaultChannelConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.ScheduledChannelConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.ManualChannelConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.BackfillChannelConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.VideoPerChannelConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.ScreenshotConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.EmbeddingBatchSizeKey] = "16",
+                [WorkerConcurrencySettings.EmbeddingWorkerConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.WebsiteScrapeGlobalConcurrencyKey] = "2",
+                [WorkerConcurrencySettings.WebsiteScrapePerHostConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.RepositoryApiGlobalConcurrencyKey] = "2",
+                [WorkerConcurrencySettings.RepositoryApiPerHostConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.WhisperGlobalConcurrencyKey] = "1",
+                [WorkerConcurrencySettings.LlmJobGlobalConcurrencyKey] = "1"
+            };
+
+            foreach (var expectedSetting in expectedConcurrencyDefaults)
+            {
+                Assert.Equal(expectedSetting.Value, await GetSettingValueAsync(connection, expectedSetting.Key));
+            }
         }
     }
 
@@ -85,6 +111,41 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task LoadAsync_reads_seeded_concurrency_defaults_and_runtime_overrides()
+    {
+        var runner = new PostgresMigrationRunner(_connectionString!);
+        await runner.ApplyAsync();
+
+        var seeder = new AppSettingsSeeder();
+        await seeder.SeedDefaultsAsync(_connectionString!);
+
+        await using (var connection = new NpgsqlConnection(_connectionString!))
+        {
+            await connection.OpenAsync();
+            await UpdateSettingValueAsync(connection, WorkerConcurrencySettings.ScreenshotConcurrencyKey, "3");
+            await UpdateSettingValueAsync(connection, WorkerConcurrencySettings.WebsiteScrapeGlobalConcurrencyKey, "4");
+        }
+
+        var settings = new WorkerConcurrencySettings();
+        await WorkerConcurrencySettingsLoader.LoadAsync(_connectionString!, true, NullLogger.Instance, settings);
+
+        Assert.Equal(WorkerConcurrencySettings.DefaultChannelConcurrencyValue, settings.DefaultChannelConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.ScheduledChannelConcurrencyValue, settings.ScheduledChannelConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.ManualChannelConcurrencyValue, settings.ManualChannelConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.BackfillChannelConcurrencyValue, settings.BackfillChannelConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.VideoPerChannelConcurrencyValue, settings.VideoPerChannelConcurrency);
+        Assert.Equal(3, settings.ScreenshotConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.EmbeddingBatchSizeValue, settings.EmbeddingBatchSize);
+        Assert.Equal(WorkerConcurrencySettings.EmbeddingWorkerConcurrencyValue, settings.EmbeddingWorkerConcurrency);
+        Assert.Equal(4, settings.WebsiteScrapeGlobalConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.WebsiteScrapePerHostConcurrencyValue, settings.WebsiteScrapePerHostConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.RepositoryApiGlobalConcurrencyValue, settings.RepositoryApiGlobalConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.RepositoryApiPerHostConcurrencyValue, settings.RepositoryApiPerHostConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.WhisperGlobalConcurrencyValue, settings.WhisperGlobalConcurrency);
+        Assert.Equal(WorkerConcurrencySettings.LlmJobGlobalConcurrencyValue, settings.LlmJobGlobalConcurrency);
+    }
+
     private static async Task<string> GetSettingValueAsync(NpgsqlConnection connection, string key)
     {
         await using var command = new NpgsqlCommand("SELECT value_json::text FROM public.app_settings WHERE key = @key", connection);
@@ -93,6 +154,16 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
 
         Assert.True(await reader.ReadAsync());
         return reader.GetString(0);
+    }
+
+    private static async Task UpdateSettingValueAsync(NpgsqlConnection connection, string key, string valueJson)
+    {
+        await using var command = new NpgsqlCommand(
+            "UPDATE public.app_settings SET value_json = CAST(@valueJson AS jsonb), updated_at = CURRENT_TIMESTAMP WHERE key = @key",
+            connection);
+        command.Parameters.AddWithValue("key", key);
+        command.Parameters.AddWithValue("valueJson", valueJson);
+        await command.ExecuteNonQueryAsync();
     }
 
     private async Task StartPostgresContainerAsync()
