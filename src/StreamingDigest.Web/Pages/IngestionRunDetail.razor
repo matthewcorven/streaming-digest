@@ -29,6 +29,7 @@
                     <a class="action-link" href="@link.Url" target="_blank" rel="noreferrer">@link.Label</a>
                 }
                 <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildRunRetryEndpoint(), GetRetryFailedLabel()))">Retry failed</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(BuildChannelScreenshotPurgeEndpoint(), GetChannelScreenshotPurgeLabel()))">Purge screenshots (channel)</button>
             </div>
         </div>
 
@@ -299,7 +300,11 @@
 
     private string BuildRunRetryEndpoint() => $"/api/admin/operations/ingestion/runs/{CurrentRun?.Id}/retry";
 
+    private string BuildChannelScreenshotPurgeEndpoint() => $"/api/admin/operations/screenshots/purge?target=channel:{CurrentRun?.Id}";
+
     private static string GetRetryFailedLabel() => "Retry failed";
+
+    private static string GetChannelScreenshotPurgeLabel() => "Purge screenshots (channel)";
 
     private static string BuildVideoRetryEndpoint(string itemId) => $"/api/admin/operations/videos/{itemId}/retry";
 
