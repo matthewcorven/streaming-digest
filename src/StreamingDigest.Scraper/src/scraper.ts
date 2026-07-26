@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { chromium } from 'playwright';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium, type Browser, type Page } from 'playwright';
+
+const SCRAPER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0';
+const MAX_VISIBLE_TEXT_LENGTH = 200_000;
 
 export interface ScrapeFirstPageRequest {
   url: string;
@@ -9,6 +15,7 @@ export interface ScrapeFirstPageRequest {
 }
 
 export interface ScrapeFirstPageResponse {
+  requestedUrl: string;
   finalUrl: string;
   title: string | null;
   description: string | null;
@@ -19,6 +26,13 @@ export interface ScrapeFirstPageResponse {
   contentType: string | null;
   contentHash: string;
   rawHtmlDebugPath: string | null;
+  exclusionReason: string | null;
+}
+
+interface RobotsRule {
+  userAgent: string;
+  disallow: string[];
+  allow: string[];
 }
 
 export function normalizeScrapeRequest(input: Partial<ScrapeFirstPageRequest>): ScrapeFirstPageRequest {
@@ -26,9 +40,10 @@ export function normalizeScrapeRequest(input: Partial<ScrapeFirstPageRequest>): 
     throw new Error('A non-empty url is required.');
   }
 
+  const trimmedUrl = input.url.trim();
   let parsedUrl: URL;
   try {
-    parsedUrl = new URL(input.url);
+    parsedUrl = new URL(trimmedUrl);
   } catch {
     throw new Error('The provided url is not a valid absolute URL.');
   }
@@ -52,46 +67,282 @@ export function normalizeScrapeRequest(input: Partial<ScrapeFirstPageRequest>): 
 
 export async function scrapeFirstPage(request: Partial<ScrapeFirstPageRequest>): Promise<ScrapeFirstPageResponse> {
   const normalized = normalizeScrapeRequest(request);
+  const parsedUrl = new URL(normalized.url);
 
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const exclusionReason = detectExcludedUrl(parsedUrl);
+  if (exclusionReason) {
+    return createExclusionResponse(normalized.url, normalized.url, exclusionReason, 0, null);
+  }
 
-  const timeoutMs = normalized.timeoutSeconds * 1000;
-  page.setDefaultTimeout(timeoutMs);
+  let robotsAllowed = true;
+  let robotsReason: string | null = null;
+  if (normalized.respectRobotsTxt) {
+    const robotsRules = await loadRobotsRules(parsedUrl);
+    robotsAllowed = isRobotsAllowed(parsedUrl.pathname, robotsRules);
+    if (!robotsAllowed) {
+      robotsReason = 'robots-txt';
+    }
+  }
 
-  const response = await page.goto(normalized.url, { waitUntil: 'domcontentloaded' });
-  const finalUrl = response?.url() ?? normalized.url;
-  const title = await page.title().catch(() => null);
-  const description = await page.locator('meta[name="description"]').getAttribute('content').catch(() => null);
-  const visibleText = (await page.locator('body').innerText()).trim();
-  const openGraph = await page.evaluate(() => {
-    const values: Record<string, string> = {};
-    for (const element of Array.from(document.querySelectorAll('meta[property^="og:"]'))) {
-      const property = element.getAttribute('property');
-      const content = element.getAttribute('content');
-      if (property && content) {
-        values[property] = content;
+  if (!robotsAllowed) {
+    return createExclusionResponse(normalized.url, normalized.url, robotsReason ?? 'robots-txt', 0, null);
+  }
+
+  let browser: Browser | undefined;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ userAgent: SCRAPER_USER_AGENT });
+    const page = await context.newPage();
+
+    const timeoutMs = normalized.timeoutSeconds * 1000;
+    page.setDefaultTimeout(timeoutMs);
+
+    const response = await page.goto(normalized.url, { waitUntil: 'domcontentloaded' });
+    const finalUrl = response?.url() ?? normalized.url;
+
+    const exclusionReason = detectRedirectExclusion(normalized.url, finalUrl);
+    if (exclusionReason) {
+      return createExclusionResponse(normalized.url, finalUrl, exclusionReason, response?.status() ?? 0, null);
+    }
+
+    const loginReason = await detectLoginPage(page, finalUrl);
+    if (loginReason) {
+      return createExclusionResponse(normalized.url, finalUrl, loginReason, response?.status() ?? 0, null);
+    }
+
+    const title = await page.title().catch(() => null);
+    const description = await page.evaluate(() => document.querySelector('meta[name="description"]')?.getAttribute('content') ?? null).catch(() => null);
+    const visibleText = await extractVisibleText(page);
+    const openGraph = await page.evaluate(() => {
+      const values: Record<string, string> = {};
+      for (const element of Array.from(document.querySelectorAll('meta')) as HTMLMetaElement[]) {
+        const property = element.getAttribute('property') ?? element.getAttribute('name');
+        const content = element.getAttribute('content');
+        if (property && content && (property.startsWith('og:') || property.startsWith('twitter:'))) {
+          values[property] = content;
+        }
+      }
+      return values;
+    });
+
+    const contentHash = createHash('sha256').update(`${title ?? ''}\n${visibleText}`).digest('hex');
+    const status = response?.status() ?? 0;
+    const contentType = response?.headers()['content-type'] ?? null;
+    let rawHtmlDebugPath: string | null = null;
+    if (normalized.debugCaptureRawHtml) {
+      rawHtmlDebugPath = await captureRawHtml(page, finalUrl);
+    }
+
+    return {
+      requestedUrl: normalized.url,
+      finalUrl,
+      title,
+      description,
+      openGraph,
+      visibleText,
+      robotsAllowed: true,
+      httpStatus: status,
+      contentType,
+      contentHash: `sha256:${contentHash}`,
+      rawHtmlDebugPath,
+      exclusionReason: null
+    };
+  } finally {
+    await browser?.close().catch(() => undefined);
+  }
+}
+
+function createExclusionResponse(requestedUrl: string, finalUrl: string, exclusionReason: string, httpStatus: number, rawHtmlDebugPath: string | null): ScrapeFirstPageResponse {
+  const contentHash = createHash('sha256').update(`${requestedUrl}\n${exclusionReason}`).digest('hex');
+  return {
+    requestedUrl,
+    finalUrl,
+    title: null,
+    description: null,
+    openGraph: {},
+    visibleText: '',
+    robotsAllowed: exclusionReason === 'robots-txt' ? false : true,
+    httpStatus,
+    contentType: null,
+    contentHash: `sha256:${contentHash}`,
+    rawHtmlDebugPath,
+    exclusionReason
+  };
+}
+
+function detectExcludedUrl(parsedUrl: URL): string | null {
+  const path = parsedUrl.pathname.toLowerCase();
+  const pathExtension = extractFileExtension(path);
+  if (pathExtension === '.pdf') {
+    return null;
+  }
+
+  const disallowedDownloadExtensions = [
+    '.zip', '.gz', '.tar', '.tgz', '.rar', '.7z', '.exe', '.msi', '.deb', '.rpm', '.apk', '.dmg', '.iso',
+    '.mp4', '.avi', '.mov', '.mpg', '.mpeg', '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.json', '.xml', '.csv', '.txt',
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg'
+  ];
+  if (pathExtension && disallowedDownloadExtensions.includes(pathExtension)) {
+    return 'non-pdf-file-download';
+  }
+
+  for (const value of parsedUrl.searchParams.values()) {
+    const queryExtension = extractFileExtension(value.toLowerCase());
+    if (queryExtension && disallowedDownloadExtensions.includes(queryExtension)) {
+      return 'non-pdf-file-download';
+    }
+  }
+
+  const queryText = parsedUrl.search.toLowerCase();
+  if (disallowedDownloadExtensions.some((extension) => queryText.includes(extension))) {
+    return 'non-pdf-file-download';
+  }
+
+  return null;
+}
+
+function detectRedirectExclusion(requestedUrl: string, finalUrl: string): string | null {
+  if (requestedUrl === finalUrl) {
+    return null;
+  }
+
+  const requested = new URL(requestedUrl);
+  const resolved = new URL(finalUrl);
+  const trackingParameters = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid', 'mc_cid', 'mc_eid', 'twclid', 'ref', 'referrer', 'source', 'cid'];
+  const hasTrackingParams = trackingParameters.some((parameter) => resolved.searchParams.has(parameter) || requested.searchParams.has(parameter));
+  if (hasTrackingParams) {
+    return 'tracking-redirect';
+  }
+
+  return null;
+}
+
+async function detectLoginPage(page: Page, finalUrl: string): Promise<string | null> {
+  const path = new URL(finalUrl).pathname.toLowerCase();
+  if (/(^|\/)(login|signin|sign-in|auth|account|password|register)(\/|$)/.test(path)) {
+    return 'login-page';
+  }
+
+  const hasPasswordField = await page.locator('input[type="password"]').count().then((count) => count > 0).catch(() => false);
+  const bodyText = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '');
+  const hasLoginPrompt = /login|sign in|sign-in/i.test(bodyText);
+
+  if (hasPasswordField || hasLoginPrompt) {
+    return 'login-page';
+  }
+
+  return null;
+}
+
+async function extractVisibleText(page: Page): Promise<string> {
+  const visibleText = await page.locator('body').innerText().catch(() => '');
+  return visibleText.replace(/\s+/g, ' ').trim().slice(0, MAX_VISIBLE_TEXT_LENGTH);
+}
+
+async function loadRobotsRules(parsedUrl: URL): Promise<RobotsRule[] | null> {
+  const robotsUrl = new URL('/robots.txt', parsedUrl);
+  try {
+    const response = await fetch(robotsUrl, {
+      redirect: 'manual',
+      headers: { 'user-agent': SCRAPER_USER_AGENT }
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = await response.text();
+    return parseRobotsTxt(body);
+  } catch {
+    return null;
+  }
+}
+
+function parseRobotsTxt(body: string): RobotsRule[] {
+  const rules: RobotsRule[] = [];
+  let currentRule: RobotsRule | null = null;
+
+  for (const line of body.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf(':');
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const directive = trimmed.slice(0, separatorIndex).trim().toLowerCase();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+
+    if (directive === 'user-agent') {
+      currentRule = { userAgent: value.toLowerCase(), disallow: [], allow: [] };
+      rules.push(currentRule);
+      continue;
+    }
+
+    if (!currentRule) {
+      continue;
+    }
+
+    if (directive === 'disallow') {
+      currentRule.disallow.push(value);
+    } else if (directive === 'allow') {
+      currentRule.allow.push(value);
+    }
+  }
+
+  return rules;
+}
+
+function isRobotsAllowed(pathname: string, rules: RobotsRule[] | null): boolean {
+  if (!rules || rules.length === 0) {
+    return true;
+  }
+
+  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const wildcardRules = rules.filter((rule) => rule.userAgent === '*' || rule.userAgent === 'playwright' || rule.userAgent === 'chrome' || rule.userAgent === 'mozilla');
+  if (wildcardRules.length === 0) {
+    return true;
+  }
+
+  for (const rule of wildcardRules) {
+    const disallowed = rule.disallow.some((pattern) => pathMatchesRule(normalizedPath, pattern));
+    if (disallowed) {
+      const allowed = rule.allow.some((pattern) => pathMatchesRule(normalizedPath, pattern));
+      if (!allowed) {
+        return false;
       }
     }
-    return values;
-  });
+  }
 
-  const contentHash = createHash('sha256').update(`${title ?? ''}\n${visibleText}`).digest('hex');
-  const status = response?.status() ?? 0;
+  return true;
+}
 
-  await browser.close();
+function pathMatchesRule(pathname: string, rulePath: string): boolean {
+  if (!rulePath) {
+    return false;
+  }
 
-  return {
-    finalUrl,
-    title,
-    description,
-    openGraph,
-    visibleText,
-    robotsAllowed: normalized.respectRobotsTxt ? true : true,
-    httpStatus: status,
-    contentType: response?.headers()['content-type'] ?? null,
-    contentHash: `sha256:${contentHash}`,
-    rawHtmlDebugPath: null
-  };
+  const normalizedRule = rulePath.startsWith('/') ? rulePath : `/${rulePath}`;
+  if (normalizedRule === '/') {
+    return true;
+  }
+
+  return pathname === normalizedRule || pathname.startsWith(normalizedRule);
+}
+
+function extractFileExtension(value: string): string | null {
+  const match = value.match(/\.[a-z0-9]{2,5}(?:$|[?#&])/i);
+  return match ? match[0].replace(/[?#&]$/, '').toLowerCase() : null;
+}
+
+async function captureRawHtml(page: Page, finalUrl: string): Promise<string> {
+  const html = await page.content();
+  const debugDirectory = join(tmpdir(), 'streaming-digest-scraper');
+  await fs.mkdir(debugDirectory, { recursive: true });
+  const fileName = `${Date.now()}-${createHash('sha256').update(finalUrl).digest('hex')}.html`;
+  const filePath = join(debugDirectory, fileName);
+  await fs.writeFile(filePath, html, 'utf8');
+  return filePath;
 }
