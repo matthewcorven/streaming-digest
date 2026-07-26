@@ -77,6 +77,7 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+builder.Services.AddScoped<IScrapeFailureRecorder, ScrapeFailureRecorder>();
 builder.Services.AddHttpClient<ScraperClient>(client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["Scraper:BaseUrl"] ?? "http://localhost:3000");
