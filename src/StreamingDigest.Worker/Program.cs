@@ -140,6 +140,20 @@ builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationSer
         client.BaseAddress = new Uri(llmBaseUrl);
     }
 });
+builder.Services.AddHttpClient<DeterministicTranscriptChunkingService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+    var baseUrl = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
+        ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
+        ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
+    if (!string.IsNullOrWhiteSpace(baseUrl))
+    {
+        client.BaseAddress = new Uri(baseUrl);
+    }
+});
+builder.Services.AddScoped(sp => ActivatorUtilities.CreateInstance<DeterministicTranscriptChunkingService>(
+    sp,
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(DeterministicTranscriptChunkingService))));
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {

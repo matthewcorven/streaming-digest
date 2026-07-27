@@ -27,7 +27,7 @@ public sealed class DeterministicTranscriptChunkingService
     private readonly ILogger<DeterministicTranscriptChunkingService>? _logger;
 
     public DeterministicTranscriptChunkingService()
-        : this(new HttpClient(), null)
+        : this(new HttpClient { Timeout = TimeSpan.FromSeconds(5) }, null)
     {
     }
 
@@ -300,7 +300,9 @@ public sealed class DeterministicTranscriptChunkingService
 
     private static Uri? ResolveConfiguredBaseAddress()
     {
-        var configuredBaseUrl = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL");
+        var configuredBaseUrl = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
         if (string.IsNullOrWhiteSpace(configuredBaseUrl))
         {
             return null;
@@ -313,7 +315,8 @@ public sealed class DeterministicTranscriptChunkingService
 
     private static string ResolveModelName()
     {
-        var configuredModel = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_MODEL");
+        var configuredModel = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_MODEL")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL");
         return string.IsNullOrWhiteSpace(configuredModel) ? "local-llm" : configuredModel;
     }
 
