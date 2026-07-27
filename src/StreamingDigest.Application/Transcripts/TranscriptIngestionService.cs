@@ -14,6 +14,7 @@ public sealed class TranscriptIngestionService(
     IYouTubeCaptionClient captionClient,
     IAudioToTextProvider? audioToTextProvider = null,
     ITemporaryMediaManager? temporaryMediaManager = null,
+    // Must be provided to activate the fallback transcription path; when null, fallback is skipped.
     Func<Guid, CancellationToken, Task<string?>>? mediaFileResolver = null) : ITranscriptIngestionService
 {
     private readonly IAudioToTextProvider? _audioToTextProvider = audioToTextProvider;

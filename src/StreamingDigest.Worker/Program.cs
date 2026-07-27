@@ -127,6 +127,7 @@ builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
 builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>(); // TODO: replace with the real caption provider when YouTube caption fetching is wired up.
+// TODO: Register Func<Guid, CancellationToken, Task<string?>> mediaFileResolver here when video media file lookup is implemented; until then, TranscriptIngestionService cannot activate its TemporaryMediaManager-backed fallback transcription path.
 builder.Services.AddScoped<ITemporaryMediaManager, TemporaryMediaManager>();
 builder.Services.AddHttpClient<IAudioToTextProvider, LocalWhisperAudioToTextProvider>(client =>
 {
