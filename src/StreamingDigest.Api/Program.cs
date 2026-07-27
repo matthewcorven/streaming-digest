@@ -1412,8 +1412,10 @@ app.MapPost("/api/notes", async (CreateNoteRequest request, StreamingDigestDbCon
         return Results.BadRequest(new { error = "markdown is required." });
     }
 
+    var targetType = request.TargetType.Trim();
+
     var liveNoteExists = await dbContext.Notes
-        .AnyAsync(n => n.TargetType == request.TargetType && n.TargetId == request.TargetId && n.DeletedAt == null, cancellationToken);
+        .AnyAsync(n => n.TargetType == targetType && n.TargetId == request.TargetId && n.DeletedAt == null, cancellationToken);
 
     if (liveNoteExists)
     {
@@ -1422,15 +1424,22 @@ app.MapPost("/api/notes", async (CreateNoteRequest request, StreamingDigestDbCon
 
     var note = new StreamingDigest.Domain.Note
     {
-        TargetType = request.TargetType.Trim(),
+        TargetType = targetType,
         TargetId = request.TargetId,
         Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim(),
         Markdown = request.Markdown.Trim(),
         EmbeddingStatus = "stale"
     };
 
-    dbContext.Notes.Add(note);
-    await dbContext.SaveChangesAsync(cancellationToken);
+    try
+    {
+        dbContext.Notes.Add(note);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+    catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException pg && pg.SqlState == "23505")
+    {
+        return Results.Conflict(new { error = "A live note already exists for this target. Use PUT to update it." });
+    }
 
     var response = new NoteResponse(note.Id, note.TargetType, note.TargetId, note.Title, note.Markdown, note.EmbeddingStatus, note.CreatedAt, note.UpdatedAt);
     return Results.Created($"/api/notes/{note.Id}", response);
