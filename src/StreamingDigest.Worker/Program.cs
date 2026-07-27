@@ -14,8 +14,10 @@ using StreamingDigest.Application;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
 using StreamingDigest.Application.Screenshots;
+using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
+using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
 using StreamingDigest.Worker.Scraping;
@@ -118,8 +120,11 @@ else
 
 builder.Services.AddSingleton(compatibilityEvaluation);
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
+builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
+builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>(); // TODO: replace with the real caption provider when YouTube caption fetching is wired up.
 builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);

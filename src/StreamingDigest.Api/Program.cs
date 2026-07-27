@@ -821,6 +821,49 @@ app.MapGet("/api/internal/ingestion-runs/{ingestionRunId:guid}/notifications", a
 
     return Results.Ok(notifications);
 });
+app.MapGet("/api/videos/{videoId:guid}/transcript", async (Guid videoId, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var transcript = await context.VideoTranscripts
+        .AsNoTracking()
+        .Include(candidate => candidate.Cues)
+        .SingleOrDefaultAsync(candidate => candidate.VideoId == videoId && candidate.IsActive, cancellationToken);
+
+    if (transcript is null)
+    {
+        return Results.NotFound();
+    }
+
+    var response = new VideoTranscriptResponse(
+        transcript.Id,
+        transcript.VideoId,
+        transcript.SourceType,
+        transcript.LanguageCode,
+        transcript.Cues
+            .OrderBy(cue => cue.Sequence)
+            .Select(cue => new TranscriptCueResponse(
+                cue.Id,
+                cue.Sequence,
+                cue.StartSeconds,
+                cue.EndSeconds,
+                cue.TextOriginal,
+                cue.TextOverride,
+                cue.TextOverride ?? cue.TextOriginal))
+            .ToArray());
+
+    return Results.Ok(response);
+});
+app.MapPut("/api/transcript-cues/{cueId:guid}/overrides", async (Guid cueId, UpdateTranscriptCueOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var cue = await context.TranscriptCues.SingleOrDefaultAsync(candidate => candidate.Id == cueId, cancellationToken);
+    if (cue is null)
+    {
+        return Results.NotFound();
+    }
+
+    cue.TextOverride = string.IsNullOrWhiteSpace(request.Text) ? null : request.Text.Trim();
+    await context.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
 
 app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
 {
@@ -1626,10 +1669,13 @@ static bool ShouldServeSpaFallback(PathString path)
 
 internal sealed record CreateChannelRequest(string? SourceUrl, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
 internal sealed record UpdateChannelRequest(string? NameOverride, string? DescriptionOverride, bool? IsPaused, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
+internal sealed record UpdateTranscriptCueOverrideRequest(string? Text);
 internal sealed record ChannelListItemResponse(Guid Id, string YoutubeChannelId, string Name, string ProfileUrl, bool IsPaused, bool IsDegraded, int ConsecutiveFailures, DateTimeOffset? LastIngestedAt, string? LastIngestionStatus);
 internal sealed record ChannelDetailResponse(Guid Id, string YoutubeChannelId, ChannelValueResponse Name, ChannelValueResponse Description, string ProfileUrl, string SourceUrl, bool IsPaused, bool IsDegraded, int ConsecutiveFailures, DateTimeOffset? LastIngestedAt, string? LastIngestionStatus, ChannelIngestionDefaultsResponse IngestionDefaults);
 internal sealed record ChannelValueResponse(string? Original, string? Override, string? Effective);
 internal sealed record ChannelIngestionDefaultsResponse(int? MaxAgeDays, int? BackfillMaxVideos);
+internal sealed record VideoTranscriptResponse(Guid Id, Guid VideoId, string SourceType, string? LanguageCode, IReadOnlyList<TranscriptCueResponse> Cues);
+internal sealed record TranscriptCueResponse(Guid Id, int Sequence, decimal StartSeconds, decimal? EndSeconds, string TextOriginal, string? TextOverride, string Text);
 
 sealed class PassThroughDashboardAuthorizationFilter : IDashboardAuthorizationFilter
 {

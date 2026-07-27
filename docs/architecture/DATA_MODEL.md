@@ -243,6 +243,7 @@ Columns:
 - `full_text_override text null`
 - `confidence numeric null`
 - `created_at timestamptz not null`
+- `updated_at timestamptz not null`
 
 `source_type` examples:
 
@@ -264,6 +265,7 @@ Columns:
 - `text_original text not null`
 - `text_override text null`
 - `created_at timestamptz not null`
+- `updated_at timestamptz not null`
 
 Index:
 
@@ -857,6 +859,9 @@ Important application/domain events and warning/error summaries.
 Canonical `event_type` values (the code-level catalog lives in `src/StreamingDigest.Domain/DomainEventTypeCatalog.cs`):
 
 - `screenshot_file_missing`
+- `transcript_ingested`
+- `transcript_ingest_failed`
+- `transcript_cutover_completed`
 - `transcript_cutover_override_inert`
 - `scrape_excluded`
 - `scrape_failed`
