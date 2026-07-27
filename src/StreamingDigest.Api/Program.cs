@@ -15,6 +15,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using StreamingDigest.Api.Observability;
+using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Domain;
 using StreamingDigest.Application.Observability;
@@ -113,6 +114,7 @@ builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
+builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
 builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>()));
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
@@ -257,18 +259,27 @@ static string ResolveChannelFallbackId(string? sourceUrl)
     return $"channel-{Convert.ToHexString(bytes)[..12].ToLowerInvariant()}";
 }
 
-static ChannelValueResponse CreateValueResponse(string? original, string? overrideValue)
-    => new(original, overrideValue, string.IsNullOrWhiteSpace(overrideValue) ? original : overrideValue);
+static ChannelValueResponse CreateValueResponse(IEffectiveValueService effectiveValueService, string? original, string? overrideValue)
+{
+    var resolvedValue = effectiveValueService.Resolve(original, overrideValue);
+    return new(resolvedValue.Original, resolvedValue.Override, resolvedValue.Effective);
+}
 
-static ChannelListItemResponse MapChannelListItem(Channel channel)
-    => new(channel.Id, channel.YoutubeChannelId, channel.NameOverride ?? channel.NameOriginal ?? channel.YoutubeChannelId, channel.ProfileUrl, channel.IsPaused, channel.IsDegraded, channel.ConsecutiveFailures, channel.LastIngestedAt, channel.LastIngestionStatus);
+static string ResolveChannelDisplayName(EffectiveValue resolvedNameValue, string youtubeChannelId)
+    => string.IsNullOrWhiteSpace(resolvedNameValue.Effective) ? youtubeChannelId : resolvedNameValue.Effective;
 
-static ChannelDetailResponse MapChannelDetail(Channel channel)
+static ChannelListItemResponse MapChannelListItem(IEffectiveValueService effectiveValueService, Channel channel)
+{
+    var resolvedNameValue = effectiveValueService.Resolve(channel.NameOriginal, channel.NameOverride);
+    return new(channel.Id, channel.YoutubeChannelId, ResolveChannelDisplayName(resolvedNameValue, channel.YoutubeChannelId), channel.ProfileUrl, channel.IsPaused, channel.IsDegraded, channel.ConsecutiveFailures, channel.LastIngestedAt, channel.LastIngestionStatus);
+}
+
+static ChannelDetailResponse MapChannelDetail(IEffectiveValueService effectiveValueService, Channel channel)
     => new(
         channel.Id,
         channel.YoutubeChannelId,
-        CreateValueResponse(channel.NameOriginal, channel.NameOverride),
-        CreateValueResponse(channel.DescriptionOriginal, channel.DescriptionOverride),
+        CreateValueResponse(effectiveValueService, channel.NameOriginal, channel.NameOverride),
+        CreateValueResponse(effectiveValueService, channel.DescriptionOriginal, channel.DescriptionOverride),
         channel.ProfileUrl,
         channel.SourceUrl,
         channel.IsPaused,
@@ -411,7 +422,7 @@ app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
     Authorization = new[] { new PassThroughDashboardAuthorizationFilter() }
 });
 
-app.MapGet("/api/channels", async (HttpContext context, StreamingDigestDbContext dbContext) =>
+app.MapGet("/api/channels", async (HttpContext context, StreamingDigestDbContext dbContext, IEffectiveValueService effectiveValueService) =>
 {
     var query = context.Request.Query;
     var includePaused = bool.TryParse(query["includePaused"], out var includePausedValue) && includePausedValue;
@@ -427,11 +438,11 @@ app.MapGet("/api/channels", async (HttpContext context, StreamingDigestDbContext
         .Take(pageSize)
         .ToListAsync();
 
-    var items = channels.Select(MapChannelListItem).ToList();
+    var items = channels.Select(channel => MapChannelListItem(effectiveValueService, channel)).ToList();
     return Results.Ok(new { items, page, pageSize, totalCount });
 });
 
-app.MapPost("/api/channels", async (CreateChannelRequest request, IChannelRepository channelRepository) =>
+app.MapPost("/api/channels", async (CreateChannelRequest request, IChannelRepository channelRepository, IEffectiveValueService effectiveValueService) =>
 {
     if (string.IsNullOrWhiteSpace(request.SourceUrl))
     {
@@ -462,16 +473,16 @@ app.MapPost("/api/channels", async (CreateChannelRequest request, IChannelReposi
     };
 
     await channelRepository.AddAsync(channel);
-    return Results.Created($"/api/channels/{channel.Id}", MapChannelDetail(channel));
+    return Results.Created($"/api/channels/{channel.Id}", MapChannelDetail(effectiveValueService, channel));
 });
 
-app.MapGet("/api/channels/{channelId:guid}", async (Guid channelId, IChannelRepository channelRepository) =>
+app.MapGet("/api/channels/{channelId:guid}", async (Guid channelId, IChannelRepository channelRepository, IEffectiveValueService effectiveValueService) =>
 {
     var channel = await channelRepository.GetByIdAsync(channelId);
-    return channel is null ? Results.NotFound() : Results.Ok(MapChannelDetail(channel));
+    return channel is null ? Results.NotFound() : Results.Ok(MapChannelDetail(effectiveValueService, channel));
 });
 
-app.MapPut("/api/channels/{channelId:guid}", async (Guid channelId, UpdateChannelRequest request, IChannelRepository channelRepository) =>
+app.MapPut("/api/channels/{channelId:guid}", async (Guid channelId, UpdateChannelRequest request, IChannelRepository channelRepository, IEffectiveValueService effectiveValueService) =>
 {
     var channel = await channelRepository.GetByIdAsync(channelId);
     if (channel is null)
@@ -505,7 +516,7 @@ app.MapPut("/api/channels/{channelId:guid}", async (Guid channelId, UpdateChanne
     }
 
     await channelRepository.UpdateAsync(channel);
-    return Results.Ok(new { status = "updated", entityType = "channel", entityId = channel.Id, resource = MapChannelDetail(channel) });
+    return Results.Ok(new { status = "updated", entityType = "channel", entityId = channel.Id, resource = MapChannelDetail(effectiveValueService, channel) });
 });
 
 app.MapDelete("/api/channels/{channelId:guid}", async (Guid channelId, HttpContext context, IChannelRepository channelRepository) =>
