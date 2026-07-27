@@ -36,7 +36,7 @@ public sealed class ScrapeFailureRecorderTests : IDisposable
     [Fact]
     public async Task RecordFailureAsync_persists_domain_event_with_summary_and_details()
     {
-        var request = new ScrapeFirstPageRequest("https://example.com/failed");
+        var request = new ScrapeFirstPageRequest("https://example.com/failed", Guid.NewGuid());
         var exception = new InvalidOperationException("The scraper timed out.");
 
         await _recorder.RecordFailureAsync(request, exception);
@@ -59,7 +59,7 @@ public sealed class ScrapeFailureRecorderTests : IDisposable
             BaseAddress = new Uri("https://scraper.internal")
         };
         var client = new ScraperClient(httpClient, _recorder, new WorkerOperationConcurrencyController(new WorkerConcurrencySettings()), new ApplicationConfiguration());
-        var request = new ScrapeFirstPageRequest("https://example.com/failed");
+        var request = new ScrapeFirstPageRequest("https://example.com/failed", Guid.NewGuid());
 
         await Assert.ThrowsAsync<HttpRequestException>(() => client.ScrapeFirstPageAsync(request));
 
