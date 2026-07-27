@@ -23,6 +23,9 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     public DbSet<VideoTranscript> VideoTranscripts => Set<VideoTranscript>();
     public DbSet<TranscriptCue> TranscriptCues => Set<TranscriptCue>();
     public DbSet<SegmentTranscriptRange> SegmentTranscriptRanges => Set<SegmentTranscriptRange>();
+    public DbSet<ExternalResource> ExternalResources => Set<ExternalResource>();
+    public DbSet<RepositoryRecord> Repositories => Set<RepositoryRecord>();
+    public DbSet<FieldOverrideHistory> FieldOverrideHistories => Set<FieldOverrideHistory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -43,6 +46,9 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
         modelBuilder.ApplyConfiguration(new VideoTranscriptConfiguration());
         modelBuilder.ApplyConfiguration(new TranscriptCueConfiguration());
         modelBuilder.ApplyConfiguration(new SegmentTranscriptRangeConfiguration());
+        modelBuilder.ApplyConfiguration(new ExternalResourceConfiguration());
+        modelBuilder.ApplyConfiguration(new RepositoryRecordConfiguration());
+        modelBuilder.ApplyConfiguration(new FieldOverrideHistoryConfiguration());
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

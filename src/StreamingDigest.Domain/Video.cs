@@ -55,6 +55,7 @@ public sealed class Video : AuditedEntity
 
     public Guid ChannelId { get; set; }
     public Channel? Channel { get; set; }
+    public string? TitleOverride { get; set; }
     public string AuthorOriginal { get; set; } = string.Empty;
     public string? AuthorOverride { get; set; }
     public string? DescriptionOriginal { get; set; }
