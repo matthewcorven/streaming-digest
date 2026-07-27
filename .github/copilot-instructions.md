@@ -1,3 +1,10 @@
+## PR Review Delegation
+
+- When a PR review session is created, do **not** begin by reading files, running branch-diff, or performing any review work directly.
+- The correct flow is to **immediately delegate** to Morpheus (or the designated code reviewer on the team roster) as the first action — before any file reads or diff analysis.
+- The designated reviewer — not the PR review session shell — is responsible for branch-diff, all file reads, and all review analysis.
+- A PR review session that reads files or inspects diffs before delegating violates this protocol.
+
 ## Agent Tool Use
 
 - When asking questions of the human operator, use the ask_questions/askQuestions tool.
