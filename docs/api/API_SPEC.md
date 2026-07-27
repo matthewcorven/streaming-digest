@@ -11,7 +11,7 @@ Format: JSON unless otherwise noted
 - Mutating endpoints require authentication and CSRF protection.
 - All admin/operational endpoints require authentication.
 - Errors use consistent RFC 7807-style problem details.
-- Long-running operations enqueue application-owned operations and usually Hangfire jobs; callers track `/api/operations/{operationId}` instead of depending on Hangfire internals.
+- Long-running operations enqueue application-owned operations and usually Hangfire jobs; callers track `/api/admin/operations/{operationId}` instead of depending on Hangfire internals.
 - Re-running work has exactly two verbs (ADR-0002): **Retry** re-executes failed/deferred work only and is idempotent; **Reprocess** re-executes the full pipeline for an already-succeeded entity, bypassing the idempotency guard. "Regenerate" never appears as a user-facing verb.
 - Search endpoints return explainable ranking components.
 - Top-level MVP search results are video clusters. Use `matchedDocumentTypes` to filter which document types may match inside clusters.
@@ -65,7 +65,7 @@ Pagination conventions:
   "operationId": "uuid",
   "jobId": "hangfire-job-id",
   "ingestionRunId": "uuid",
-  "statusUrl": "/api/operations/{operationId}"
+  "statusUrl": "/api/admin/operations/{operationId}"
 }
 ```
 
@@ -85,7 +85,7 @@ Pagination conventions:
     {
       "operationId": "uuid",
       "operationType": "reprocess_embeddings",
-      "statusUrl": "/api/operations/{operationId}"
+      "statusUrl": "/api/admin/operations/{operationId}"
     }
   ]
 }
@@ -126,7 +126,7 @@ Batch response:
       "error": null
     }
   ],
-  "statusUrl": "/api/operations/{operationId}"
+  "statusUrl": "/api/admin/operations/{operationId}"
 }
 ```
 
@@ -436,194 +436,79 @@ Behavior:
 - If `deleteRelatedData=false`, stop future ingestion/remove channel config according to implementation policy.
 - If `true`, delete related videos/data/screenshots where safe.
 
-## 7. Operations and ingestion endpoints
+## 7. Admin operations and ingestion endpoints
 
-### GET `/api/operations`
+### GET `/api/admin/operations/{operationId}`
 
-Query params:
-
-- `status`
-- `operationType`
-- `from`
-- `to`
-- `page`
-- `pageSize`
-
-### GET `/api/operations/{operationId}`
-
-Returns application-owned operation status.
+Returns application-owned operation status. The current admin operation surface exposes run, retry, reprocess, backup, and maintenance actions through this admin prefix.
 
 ```json
 {
-  "id": "uuid",
-  "operationType": "ingestion_run",
-  "status": "running",
-  "riskLevel": null,
-  "relatedEntityType": "ingestion_run",
-  "relatedEntityId": "uuid",
-  "hangfireJobId": "123",
-  "startedAt": "2026-07-17T10:00:00Z",
-  "completedAt": null,
-  "summary": {},
-  "errorSummary": null
+  "operationId": "uuid",
+  "operationType": "retry.video",
+  "status": "accepted",
+  "message": "Retry queued for video 'uuid'.",
+  "target": "uuid",
+  "jobId": "hangfire-job-id",
+  "healthStatus": null
 }
 ```
 
-### POST `/api/ingestion/run`
+### POST `/api/admin/operations/ingestion/run`
 
 Start manual ingestion for all active channels.
 
-Request:
+### POST `/api/admin/operations/ingestion/channel-backfill`
 
-```json
-{
-  "maxAgeDays": 30,
-  "notifyOnCompletion": true
-}
-```
+Start channel backfill for the configured scope.
 
-Response: accepted operation.
+### POST `/api/admin/operations/ingestion/runs/{runId}/retry`
 
-### POST `/api/channels/{channelId}/ingestion/run`
+Retry a failed ingestion run.
 
-Start manual ingestion for one channel.
-
-Request:
-
-```json
-{
-  "maxAgeDays": 30,
-  "notifyOnCompletion": true
-}
-```
-
-### POST `/api/channels/{channelId}/ingestion/backfill`
-
-Request:
-
-```json
-{
-  "backfillDays": 365,
-  "maxVideos": 500,
-  "notifyOnCompletion": true
-}
-```
-
-Backfill uses its own days/max-count parameters and can exceed the default max-age lookback.
-
-### GET `/api/ingestion/runs`
-
-Query params:
-
-- `status`
-- `runType`
-- `from`
-- `to`
-- `page`
-- `pageSize`
-
-### GET `/api/ingestion/runs/{runId}`
-
-Response includes summary counts, item status, stage summary, warnings, deferments, and operational links.
-
-```json
-{
-  "id": "uuid",
-  "operationId": "uuid",
-  "runType": "scheduled",
-  "status": "processed_with_warnings",
-  "startedAt": "2026-07-17T10:00:00Z",
-  "completedAt": "2026-07-17T10:15:00Z",
-  "summary": {
-    "channelsChecked": 1,
-    "newVideosFound": 5,
-    "videosIngested": 4,
-    "videosFailed": 1,
-    "repositoriesFound": 2
-  },
-  "liveRollup": {
-    "pendingRetryCount": 0,
-    "deferredCount": 1,
-    "failedCount": 0,
-    "processedCount": 5
-  },
-  "stageSummary": [
-    {
-      "stage": "transcript",
-      "status": "completed",
-      "count": 4
-    },
-    {
-      "stage": "website_scrape",
-      "status": "deferred",
-      "count": 3
-    }
-  ],
-  "warnings": [],
-  "deferments": [],
-  "links": {
-    "hangfire": "/admin/jobs",
-    "trace": "..."
-  }
-}
-```
-
-Runs are immutable once `completedAt` is set (ADR-0005): `status` and `summary` are the frozen historical record, while `liveRollup` is derived from the current state of the run's items — the two can legitimately differ after successful retries. UI copy should distinguish "run outcome" from "current state."
-
-### GET `/api/ingestion/runs/{runId}/items`
-
-Query params:
-
-- `status`
-- `stage`
-- `itemType`
-
-### POST `/api/ingestion/items/{itemId}/retry`
-
-Retries failed/deferred item stage. Response: accepted operation.
-
-### POST `/api/videos/{videoId}/retry`
+### POST `/api/admin/operations/videos/{videoId}/retry`
 
 Retries failed/deferred stages of a video. Applies only to stages in a failed or deferred state (ADR-0002); requests naming succeeded stages are rejected per-stage with a validation error.
 
-Request:
+### POST `/api/admin/operations/links/{linkId}/retry`
 
-```json
-{
-  "stages": ["transcript", "screenshots", "embeddings"],
-  "retryFailedOnly": true
-}
-```
+Retries a failed link-related operation.
 
-### POST `/api/videos/{videoId}/reprocess`
+### POST `/api/admin/operations/repositories/{repositoryId}/retry`
 
-Re-runs the full ingestion pipeline for an already-succeeded video, bypassing the idempotency/skip guard (ADR-0002). A Reprocess discovers fresh platform state (including a higher-preference transcript, which activates via transcript cutover, ADR-0010), resets Retry Budgets, and marks affected search documents stale by derivation.
+Retries failed repository processing.
 
-Request:
+### POST `/api/admin/operations/videos/{videoId}/reprocess`
 
-```json
-{
-  "notifyOnCompletion": false
-}
-```
+Re-runs the full ingestion pipeline for an already-succeeded video, bypassing the idempotency/skip guard (ADR-0002). A reprocess discovers fresh platform state, resets retry budgets, and marks affected search documents stale by derivation.
 
-Response: accepted operation.
+### POST `/api/admin/operations/repositories/{repositoryId}/reprocess`
 
-### POST `/api/external-link-occurrences/{occurrenceId}/retry`
+Re-runs the full repository pipeline for a succeeded repository (ADR-0002). Refreshes metadata, README, LICENSE, and re-runs the DeepWiki check when appropriate.
 
-Retries link occurrence processing when occurrence-specific processing failed.
+### POST `/api/admin/operations/resources/{resourceId}/reprocess`
 
-### POST `/api/external-resources/{resourceId}/retry`
+Re-runs the pipeline for a canonical resource.
 
-Retries canonical resource classification/scraping/repository association processing.
+### POST `/api/admin/operations/embeddings/reprocess`
 
-### POST `/api/repositories/{repositoryId}/retry`
+Queues bulk reprocessing of embeddings for the requested scope.
 
-Retries failed repository metadata/README/LICENSE/DeepWiki processing for GitHub repositories in MVP. GitLab and Bitbucket are MVP+.
+### POST `/api/admin/operations/notifications/matrix/test`
 
-### POST `/api/repositories/{repositoryId}/reprocess`
+Queues a Matrix notification test operation.
 
-Re-runs the full repository pipeline for a succeeded repository (ADR-0002). Refreshes metadata, README, and LICENSE, and re-runs the DeepWiki check when its stored outcome was negative (no page or placeholder — the repo may have been indexed since). A stored reachable DeepWiki URL is not re-verified.
+### POST `/api/admin/operations/backup`
+
+Creates a backup archive and returns the resulting operation record.
+
+### POST `/api/admin/operations/restore`
+
+Restores the latest backup archive.
+
+### GET `/api/admin/operations/backups/{archiveName}`
+
+Downloads a backup archive.
 
 ### GET `/api/rate-limit-deferments`
 
