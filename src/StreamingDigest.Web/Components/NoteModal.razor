@@ -1,0 +1,270 @@
+@using System.Net.Http.Json
+
+@inject HttpClient Http
+
+@if (IsVisible)
+{
+    <div class="modal-backdrop" @onclick="CloseIfBackdrop">
+        <div class="modal-panel modal-panel--narrow" @onclick:stopPropagation="true" role="dialog" aria-modal="true" aria-labelledby="note-modal-title">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">Note</p>
+                    <h2 id="note-modal-title">@(TargetTitle ?? "Untitled")</h2>
+                </div>
+                <button class="modal-close" type="button" @onclick="Close" aria-label="Close">✕</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_statusMessage))
+            {
+                <p class="action-feedback @_statusTone">@_statusMessage</p>
+            }
+
+            @if (_isLoading)
+            {
+                <p class="helper-text">Loading note…</p>
+            }
+            else
+            {
+                <div class="form-stack">
+                    <label class="field-label" for="quick-note-title">Title</label>
+                    <input id="quick-note-title" class="text-input" placeholder="Optional title" @bind="_noteTitle" />
+
+                    <label class="field-label" for="quick-note-markdown">Note (Markdown)</label>
+                    <textarea id="quick-note-markdown" class="text-input textarea-field" rows="7"
+                              placeholder="Write a note in Markdown… **bold**, _italic_, links, or tags."
+                              @bind="_noteMarkdown"></textarea>
+
+                    <p class="helper-text">
+                        Notes are embedded and boost this item's ranking after the next embedding run.
+                    </p>
+
+                    <div class="action-buttons">
+                        <button class="action-button" type="button"
+                                disabled="@(_isSaving || string.IsNullOrWhiteSpace(_noteMarkdown))"
+                                @onclick="SaveAsync">
+                            @(_existingNoteId.HasValue ? "Update note" : "Add note")
+                        </button>
+                        @if (_existingNoteId.HasValue)
+                        {
+                            <button class="secondary-button danger" type="button" disabled="@_isSaving" @onclick="DeleteAsync">Delete</button>
+                        }
+                        <button class="secondary-button" type="button" @onclick="Close">Close</button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public Guid TargetId { get; set; }
+    [Parameter] public string TargetType { get; set; } = "video";
+    [Parameter] public string? TargetTitle { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private bool _isLoading;
+    private bool _isSaving;
+    private string? _statusMessage;
+    private string? _statusTone;
+
+    private Guid? _existingNoteId;
+    private string? _noteTitle;
+    private string? _noteMarkdown;
+    private string? _csrfToken;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsVisible && TargetId != Guid.Empty)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _statusMessage = null;
+
+        // Reset note state before fetch so a failed load never leaves stale data
+        _existingNoteId = null;
+        _noteTitle = null;
+        _noteMarkdown = null;
+
+        try
+        {
+            var response = await Http.GetFromJsonAsync<NoteListResponse>($"/api/notes?targetType={TargetType}&targetId={TargetId}");
+            var note = response?.Items?.FirstOrDefault();
+            if (note is not null)
+            {
+                _existingNoteId = note.Id;
+                _noteTitle = note.Title ?? string.Empty;
+                _noteMarkdown = note.Markdown;
+            }
+            else
+            {
+                _existingNoteId = null;
+                _noteTitle = string.Empty;
+                _noteMarkdown = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Could not load note: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _isSaving = true;
+        _statusMessage = null;
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            HttpResponseMessage response;
+            if (_existingNoteId.HasValue)
+            {
+                var request = new HttpRequestMessage(HttpMethod.Put, $"/api/notes/{_existingNoteId}");
+                request.Content = JsonContent.Create(new
+                {
+                    title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
+                    markdown = _noteMarkdown
+                });
+                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+                response = await Http.SendAsync(request);
+            }
+            else
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, "/api/notes");
+                request.Content = JsonContent.Create(new
+                {
+                    targetType = TargetType,
+                    targetId = TargetId,
+                    title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
+                    markdown = _noteMarkdown
+                });
+                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+                response = await Http.SendAsync(request);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+            }
+
+            await LoadAsync();
+            _statusMessage = "Note saved.";
+            _statusTone = "success";
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Save failed: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (!_existingNoteId.HasValue)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        _statusMessage = null;
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/notes/{_existingNoteId}");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+            }
+
+            _existingNoteId = null;
+            _noteTitle = string.Empty;
+            _noteMarkdown = string.Empty;
+            _statusMessage = "Note deleted.";
+            _statusTone = "success";
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Delete failed: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task Close()
+    {
+        _statusMessage = null;
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task CloseIfBackdrop()
+    {
+        await Close();
+    }
+
+    private async Task EnsureApiSessionAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_csrfToken))
+        {
+            return;
+        }
+
+        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        if (!loginResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("Could not authenticate the API session.");
+        }
+
+        using var csrfResponse = await Http.GetAsync("/api/auth/csrf");
+        if (!csrfResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("Could not obtain a CSRF token.");
+        }
+
+        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>();
+        _csrfToken = csrf?.Token;
+    }
+
+    private sealed class NoteListResponse
+    {
+        public IReadOnlyList<NoteResponse>? Items { get; set; }
+    }
+
+    private sealed class NoteResponse
+    {
+        public Guid Id { get; set; }
+        public string? Title { get; set; }
+        public string Markdown { get; set; } = string.Empty;
+    }
+
+    private sealed class CsrfResponse
+    {
+        public string? Token { get; set; }
+    }
+}

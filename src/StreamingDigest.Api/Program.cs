@@ -864,6 +864,50 @@ app.MapGet("/api/videos/{videoId:guid}/transcript", async (Guid videoId, Streami
 
     return Results.Ok(response);
 });
+app.MapGet("/api/videos/{videoId:guid}/overrides", async (Guid videoId, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var video = await context.Videos
+        .AsNoTracking()
+        .SingleOrDefaultAsync(v => v.Id == videoId, cancellationToken);
+
+    if (video is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new
+    {
+        titleOriginal = video.Title,
+        titleOverride = video.TitleOverride,
+        authorOriginal = video.AuthorOriginal,
+        authorOverride = video.AuthorOverride,
+        descriptionOriginal = video.DescriptionOriginal,
+        descriptionOverride = video.DescriptionOverride
+    });
+});
+
+app.MapGet("/api/external-resources/{resourceId:guid}/overrides", async (Guid resourceId, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var resource = await context.ExternalResources
+        .AsNoTracking()
+        .SingleOrDefaultAsync(r => r.Id == resourceId, cancellationToken);
+
+    if (resource is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new
+    {
+        titleOriginal = resource.TitleOriginal,
+        titleOverride = resource.TitleOverride,
+        descriptionOriginal = resource.DescriptionOriginal,
+        descriptionOverride = resource.DescriptionOverride,
+        classificationOriginal = resource.ClassificationOriginal,
+        classificationOverride = resource.ClassificationOverride
+    });
+});
+
 app.MapPut("/api/videos/{videoId:guid}/overrides", async (Guid videoId, UpdateVideoOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
 {
     var video = await context.Videos.SingleOrDefaultAsync(v => v.Id == videoId, cancellationToken);
