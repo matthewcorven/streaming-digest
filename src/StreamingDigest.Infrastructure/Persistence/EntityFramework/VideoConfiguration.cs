@@ -18,6 +18,7 @@ internal sealed class VideoConfiguration : IEntityTypeConfiguration<Video>
         builder.Property(video => video.PlatformVideoId).HasColumnName("platform_video_id").IsRequired().HasMaxLength(255);
         builder.Property(video => video.YoutubeVideoId).HasColumnName("youtube_video_id").IsRequired().HasMaxLength(255);
         builder.Property(video => video.ChannelId).HasColumnName("channel_id");
+        builder.Property(video => video.TitleOverride).HasColumnName("title_override").HasMaxLength(1024);
         builder.Property(video => video.AuthorOriginal).HasColumnName("author_original").IsRequired().HasMaxLength(1024);
         builder.Property(video => video.AuthorOverride).HasColumnName("author_override").HasMaxLength(1024);
         builder.Property(video => video.DescriptionOriginal).HasColumnName("description_original").HasMaxLength(4000);
