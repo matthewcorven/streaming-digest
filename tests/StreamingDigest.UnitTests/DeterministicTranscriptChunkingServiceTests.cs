@@ -1,3 +1,4 @@
+using System.Net;
 using StreamingDigest.Application;
 using StreamingDigest.Domain;
 
@@ -278,6 +279,54 @@ public sealed class DeterministicTranscriptChunkingServiceTests
         Assert.Equal(fixedNow, result.ActivatedAt);
     }
 
+    [Fact]
+    public void CreateFromTranscriptCues_AppliesLlmRefinement_WhenPayloadIsValid()
+    {
+        var video = VideoWith(durationSeconds: 180);
+        var cues = new[] { Cue(1, 0, 60), Cue(2, 60, 120), Cue(3, 120, 180) };
+        var handler = new StubHttpMessageHandler("""
+        {
+          "segments": [
+            { "title": "Opening", "startSeconds": 0, "endSeconds": 90 },
+            { "title": "Wrap-up", "startSeconds": 90, "endSeconds": 180 }
+          ]
+        }
+        """);
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var refinementService = new DeterministicTranscriptChunkingService(httpClient);
+
+        var result = refinementService.CreateFromTranscriptCues(video, cues, windowSeconds: 120)!;
+
+        Assert.Equal("Opening", result.Segments[0].TitleOriginal);
+        Assert.Equal(0m, result.Segments[0].StartSeconds);
+        Assert.Equal(90m, result.Segments[0].EndSeconds);
+        Assert.Equal("Wrap-up", result.Segments[1].TitleOriginal);
+        Assert.Equal(90m, result.Segments[1].StartSeconds);
+        Assert.Equal(180m, result.Segments[1].EndSeconds);
+        Assert.Equal("local-llm", result.LlmModel);
+        Assert.Equal("segment-refinement-v1", result.LlmPromptVersion);
+    }
+
+    [Fact]
+    public void CreateFromTranscriptCues_PreservesDeterministicSegments_WhenLlmPayloadIsInvalid()
+    {
+        var video = VideoWith(durationSeconds: 180);
+        var cues = new[] { Cue(1, 0, 60), Cue(2, 60, 120), Cue(3, 120, 180) };
+        var handler = new StubHttpMessageHandler("not-json");
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var refinementService = new DeterministicTranscriptChunkingService(httpClient);
+
+        var result = refinementService.CreateFromTranscriptCues(video, cues, windowSeconds: 120)!;
+
+        Assert.Equal("Part 1", result.Segments[0].TitleOriginal);
+        Assert.Equal(0m, result.Segments[0].StartSeconds);
+        Assert.Equal(120m, result.Segments[0].EndSeconds);
+        Assert.Equal("Part 2", result.Segments[1].TitleOriginal);
+        Assert.Equal(120m, result.Segments[1].StartSeconds);
+        Assert.Equal(180m, result.Segments[1].EndSeconds);
+        Assert.Null(result.LlmModel);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -317,5 +366,16 @@ public sealed class DeterministicTranscriptChunkingServiceTests
 
         Assert.Single(result.Segments);
         Assert.Single(result.Segments[0].TranscriptRanges);
+    }
+
+    private sealed class StubHttpMessageHandler(string responseBody) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseBody)
+            });
+        }
     }
 }
