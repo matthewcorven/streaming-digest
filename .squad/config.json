@@ -1,13 +1,14 @@
 {
   "version": 1,
-  "defaultModel": "claude-sonnet-4.6",
+  "defaultModel": "mai-code-1-flash-picker",
   "agentModelOverrides": {
-    "morpheus": "claude-opus-4.8",
-    "switch": "mai-code-1-flash-picker",
-    "ralph": "mai-code-1-flash-picker",
-    "scribe": "mai-code-1-flash-picker"
-  },
-  "taskModelOverrides": {
-    "prototype": "claude-opus-4.8"
+    "morpheus": "gpt-5.4",
+    "trinity": "claude-sonnet-4.6",
+    "tank": "mai-code-1-flash-picker",
+    "dozer": "mai-code-1-flash-picker",
+    "neo": "mai-code-1-flash-picker",
+    "switch": "claude-haiku-4.5",
+    "scribe": "claude-haiku-4.5",
+    "ralph": "claude-sonnet-4.6"
   }
 }

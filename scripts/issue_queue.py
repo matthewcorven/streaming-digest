@@ -110,6 +110,13 @@ def has_member_label(issue: Dict[str, object]) -> bool:
     return any((label.get("name") or "").lower().startswith("squad:") for label in labels)
 
 
+def matches_label_filter(issue: Dict[str, object], label_name: str) -> bool:
+    normalized_label = (label_name or "").lower()
+    if normalized_label == "squad":
+        return has_label(issue, "squad") or has_member_label(issue)
+    return has_label(issue, label_name)
+
+
 def fetch_issues(repo: str, state: str, limit: int) -> List[Dict[str, object]]:
     command_args = [
         "issue",
@@ -232,6 +239,23 @@ def build_issue_summaries(issues: List[Dict[str, object]], issue_index: Dict[str
     return summaries
 
 
+def filter_summaries_by_label(
+    summaries: List[Dict[str, object]],
+    issues: List[Dict[str, object]],
+    labels: List[str],
+) -> List[Dict[str, object]]:
+    if not labels:
+        return list(summaries)
+
+    issues_by_number = {int(issue["number"]): issue for issue in issues}
+    visible_summaries = []
+    for summary in summaries:
+        issue = issues_by_number.get(int(summary["number"]))
+        if issue and all(matches_label_filter(issue, label) for label in labels):
+            visible_summaries.append(summary)
+    return visible_summaries
+
+
 def _format_reference(entry: Dict[str, object]) -> str:
     if entry.get("resolved"):
         return f"#{entry['resolved']['number']}"
@@ -350,16 +374,14 @@ def main() -> int:
 
     issues = fetch_issues(repo, args.state, args.limit)
 
-    filtered_issues = [issue for issue in issues if not issue.get("pull_request")]
-    if labels:
-        filtered_issues = [issue for issue in filtered_issues if all(has_label(issue, label) for label in labels)]
-
-    issue_index = build_issue_index(filtered_issues)
-    summaries = build_issue_summaries(filtered_issues, issue_index)
+    issue_graph = [issue for issue in issues if not issue.get("pull_request")]
+    issue_index = build_issue_index(issue_graph)
+    summaries = build_issue_summaries(issue_graph, issue_index)
+    visible_summaries = filter_summaries_by_label(summaries, issue_graph, labels)
     pull_requests = fetch_pull_requests(repo, "all", args.limit)
     linked_issue_numbers = collect_linked_issue_numbers(pull_requests)
-    available = [issue for issue in summaries if is_issue_available(issue, linked_issue_numbers)]
-    blocked = [issue for issue in summaries if issue["state"] == "OPEN" and issue["is_blocked"]]
+    available = [issue for issue in visible_summaries if is_issue_available(issue, linked_issue_numbers)]
+    blocked = [issue for issue in visible_summaries if issue["state"] == "OPEN" and issue["is_blocked"]]
 
     queue_result = {
         "repo": repo,
@@ -375,7 +397,7 @@ def main() -> int:
         # already "open" reuse it; otherwise make the one extra fetch. With the default
         # "all" this costs a single additional gh call and keeps board semantics unchanged.
         open_issues = issues if args.state == "open" else fetch_issues(repo, "open", args.limit)
-        open_squad_issues = [issue for issue in open_issues if has_label(issue, "squad")]
+        open_squad_issues = [issue for issue in open_issues if matches_label_filter(issue, "squad")]
         untriaged = [issue for issue in open_squad_issues if not has_member_label(issue)]
         assigned = [issue for issue in open_squad_issues if has_member_label(issue)]
         pull_requests = fetch_pull_requests(repo, "all", args.limit)
