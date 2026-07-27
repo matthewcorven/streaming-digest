@@ -124,6 +124,8 @@ builder.Services.AddSingleton(compatibilityEvaluation);
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
+builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
 builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>(); // TODO: replace with the real caption provider when YouTube caption fetching is wired up.
