@@ -80,6 +80,22 @@ public sealed class TranscriptIngestionService(
                 .CountAsync(ct);
         }
 
+        // Guard: do not downgrade to a lower-preference source.
+        var isDowngrade = activeTranscripts.Any(prior =>
+            GetSourceTypePreference(prior.SourceType) > GetSourceTypePreference(sourceType));
+        if (isDowngrade)
+        {
+            await transaction.RollbackAsync(ct);
+            return new TranscriptIngestionResult(
+                Succeeded: false,
+                TranscriptId: null,
+                SourceType: sourceType,
+                LanguageCode: fetchedTrack.LanguageCode,
+                CueCount: 0,
+                ErrorMessage: "source_preference_downgrade",
+                Skipped: true);
+        }
+
         foreach (var activeTranscript in activeTranscripts)
         {
             activeTranscript.IsActive = false;

@@ -153,6 +153,35 @@ public sealed class AudioToTextProviderTests : IDisposable
         Assert.DoesNotContain(events, e => e.EventType == DomainEventTypeCatalog.TranscriptCutoverCompleted);
     }
 
+    [Fact]
+    public async Task IngestAsync_skips_and_preserves_active_transcript_when_incoming_source_is_lower_preference()
+    {
+        var video = await SeedVideoAsync("video-downgrade-guard");
+        await SeedActiveTranscriptAsync(video.Id, VideoTranscriptSourceTypes.YouTubeCaption);
+
+        var client = new StubCaptionClient(
+            [new CaptionTrackInfo("en", true, "en-auto")],
+            new Dictionary<string, CaptionFetchResult>
+            {
+                ["en-auto"] = new CaptionFetchResult("en", true, "Auto transcript",
+                    [new CaptionCueDto(1, 0m, 2m, "Hello")])
+            });
+        var service = new TranscriptIngestionService(_context, client);
+
+        var result = await service.IngestAsync(video.Id, CancellationToken.None);
+
+        Assert.True(result.Skipped);
+        Assert.Equal("source_preference_downgrade", result.ErrorMessage);
+
+        var activeTranscripts = _context.VideoTranscripts
+            .Where(t => t.VideoId == video.Id && t.IsActive)
+            .ToList();
+        Assert.Single(activeTranscripts);
+        Assert.Equal(VideoTranscriptSourceTypes.YouTubeCaption, activeTranscripts[0].SourceType);
+
+        Assert.Empty(_context.DomainEvents.ToList());
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     public void Dispose()
