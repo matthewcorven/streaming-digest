@@ -47,3 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_segments_video_start_seconds
 
 CREATE INDEX IF NOT EXISTS idx_segments_video_is_active
     ON public.segments (video_id, is_active);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_segment_generations_video_is_active
+    ON public.segment_generations (video_id)
+    WHERE is_active = true;

@@ -21,10 +21,9 @@ internal sealed class SegmentGenerationConfiguration : IEntityTypeConfiguration<
         builder.Property(gen => gen.LlmModel).HasColumnName("llm_model").HasMaxLength(255);
         builder.Property(gen => gen.LlmPromptVersion).HasColumnName("llm_prompt_version").HasMaxLength(128);
         builder.Property(gen => gen.CreatedByOperationId).HasColumnName("created_by_operation_id");
-        builder.Property(gen => gen.ActivatedAt).HasColumnName("activated_at");
+        builder.Property(gen => gen.ActivatedAt).HasColumnName("activated_at").HasColumnType("timestamptz");
         builder.Property(gen => gen.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-        builder.Ignore(gen => gen.Segments);
         builder.Ignore(gen => gen.Screenshots);
         builder.Ignore(gen => gen.Notes);
         builder.Ignore(gen => gen.PendingInboxItems);
@@ -35,5 +34,15 @@ internal sealed class SegmentGenerationConfiguration : IEntityTypeConfiguration<
 
         builder.HasIndex(gen => gen.VideoId)
             .HasDatabaseName("idx_segment_generations_video_id");
+
+        builder.HasIndex(gen => gen.VideoId)
+            .HasFilter("is_active = true")
+            .HasDatabaseName("idx_segment_generations_video_is_active")
+            .IsUnique();
+
+        builder.HasMany(gen => gen.Segments)
+            .WithOne()
+            .HasForeignKey(seg => seg.SegmentGenerationId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
