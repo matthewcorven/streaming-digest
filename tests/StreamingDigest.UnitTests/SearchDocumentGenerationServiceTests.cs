@@ -32,6 +32,30 @@ public sealed class SearchDocumentGenerationServiceTests
     }
 
     [Fact]
+    public void CreateDocument_ContentHash_does_not_collide_across_title_body_boundary()
+    {
+        var sourceId = Guid.NewGuid();
+
+        // "foo\n" + "bar" and "foo" + "\nbar" join to the same string with newline
+        // concatenation — the length-delimited encoding must keep them distinct.
+        var doc1 = _service.CreateDocument(new SearchDocumentCandidate(
+            DocumentType: "video_metadata",
+            SourceEntityType: "videos",
+            SourceEntityId: sourceId,
+            TitleOriginal: "foo\n",
+            BodyOriginal: "bar"));
+
+        var doc2 = _service.CreateDocument(new SearchDocumentCandidate(
+            DocumentType: "video_metadata",
+            SourceEntityType: "videos",
+            SourceEntityId: sourceId,
+            TitleOriginal: "foo",
+            BodyOriginal: "\nbar"));
+
+        Assert.NotEqual(doc1.ContentHash, doc2.ContentHash);
+    }
+
+    [Fact]
     public void Generate_populates_all_documents_with_expected_metadata()
     {
         var parentVideoId = Guid.NewGuid();

@@ -77,9 +77,20 @@ public sealed class SearchDocumentGenerationService : ISearchDocumentGenerationS
 
     private static string ComputeContentHash(string? title, string? body)
     {
-        var normalized = string.Join("\n", new[] { title ?? string.Empty, body ?? string.Empty });
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return Convert.ToHexString(bytes);
+        var titleBytes = Encoding.UTF8.GetBytes(title ?? string.Empty);
+        var bodyBytes = Encoding.UTF8.GetBytes(body ?? string.Empty);
+
+        // Length-delimited encoding: [4-byte length][content][4-byte length][content]
+        // Prevents cross-boundary collisions where title="foo\n" + body="bar"
+        // would otherwise hash identically to title="foo" + body="\nbar".
+        var buffer = new byte[4 + titleBytes.Length + 4 + bodyBytes.Length];
+        var span = buffer.AsSpan();
+        BitConverter.TryWriteBytes(span[..4], titleBytes.Length);
+        titleBytes.CopyTo(span[4..]);
+        BitConverter.TryWriteBytes(span[(4 + titleBytes.Length)..(8 + titleBytes.Length)], bodyBytes.Length);
+        bodyBytes.CopyTo(span[(8 + titleBytes.Length)..]);
+
+        return Convert.ToHexString(SHA256.HashData(buffer));
     }
 }
 
