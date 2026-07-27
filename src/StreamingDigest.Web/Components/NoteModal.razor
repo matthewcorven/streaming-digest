@@ -87,6 +87,11 @@
         _isLoading = true;
         _statusMessage = null;
 
+        // Reset note state before fetch so a failed load never leaves stale data
+        _existingNoteId = null;
+        _noteTitle = null;
+        _noteMarkdown = null;
+
         try
         {
             var response = await Http.GetFromJsonAsync<NoteListResponse>($"/api/notes?targetType={TargetType}&targetId={TargetId}");

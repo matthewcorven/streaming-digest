@@ -952,3 +952,41 @@ body {
 .secondary-button.danger:hover {
     background: #fee2e2;
 }
+
+/* ── Shared form primitives (used by modal components) ────────────── */
+
+.form-stack {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.field-label {
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.action-feedback {
+    border-radius: 0.9rem;
+    padding: 0.85rem 1rem;
+    font-weight: 600;
+}
+
+.action-feedback.success {
+    background: rgba(34, 197, 94, 0.14);
+    color: #166534;
+}
+
+.action-feedback.warning {
+    background: rgba(249, 115, 22, 0.14);
+    color: #9a2c00;
+}
+
+.action-feedback.error {
+    background: rgba(248, 113, 113, 0.14);
+    color: #991b1b;
+}
+
+.action-feedback.neutral {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+}

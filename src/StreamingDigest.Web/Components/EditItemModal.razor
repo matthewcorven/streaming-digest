@@ -181,6 +181,12 @@
         _classificationSaved = false;
         ActiveTab = "metadata";
 
+        // Reset all form state before fetch so a failed load never leaves stale data
+        _originalTitle = _editTitle = _editAuthor = _editDescription = null;
+        _originalClassification = _editClassification = null;
+        _existingNoteId = null;
+        _noteTitle = _noteMarkdown = null;
+
         try
         {
             await EnsureApiSessionAsync();
