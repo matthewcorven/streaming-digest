@@ -24,7 +24,7 @@ public sealed class ModelDiscoveryService
     {
         var model = ResolveModel(modelKind, modelId);
         var operationId = Guid.NewGuid();
-        var statusUrl = $"/api/operations/{operationId}";
+        var statusUrl = $"/api/admin/operations/{operationId}";
 
         await RecordReadinessVerificationAsync(connectionString, model, cancellationToken, "queued");
 
