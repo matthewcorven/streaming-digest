@@ -167,6 +167,64 @@ public sealed class YouTubeApiMetadataAdapterTests
         Assert.Contains("fixture-yt-api-video-id", result.Video.VideoUrl);
     }
 
+    // ── FetchVideoAsync — IsLongForm classification ───────────────────────────
+
+    [Fact]
+    public async Task FetchVideoAsync_sets_IsLongForm_true_when_no_minDuration_provided()
+    {
+        var body = _fixtures.ReadText("youtube-api/video-response.json");
+        var handler = new StubHttpMessageHandler((_, _) =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            });
+
+        var adapter = new YouTubeApiMetadataAdapter(new HttpClient(handler), "fixture-api-key");
+
+        // No minDurationSeconds → defaults to true
+        var result = await adapter.FetchVideoAsync("fixture-yt-api-video-id", minDurationSeconds: null);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Video!.IsLongForm);
+    }
+
+    [Fact]
+    public async Task FetchVideoAsync_sets_IsLongForm_true_when_duration_meets_threshold()
+    {
+        var body = _fixtures.ReadText("youtube-api/video-response.json"); // fixture: 630s
+        var handler = new StubHttpMessageHandler((_, _) =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            });
+
+        var adapter = new YouTubeApiMetadataAdapter(new HttpClient(handler), "fixture-api-key");
+
+        var result = await adapter.FetchVideoAsync("fixture-yt-api-video-id", minDurationSeconds: 61);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Video!.IsLongForm); // 630s >= 61s
+    }
+
+    [Fact]
+    public async Task FetchVideoAsync_sets_IsLongForm_false_when_duration_is_below_threshold()
+    {
+        var body = _fixtures.ReadText("youtube-api/video-response.json"); // fixture: 630s
+        var handler = new StubHttpMessageHandler((_, _) =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            });
+
+        var adapter = new YouTubeApiMetadataAdapter(new HttpClient(handler), "fixture-api-key");
+
+        // Set threshold above the fixture duration of 630s
+        var result = await adapter.FetchVideoAsync("fixture-yt-api-video-id", minDurationSeconds: 3601);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Video!.IsLongForm); // 630s < 3601s
+    }
+
     // ── FetchVideoAsync — missing video ───────────────────────────────────────
 
     [Fact]
