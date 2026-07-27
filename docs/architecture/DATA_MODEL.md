@@ -866,6 +866,7 @@ Canonical `event_type` values (the code-level catalog lives in `src/StreamingDig
 - `channel_degraded_entered`
 - `channel_probe_succeeded`
 - `channel_probe_failed`
+- `video_unavailable_entered`
 - `orphaned_note_surfaced`
 - `temp_media_orphan_cleanup`
 - `embedding_reprocess_queued`

@@ -18,6 +18,7 @@ public sealed record YouTubeApiVideoResult(
     bool IsSuccess,
     bool IsApiKeyMissing,
     bool IsRateLimited,
+    bool IsUnavailable,
     int? StatusCode,
     string? ErrorMessage);
 
@@ -103,12 +104,12 @@ public sealed class YouTubeApiMetadataAdapter
     {
         if (!IsConfigured)
         {
-            return new YouTubeApiVideoResult(null, false, true, false, null, "YouTube API key is not configured.");
+            return new YouTubeApiVideoResult(null, false, true, false, false, null, "YouTube API key is not configured.");
         }
 
         if (string.IsNullOrWhiteSpace(videoId))
         {
-            return new YouTubeApiVideoResult(null, false, false, false, null, "Video ID is required.");
+            return new YouTubeApiVideoResult(null, false, false, false, false, null, "Video ID is required.");
         }
 
         var url = $"{BaseUrl}/videos?part=snippet,contentDetails&id={Uri.EscapeDataString(videoId)}&key={Uri.EscapeDataString(_apiKey!)}";
@@ -120,12 +121,12 @@ public sealed class YouTubeApiMetadataAdapter
 
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
-                return new YouTubeApiVideoResult(null, false, false, true, (int)response.StatusCode, "YouTube API rate limit exceeded.");
+                return new YouTubeApiVideoResult(null, false, false, true, false, (int)response.StatusCode, "YouTube API rate limit exceeded.");
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return new YouTubeApiVideoResult(null, false, false, false, (int)response.StatusCode, $"YouTube API returned {(int)response.StatusCode}.");
+                return new YouTubeApiVideoResult(null, false, false, false, false, (int)response.StatusCode, $"YouTube API returned {(int)response.StatusCode}.");
             }
 
             var parsed = JsonSerializer.Deserialize<YouTubeApiVideoListResponse>(body, JsonOptions);
@@ -133,19 +134,19 @@ public sealed class YouTubeApiMetadataAdapter
 
             if (item is null)
             {
-                return new YouTubeApiVideoResult(null, false, false, false, (int)response.StatusCode, $"Video '{videoId}' not found in YouTube API response.");
+                return new YouTubeApiVideoResult(null, false, false, false, true, (int)response.StatusCode, $"Video '{videoId}' not found in YouTube API response (deleted or private).");
             }
 
             var video = AdaptVideo(item, channelId, minDurationSeconds);
-            return new YouTubeApiVideoResult(video, true, false, false, (int)response.StatusCode, null);
+            return new YouTubeApiVideoResult(video, true, false, false, false, (int)response.StatusCode, null);
         }
         catch (HttpRequestException ex)
         {
-            return new YouTubeApiVideoResult(null, false, false, false, null, ex.Message);
+            return new YouTubeApiVideoResult(null, false, false, false, false, null, ex.Message);
         }
         catch (JsonException ex)
         {
-            return new YouTubeApiVideoResult(null, false, false, false, null, $"Failed to parse YouTube API video response: {ex.Message}");
+            return new YouTubeApiVideoResult(null, false, false, false, false, null, $"Failed to parse YouTube API video response: {ex.Message}");
         }
     }
 
