@@ -37,6 +37,13 @@ public sealed class Segment : AuditedEntity
     public string? LlmPromptVersion { get; init; }
     public bool IsActive { get; set; } = true;
     public bool RequiresEmbeddingApproval { get; set; }
+    public List<SegmentTranscriptRange> TranscriptRanges { get; } = [];
+}
+
+public sealed class SegmentTranscriptRange
+{
+    public Guid SegmentId { get; init; }
+    public Guid TranscriptCueId { get; init; }
 }
 
 public sealed class SegmentScreenshot
