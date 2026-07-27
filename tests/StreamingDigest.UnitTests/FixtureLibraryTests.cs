@@ -31,7 +31,10 @@ public class FixtureLibraryTests
             "rate-limit/deepwiki-429.json",
             "rate-limit/website-429.json",
             "url-normalization/corpus.json",
-            "recall/vague-query-corpus.json"
+            "recall/vague-query-corpus.json",
+            "youtube-api/channel-response.json",
+            "youtube-api/video-response.json",
+            "youtube-api/search-response.json"
         };
 
         foreach (var fixturePath in fixturePaths)
