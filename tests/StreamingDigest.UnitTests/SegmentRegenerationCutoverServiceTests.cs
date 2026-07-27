@@ -15,7 +15,7 @@ public sealed class SegmentRegenerationCutoverServiceTests
             videoId,
             "semantic_llm",
             2,
-            [new Segment { Sequence = 1, Title = "Intro" }]);
+            [new Segment { VideoId = videoId, SourceType = "semantic_llm", Sequence = 1, TitleOriginal = "Intro" }]);
 
         Assert.True(generation.RequiresUserApproval);
         Assert.Equal("pending_approval", generation.Status);
@@ -41,9 +41,11 @@ public sealed class SegmentRegenerationCutoverServiceTests
 
         var oldSegment = new Segment
         {
+            VideoId = videoId,
             SegmentGenerationId = oldGeneration.Id,
+            SourceType = "author_chapter",
             Sequence = 1,
-            Title = "Existing segment"
+            TitleOriginal = "Existing segment"
         };
 
         oldGeneration.Segments.Add(oldSegment);
@@ -63,7 +65,7 @@ public sealed class SegmentRegenerationCutoverServiceTests
             videoId,
             "semantic_llm",
             2,
-            [new Segment { Sequence = 1, Title = "New segment" }]);
+            [new Segment { VideoId = videoId, SourceType = "semantic_llm", Sequence = 1, TitleOriginal = "New segment" }]);
 
         var result = service.ApproveCutover(pendingGeneration, [oldGeneration, pendingGeneration]);
 

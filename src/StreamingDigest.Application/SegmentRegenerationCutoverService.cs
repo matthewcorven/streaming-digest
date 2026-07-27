@@ -26,9 +26,13 @@ public sealed class SegmentRegenerationCutoverService
         {
             generation.Segments.Add(new Segment
             {
+                VideoId = segment.VideoId,
                 SegmentGenerationId = generation.Id,
+                SourceType = sourceType,
                 Sequence = segment.Sequence,
-                Title = segment.Title,
+                StartSeconds = segment.StartSeconds,
+                EndSeconds = segment.EndSeconds,
+                TitleOriginal = segment.TitleOriginal,
                 IsActive = segment.IsActive,
                 RequiresEmbeddingApproval = true
             });
