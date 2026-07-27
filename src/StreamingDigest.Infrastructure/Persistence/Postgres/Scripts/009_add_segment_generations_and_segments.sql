@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_segment_generations_video_id
 CREATE TABLE IF NOT EXISTS public.segments (
     id uuid PRIMARY KEY,
     video_id uuid NOT NULL REFERENCES public.videos(id),
-    segment_generation_id uuid NOT NULL REFERENCES public.segment_generations(id),
+    segment_generation_id uuid NOT NULL REFERENCES public.segment_generations(id) ON DELETE CASCADE,
     source_type text NOT NULL,
     sequence integer NOT NULL,
     start_seconds numeric NOT NULL,
