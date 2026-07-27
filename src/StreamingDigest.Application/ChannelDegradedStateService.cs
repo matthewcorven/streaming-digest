@@ -137,7 +137,7 @@ public static class ChannelDegradedStateService
     /// <c>degraded_at</c> as a history entry — the domain-event log captures the clear.
     /// </para>
     /// </summary>
-    public static void ClearDegradedManually(Channel channel, DateTimeOffset now)
+    public static void ClearDegradedManually(Channel channel)
     {
         channel.IsDegraded = false;
         channel.ConsecutiveFailures = 0;

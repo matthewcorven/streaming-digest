@@ -205,7 +205,7 @@ public sealed class ChannelDegradedStateServiceTests
         var channel = MakeChannel(isDegraded: true, consecutiveFailures: 7);
         channel.DegradedAt = Now.AddDays(-5);
 
-        ChannelDegradedStateService.ClearDegradedManually(channel, Now);
+        ChannelDegradedStateService.ClearDegradedManually(channel);
 
         Assert.False(channel.IsDegraded);
         Assert.Equal(0, channel.ConsecutiveFailures);
@@ -219,7 +219,7 @@ public sealed class ChannelDegradedStateServiceTests
         var originalProbeAt = Now.AddDays(-1);
         channel.LastProbeAt = originalProbeAt;
 
-        ChannelDegradedStateService.ClearDegradedManually(channel, Now);
+        ChannelDegradedStateService.ClearDegradedManually(channel);
 
         Assert.Equal(originalProbeAt, channel.LastProbeAt); // unchanged
     }
@@ -289,7 +289,7 @@ public sealed class ChannelDegradedStateServiceTests
         channel.DegradedAt = Now.AddDays(-2);
 
         // User manually clears
-        ChannelDegradedStateService.ClearDegradedManually(channel, Now);
+        ChannelDegradedStateService.ClearDegradedManually(channel);
         Assert.False(channel.IsDegraded);
         Assert.Equal(0, channel.ConsecutiveFailures);
 
