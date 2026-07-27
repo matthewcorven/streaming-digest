@@ -26,6 +26,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     public DbSet<ExternalResource> ExternalResources => Set<ExternalResource>();
     public DbSet<RepositoryRecord> Repositories => Set<RepositoryRecord>();
     public DbSet<FieldOverrideHistory> FieldOverrideHistories => Set<FieldOverrideHistory>();
+    public DbSet<Note> Notes => Set<Note>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,6 +50,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
         modelBuilder.ApplyConfiguration(new ExternalResourceConfiguration());
         modelBuilder.ApplyConfiguration(new RepositoryRecordConfiguration());
         modelBuilder.ApplyConfiguration(new FieldOverrideHistoryConfiguration());
+        modelBuilder.ApplyConfiguration(new NoteConfiguration());
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
