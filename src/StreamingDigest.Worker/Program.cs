@@ -127,7 +127,16 @@ builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
 builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>(); // TODO: replace with the real caption provider when YouTube caption fetching is wired up.
-builder.Services.AddScoped<IAudioToTextProvider, StubAudioToTextProvider>(); // TODO: replace with the real whisper adapter (Task 6.3) before production use.
+builder.Services.AddHttpClient<IAudioToTextProvider, LocalWhisperAudioToTextProvider>(client =>
+{
+    var whisperBaseUrl = builder.Configuration["whisper:baseUrl"]
+        ?? Environment.GetEnvironmentVariable("STREAMINGDIGEST_WHISPER_BASE_URL");
+    if (!string.IsNullOrWhiteSpace(whisperBaseUrl))
+    {
+        client.BaseAddress = new Uri(whisperBaseUrl);
+    }
+    client.Timeout = TimeSpan.FromMinutes(10); // transcription of long audio can take several minutes
+});
 builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);
