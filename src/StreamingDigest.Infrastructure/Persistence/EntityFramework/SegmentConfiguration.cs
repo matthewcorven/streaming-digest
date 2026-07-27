@@ -39,5 +39,10 @@ internal sealed class SegmentConfiguration : IEntityTypeConfiguration<Segment>
 
         builder.HasIndex(seg => new { seg.VideoId, seg.IsActive })
             .HasDatabaseName("idx_segments_video_is_active");
+
+        builder.HasMany(seg => seg.TranscriptRanges)
+            .WithOne()
+            .HasForeignKey(r => r.SegmentId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

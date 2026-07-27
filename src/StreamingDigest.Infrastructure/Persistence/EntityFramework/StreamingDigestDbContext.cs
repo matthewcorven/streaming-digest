@@ -22,6 +22,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     public DbSet<RateLimitDeferment> RateLimitDeferments => Set<RateLimitDeferment>();
     public DbSet<VideoTranscript> VideoTranscripts => Set<VideoTranscript>();
     public DbSet<TranscriptCue> TranscriptCues => Set<TranscriptCue>();
+    public DbSet<SegmentTranscriptRange> SegmentTranscriptRanges => Set<SegmentTranscriptRange>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -41,6 +42,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
         modelBuilder.ApplyConfiguration(new RateLimitDefermentConfiguration());
         modelBuilder.ApplyConfiguration(new VideoTranscriptConfiguration());
         modelBuilder.ApplyConfiguration(new TranscriptCueConfiguration());
+        modelBuilder.ApplyConfiguration(new SegmentTranscriptRangeConfiguration());
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
