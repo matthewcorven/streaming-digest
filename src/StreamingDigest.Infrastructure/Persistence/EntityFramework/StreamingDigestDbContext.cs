@@ -7,6 +7,8 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
 {
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<Video> Videos => Set<Video>();
+    public DbSet<SegmentGeneration> SegmentGenerations => Set<SegmentGeneration>();
+    public DbSet<Segment> Segments => Set<Segment>();
     public DbSet<Digest> Digests => Set<Digest>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<DomainEvent> DomainEvents => Set<DomainEvent>();
@@ -22,6 +24,8 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     {
         modelBuilder.ApplyConfiguration(new ChannelConfiguration());
         modelBuilder.ApplyConfiguration(new VideoConfiguration());
+        modelBuilder.ApplyConfiguration(new SegmentGenerationConfiguration());
+        modelBuilder.ApplyConfiguration(new SegmentConfiguration());
         modelBuilder.ApplyConfiguration(new DigestConfiguration());
         modelBuilder.ApplyConfiguration(new NotificationConfiguration());
         modelBuilder.ApplyConfiguration(new DomainEventConfiguration());
