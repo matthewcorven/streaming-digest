@@ -759,3 +759,196 @@ body {
         flex-wrap: wrap;
     }
 }
+/* ── Modal overlay ────────────────────────────────────────────────── */
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 30, 44, 0.45);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.modal-panel {
+    background: #fff;
+    border-radius: 1rem;
+    width: 100%;
+    max-width: 600px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 1.5rem;
+    box-shadow: 0 20px 60px rgba(15, 30, 44, 0.25);
+}
+
+.modal-panel--narrow {
+    max-width: 480px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1.25rem;
+    gap: 1rem;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    color: #54657a;
+    padding: 0.25rem 0.4rem;
+    border-radius: 0.4rem;
+    flex-shrink: 0;
+}
+
+.modal-close:hover {
+    background: #eef2f7;
+}
+
+/* ── Tab bar ──────────────────────────────────────────────────────── */
+
+.tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #dce5f0;
+    margin-bottom: 1.25rem;
+}
+
+.tab-button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: #54657a;
+    margin-bottom: -1px;
+    white-space: nowrap;
+}
+
+.tab-button:hover {
+    color: #1b6ec2;
+}
+
+.tab-button.active {
+    color: #1b6ec2;
+    border-bottom-color: #1b6ec2;
+}
+
+/* ── Form helpers ─────────────────────────────────────────────────── */
+
+.textarea-field {
+    resize: vertical;
+    min-height: 6rem;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.field-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* ── Classification feedback ──────────────────────────────────────── */
+
+.classification-feedback {
+    background: #e8f6eb;
+    color: #176b33;
+    border: 1px solid #b6e0c0;
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.85rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-top: 0.5rem;
+}
+
+.classification-feedback--inline {
+    display: inline-block;
+    margin-top: 0.4rem;
+    margin-bottom: 0.2rem;
+}
+
+/* ── Search result list ───────────────────────────────────────────── */
+
+.search-result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.search-result-card {
+    border: 1px solid #dce5f0;
+    border-radius: 0.75rem;
+    padding: 1rem 1.1rem;
+    background: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.search-result-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.search-result-body p {
+    margin: 0.25rem 0 0;
+}
+
+/* ── Chip ─────────────────────────────────────────────────────────── */
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem;
+    background: #eef2f7;
+    color: #4f5e70;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.chip--note {
+    background: #f0f7ff;
+    color: #1b6ec2;
+}
+
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+/* ── Button variants ──────────────────────────────────────────────── */
+
+.secondary-button.compact,
+.action-button.compact {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+.secondary-button.danger {
+    color: #9b1c1c;
+    background: #fef2f2;
+}
+
+.secondary-button.danger:hover {
+    background: #fee2e2;
+}

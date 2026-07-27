@@ -37,4 +37,136 @@
             <p class="card-body">The latest recall run surfaced the intended cluster in the top 3 results for the representative query set.</p>
         </article>
     </section>
+
+    <section class="card">
+        <div class="section-heading">
+            <div>
+                <h2>Sample results</h2>
+                <p class="page-description">Use Edit to update metadata or add a classification correction. Use Notes to attach a searchable markdown note that boosts this item's ranking.</p>
+            </div>
+        </div>
+
+        <div class="search-result-list">
+            @foreach (var item in _sampleResults)
+            {
+                <article class="search-result-card">
+                    <div class="search-result-body">
+                        <div class="item-title-row">
+                            <strong>@item.Title</strong>
+                            <span class="status-pill @(item.ItemType == "video" ? "status-ready" : "status-neutral")">@item.ItemType</span>
+                        </div>
+                        <p class="page-description">@item.Description</p>
+                        @if (item.HasClassificationOverride)
+                        {
+                            <div class="classification-feedback classification-feedback--inline">
+                                ✓ Future similar links will use this correction.
+                            </div>
+                        }
+                        @if (item.HasNote)
+                        {
+                            <span class="chip chip--note">📝 Note attached</span>
+                        }
+                    </div>
+                    <div class="action-buttons">
+                        <button class="secondary-button compact" type="button" @onclick="() => OpenEditModal(item)">Edit</button>
+                        <button class="secondary-button compact" type="button" @onclick="() => OpenNoteModal(item)">Notes</button>
+                    </div>
+                </article>
+            }
+        </div>
+    </section>
 </div>
+
+<EditItemModal IsVisible="_editModalVisible"
+               ItemId="_activeItem?.Id ?? Guid.Empty"
+               ItemType="_activeItem?.ItemType ?? string.Empty"
+               ItemTitle="_activeItem?.Title"
+               OnClose="CloseEditModal"
+               OnSaved="OnItemSaved" />
+
+<NoteModal IsVisible="_noteModalVisible"
+           TargetId="_activeItem?.Id ?? Guid.Empty"
+           TargetType="_activeItem?.ItemType ?? string.Empty"
+           TargetTitle="_activeItem?.Title"
+           OnClose="CloseNoteModal"
+           OnSaved="OnItemSaved" />
+
+@code {
+    private bool _editModalVisible;
+    private bool _noteModalVisible;
+    private SearchResultItem? _activeItem;
+
+    // Fixture results — representative of what real search results will surface
+    private readonly List<SearchResultItem> _sampleResults =
+    [
+        new SearchResultItem
+        {
+            Id = new Guid("00000000-0000-0000-0000-000000000001"),
+            ItemType = "video",
+            Title = "Building Blazor WASM apps from scratch",
+            Description = "A deep-dive into hosted Blazor WebAssembly patterns, DI, and auth integration.",
+            HasNote = false,
+            HasClassificationOverride = false
+        },
+        new SearchResultItem
+        {
+            Id = new Guid("00000000-0000-0000-0000-000000000002"),
+            ItemType = "video",
+            Title = "Async patterns in .NET 10",
+            Description = "Channel<T>, IAsyncEnumerable, and structured concurrency walkthrough.",
+            HasNote = true,
+            HasClassificationOverride = false
+        },
+        new SearchResultItem
+        {
+            Id = new Guid("00000000-0000-0000-0000-000000000003"),
+            ItemType = "external_resource",
+            Title = "dotnet/runtime GitHub repository",
+            Description = "The official .NET runtime, framework, and tools repository.",
+            HasNote = false,
+            HasClassificationOverride = true
+        }
+    ];
+
+    private void OpenEditModal(SearchResultItem item)
+    {
+        _activeItem = item;
+        _editModalVisible = true;
+        _noteModalVisible = false;
+    }
+
+    private void OpenNoteModal(SearchResultItem item)
+    {
+        _activeItem = item;
+        _noteModalVisible = true;
+        _editModalVisible = false;
+    }
+
+    private void CloseEditModal()
+    {
+        _editModalVisible = false;
+        _activeItem = null;
+    }
+
+    private void CloseNoteModal()
+    {
+        _noteModalVisible = false;
+        _activeItem = null;
+    }
+
+    private void OnItemSaved()
+    {
+        // In the real search results flow this would re-query the search index.
+        // For now just close the active modal so the save feedback is visible briefly.
+    }
+
+    private sealed class SearchResultItem
+    {
+        public Guid Id { get; set; }
+        public string ItemType { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public bool HasNote { get; set; }
+        public bool HasClassificationOverride { get; set; }
+    }
+}

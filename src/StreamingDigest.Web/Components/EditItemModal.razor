@@ -1,0 +1,521 @@
+@using System.Net.Http.Json
+
+@inject HttpClient Http
+
+@if (IsVisible)
+{
+    <div class="modal-backdrop" @onclick="CloseIfBackdrop">
+        <div class="modal-panel" @onclick:stopPropagation="true" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">Edit item</p>
+                    <h2 id="edit-modal-title">@(ItemTitle ?? "Untitled")</h2>
+                </div>
+                <button class="modal-close" type="button" @onclick="Close" aria-label="Close">✕</button>
+            </div>
+
+            <div class="tab-bar">
+                <button class="tab-button @(ActiveTab == "metadata" ? "active" : "")" type="button" @onclick='() => SetTab("metadata")'>Metadata</button>
+                @if (ItemType == "external_resource")
+                {
+                    <button class="tab-button @(ActiveTab == "classification" ? "active" : "")" type="button" @onclick='() => SetTab("classification")'>Classification</button>
+                }
+                <button class="tab-button @(ActiveTab == "notes" ? "active" : "")" type="button" @onclick='() => SetTab("notes")'>Notes</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_statusMessage))
+            {
+                <p class="action-feedback @_statusTone">@_statusMessage</p>
+            }
+
+            @if (_isLoading)
+            {
+                <p class="helper-text">Loading…</p>
+            }
+            else
+            {
+                @if (ActiveTab == "metadata")
+                {
+                    <div class="form-stack">
+                        @if (ItemType == "video")
+                        {
+                            <label class="field-label" for="edit-title">Title override</label>
+                            <input id="edit-title" class="text-input" placeholder="@_originalTitle" @bind="_editTitle" />
+                            <p class="helper-text">Leave blank to keep the original: <em>@_originalTitle</em></p>
+
+                            <label class="field-label" for="edit-author">Author override</label>
+                            <input id="edit-author" class="text-input" placeholder="@_originalAuthor" @bind="_editAuthor" />
+                            <p class="helper-text">Leave blank to keep the original.</p>
+
+                            <label class="field-label" for="edit-description">Description override</label>
+                            <textarea id="edit-description" class="text-input textarea-field" rows="4" placeholder="@_originalDescription" @bind="_editDescription"></textarea>
+                        }
+                        else if (ItemType == "external_resource")
+                        {
+                            <label class="field-label" for="edit-res-title">Title override</label>
+                            <input id="edit-res-title" class="text-input" placeholder="@_originalTitle" @bind="_editTitle" />
+                            <p class="helper-text">Leave blank to keep the original: <em>@_originalTitle</em></p>
+
+                            <label class="field-label" for="edit-res-description">Description override</label>
+                            <textarea id="edit-res-description" class="text-input textarea-field" rows="4" placeholder="@_originalDescription" @bind="_editDescription"></textarea>
+                        }
+
+                        <div class="action-buttons">
+                            <button class="action-button" type="button" disabled="@_isSaving" @onclick="SaveMetadataAsync">Save</button>
+                            <button class="secondary-button" type="button" @onclick="Close">Cancel</button>
+                        </div>
+                    </div>
+                }
+
+                @if (ActiveTab == "classification" && ItemType == "external_resource")
+                {
+                    <div class="form-stack">
+                        <div class="field-group">
+                            <p class="field-label">Current classification</p>
+                            <span class="status-pill status-neutral">@(_editClassification ?? _originalClassification ?? "unknown")</span>
+                        </div>
+
+                        <label class="field-label" for="edit-classification">Corrected classification</label>
+                        <select id="edit-classification" class="text-input" @bind="_editClassification">
+                            <option value="">— keep current —</option>
+                            <option value="code_repository">Code repository</option>
+                            <option value="website_resource">Website / article</option>
+                            <option value="ad_sponsor">Ad / sponsor</option>
+                            <option value="affiliate">Affiliate</option>
+                            <option value="social">Social</option>
+                            <option value="newsletter">Newsletter</option>
+                            <option value="course">Course</option>
+                            <option value="merch">Merch</option>
+                            <option value="other">Other</option>
+                        </select>
+
+                        @if (_classificationSaved)
+                        {
+                            <div class="classification-feedback">
+                                ✓ Future similar links will use this correction.
+                            </div>
+                        }
+
+                        <div class="action-buttons">
+                            <button class="action-button" type="button" disabled="@(_isSaving || string.IsNullOrWhiteSpace(_editClassification))" @onclick="SaveClassificationAsync">Apply correction</button>
+                            <button class="secondary-button" type="button" @onclick="Close">Cancel</button>
+                        </div>
+                    </div>
+                }
+
+                @if (ActiveTab == "notes")
+                {
+                    <div class="form-stack">
+                        <label class="field-label" for="note-title">Note title</label>
+                        <input id="note-title" class="text-input" placeholder="Optional title" @bind="_noteTitle" />
+
+                        <label class="field-label" for="note-markdown">Note (Markdown)</label>
+                        <textarea id="note-markdown" class="text-input textarea-field" rows="8"
+                                  placeholder="Write a note in Markdown… e.g. **key takeaway**, links, or tags."
+                                  @bind="_noteMarkdown"></textarea>
+                        <p class="helper-text">Notes are embedded and boost this item's search ranking after the next embedding run.</p>
+
+                        <div class="action-buttons">
+                            <button class="action-button" type="button" disabled="@(_isSaving || string.IsNullOrWhiteSpace(_noteMarkdown))" @onclick="SaveNoteAsync">@(_existingNoteId.HasValue ? "Update note" : "Add note")</button>
+                            @if (_existingNoteId.HasValue)
+                            {
+                                <button class="secondary-button danger" type="button" disabled="@_isSaving" @onclick="DeleteNoteAsync">Delete note</button>
+                            }
+                            <button class="secondary-button" type="button" @onclick="Close">Cancel</button>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public Guid ItemId { get; set; }
+    [Parameter] public string ItemType { get; set; } = "video";
+    [Parameter] public string? ItemTitle { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private string ActiveTab { get; set; } = "metadata";
+
+    private bool _isLoading;
+    private bool _isSaving;
+    private string? _statusMessage;
+    private string? _statusTone;
+
+    // Metadata fields
+    private string? _originalTitle;
+    private string? _originalAuthor;
+    private string? _originalDescription;
+    private string? _editTitle;
+    private string? _editAuthor;
+    private string? _editDescription;
+
+    // Classification fields
+    private string? _originalClassification;
+    private string? _editClassification;
+    private bool _classificationSaved;
+
+    // Notes fields
+    private Guid? _existingNoteId;
+    private string? _noteTitle;
+    private string? _noteMarkdown;
+
+    // Auth
+    private string? _csrfToken;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsVisible && ItemId != Guid.Empty)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _statusMessage = null;
+        _classificationSaved = false;
+        ActiveTab = "metadata";
+
+        try
+        {
+            await EnsureApiSessionAsync();
+            await LoadItemAsync();
+            await LoadNoteAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Could not load item: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task LoadItemAsync()
+    {
+        if (ItemType == "video")
+        {
+            var detail = await Http.GetFromJsonAsync<VideoDetailResponse>($"/api/videos/{ItemId}/overrides");
+            if (detail is not null)
+            {
+                _originalTitle = detail.TitleOriginal;
+                _originalAuthor = detail.AuthorOriginal;
+                _originalDescription = detail.DescriptionOriginal;
+                _editTitle = detail.TitleOverride ?? string.Empty;
+                _editAuthor = detail.AuthorOverride ?? string.Empty;
+                _editDescription = detail.DescriptionOverride ?? string.Empty;
+            }
+        }
+        else if (ItemType == "external_resource")
+        {
+            var detail = await Http.GetFromJsonAsync<ExternalResourceDetailResponse>($"/api/external-resources/{ItemId}/overrides");
+            if (detail is not null)
+            {
+                _originalTitle = detail.TitleOriginal;
+                _originalDescription = detail.DescriptionOriginal;
+                _originalClassification = detail.ClassificationOriginal;
+                _editTitle = detail.TitleOverride ?? string.Empty;
+                _editDescription = detail.DescriptionOverride ?? string.Empty;
+                _editClassification = detail.ClassificationOverride ?? string.Empty;
+                _classificationSaved = !string.IsNullOrWhiteSpace(detail.ClassificationOverride);
+            }
+        }
+    }
+
+    private async Task LoadNoteAsync()
+    {
+        var response = await Http.GetFromJsonAsync<NoteListResponse>($"/api/notes?targetType={ItemType}&targetId={ItemId}");
+        var note = response?.Items?.FirstOrDefault();
+        if (note is not null)
+        {
+            _existingNoteId = note.Id;
+            _noteTitle = note.Title ?? string.Empty;
+            _noteMarkdown = note.Markdown;
+        }
+        else
+        {
+            _existingNoteId = null;
+            _noteTitle = string.Empty;
+            _noteMarkdown = string.Empty;
+        }
+    }
+
+    private async Task SaveMetadataAsync()
+    {
+        _isSaving = true;
+        _statusMessage = null;
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            HttpResponseMessage response;
+            if (ItemType == "video")
+            {
+                var request = new HttpRequestMessage(HttpMethod.Put, $"/api/videos/{ItemId}/overrides");
+                request.Content = JsonContent.Create(new
+                {
+                    title = string.IsNullOrWhiteSpace(_editTitle) ? null : _editTitle,
+                    author = string.IsNullOrWhiteSpace(_editAuthor) ? null : _editAuthor,
+                    description = string.IsNullOrWhiteSpace(_editDescription) ? null : _editDescription
+                });
+                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+                response = await Http.SendAsync(request);
+            }
+            else
+            {
+                var request = new HttpRequestMessage(HttpMethod.Put, $"/api/external-resources/{ItemId}/overrides");
+                request.Content = JsonContent.Create(new
+                {
+                    title = string.IsNullOrWhiteSpace(_editTitle) ? null : _editTitle,
+                    description = string.IsNullOrWhiteSpace(_editDescription) ? null : _editDescription
+                });
+                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+                response = await Http.SendAsync(request);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+            }
+
+            _statusMessage = "Metadata saved. Search results will reflect this update after the next embedding run.";
+            _statusTone = "success";
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Save failed: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task SaveClassificationAsync()
+    {
+        _isSaving = true;
+        _statusMessage = null;
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            var request = new HttpRequestMessage(HttpMethod.Put, $"/api/external-resources/{ItemId}/overrides");
+            request.Content = JsonContent.Create(new
+            {
+                classification = string.IsNullOrWhiteSpace(_editClassification) ? null : _editClassification
+            });
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+            }
+
+            _classificationSaved = true;
+            _originalClassification = _editClassification;
+            _statusMessage = "Classification saved.";
+            _statusTone = "success";
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Save failed: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task SaveNoteAsync()
+    {
+        _isSaving = true;
+        _statusMessage = null;
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            HttpResponseMessage response;
+            if (_existingNoteId.HasValue)
+            {
+                var request = new HttpRequestMessage(HttpMethod.Put, $"/api/notes/{_existingNoteId}");
+                request.Content = JsonContent.Create(new
+                {
+                    title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
+                    markdown = _noteMarkdown
+                });
+                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+                response = await Http.SendAsync(request);
+            }
+            else
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, "/api/notes");
+                request.Content = JsonContent.Create(new
+                {
+                    targetType = ItemType,
+                    targetId = ItemId,
+                    title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
+                    markdown = _noteMarkdown
+                });
+                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+                response = await Http.SendAsync(request);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+            }
+
+            // Reload note ID after create
+            await LoadNoteAsync();
+
+            _statusMessage = "Note saved. It will boost this item's search ranking after the next embedding run.";
+            _statusTone = "success";
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Save failed: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task DeleteNoteAsync()
+    {
+        if (!_existingNoteId.HasValue)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        _statusMessage = null;
+
+        try
+        {
+            await EnsureApiSessionAsync();
+
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/notes/{_existingNoteId}");
+            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+            }
+
+            _existingNoteId = null;
+            _noteTitle = string.Empty;
+            _noteMarkdown = string.Empty;
+            _statusMessage = "Note deleted.";
+            _statusTone = "success";
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Delete failed: {ex.Message}";
+            _statusTone = "error";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private void SetTab(string tab)
+    {
+        ActiveTab = tab;
+        _statusMessage = null;
+    }
+
+    private async Task Close()
+    {
+        _statusMessage = null;
+        _classificationSaved = false;
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task CloseIfBackdrop()
+    {
+        await Close();
+    }
+
+    private async Task EnsureApiSessionAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_csrfToken))
+        {
+            return;
+        }
+
+        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        if (!loginResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("Could not authenticate the API session.");
+        }
+
+        using var csrfResponse = await Http.GetAsync("/api/auth/csrf");
+        if (!csrfResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("Could not obtain a CSRF token.");
+        }
+
+        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>();
+        _csrfToken = csrf?.Token;
+    }
+
+    // Response models (API contracts mirrored from Program.cs)
+
+    private sealed class VideoDetailResponse
+    {
+        public string? TitleOriginal { get; set; }
+        public string? TitleOverride { get; set; }
+        public string? AuthorOriginal { get; set; }
+        public string? AuthorOverride { get; set; }
+        public string? DescriptionOriginal { get; set; }
+        public string? DescriptionOverride { get; set; }
+    }
+
+    private sealed class ExternalResourceDetailResponse
+    {
+        public string? TitleOriginal { get; set; }
+        public string? TitleOverride { get; set; }
+        public string? DescriptionOriginal { get; set; }
+        public string? DescriptionOverride { get; set; }
+        public string? ClassificationOriginal { get; set; }
+        public string? ClassificationOverride { get; set; }
+    }
+
+    private sealed class NoteListResponse
+    {
+        public IReadOnlyList<NoteResponse>? Items { get; set; }
+    }
+
+    private sealed class NoteResponse
+    {
+        public Guid Id { get; set; }
+        public string? Title { get; set; }
+        public string Markdown { get; set; } = string.Empty;
+    }
+
+    private sealed class CsrfResponse
+    {
+        public string? Token { get; set; }
+    }
+}
