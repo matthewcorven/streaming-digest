@@ -127,6 +127,7 @@ builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
 builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>(); // TODO: replace with the real caption provider when YouTube caption fetching is wired up.
+builder.Services.AddScoped<ITemporaryMediaManager, TemporaryMediaManager>();
 builder.Services.AddHttpClient<IAudioToTextProvider, LocalWhisperAudioToTextProvider>(client =>
 {
     var whisperBaseUrl = builder.Configuration["whisper:baseUrl"]
