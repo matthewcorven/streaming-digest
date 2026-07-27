@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Domain;
 
 namespace StreamingDigest.Application.Transcripts;
@@ -7,11 +8,16 @@ namespace StreamingDigest.Application.Transcripts;
 /// <summary>
 /// Persists transcript ingestion results without performing the broader
 /// video-unavailable state transition owned by Task 5.5.
+/// The audio-to-text fallback path (Task 6.4) will invoke <see cref="IAudioToTextProvider"/>
+/// once temporary media lifecycle management is in place.
 /// </summary>
 public sealed class TranscriptIngestionService(
     IStreamingDigestDbContext context,
-    IYouTubeCaptionClient captionClient) : ITranscriptIngestionService
+    IYouTubeCaptionClient captionClient,
+    IAudioToTextProvider? audioToTextProvider = null) : ITranscriptIngestionService
 {
+    // Stored for use by the audio-to-text fallback path implemented in Task 6.4.
+    private readonly IAudioToTextProvider? _audioToTextProvider = audioToTextProvider;
     public async Task<TranscriptIngestionResult> IngestAsync(Guid videoId, CancellationToken ct)
     {
         var video = await context.Videos.SingleOrDefaultAsync(candidate => candidate.Id == videoId, ct)
@@ -62,6 +68,18 @@ public sealed class TranscriptIngestionService(
             .Where(transcript => transcript.VideoId == videoId && transcript.IsActive)
             .ToListAsync(ct);
 
+        var isCutover = activeTranscripts.Any(prior =>
+            GetSourceTypePreference(sourceType) > GetSourceTypePreference(prior.SourceType));
+
+        int inertCueOverrideCount = 0;
+        if (isCutover)
+        {
+            var deactivatedIds = activeTranscripts.Select(t => t.Id).ToList();
+            inertCueOverrideCount = await context.TranscriptCues
+                .Where(cue => deactivatedIds.Contains(cue.TranscriptId) && cue.TextOverride != null)
+                .CountAsync(ct);
+        }
+
         foreach (var activeTranscript in activeTranscripts)
         {
             activeTranscript.IsActive = false;
@@ -107,6 +125,43 @@ public sealed class TranscriptIngestionService(
             })
         });
 
+        if (isCutover)
+        {
+            context.DomainEvents.Add(new DomainEvent
+            {
+                EventType = DomainEventTypeCatalog.RequireDefined(DomainEventTypeCatalog.TranscriptCutoverCompleted),
+                Severity = "info",
+                EntityType = "video",
+                EntityId = videoId,
+                Message = inertCueOverrideCount == 0
+                    ? $"Transcript upgraded to {sourceType} for video {videoId}."
+                    : $"Transcript upgraded to {sourceType} for video {videoId}; {inertCueOverrideCount} cue override(s) on the previous transcript are now inert.",
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    NewTranscriptId = transcript.Id,
+                    NewSourceType = sourceType,
+                    InertCueOverrideCount = inertCueOverrideCount
+                })
+            });
+
+            if (inertCueOverrideCount > 0)
+            {
+                context.DomainEvents.Add(new DomainEvent
+                {
+                    EventType = DomainEventTypeCatalog.RequireDefined(DomainEventTypeCatalog.TranscriptCutoverOverrideInert),
+                    Severity = "warning",
+                    EntityType = "video",
+                    EntityId = videoId,
+                    Message = $"{inertCueOverrideCount} cue override(s) became inert after transcript cutover to {sourceType} for video {videoId}.",
+                    DetailsJson = JsonSerializer.Serialize(new
+                    {
+                        NewSourceType = sourceType,
+                        InertCueOverrideCount = inertCueOverrideCount
+                    })
+                });
+            }
+        }
+
         await context.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
@@ -133,6 +188,20 @@ public sealed class TranscriptIngestionService(
         => !string.IsNullOrWhiteSpace(languageCode)
            && (languageCode.Equals("en", StringComparison.OrdinalIgnoreCase)
                || languageCode.StartsWith("en-", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Returns a preference rank for <paramref name="sourceType"/>.
+    /// Higher rank wins: <c>youtube_caption</c> (3) &gt; <c>local_whisper</c> (2)
+    /// &gt; <c>youtube_auto_caption</c> (1) &gt; unknown (0).
+    /// Matches the preference order in ADR-0010.
+    /// </summary>
+    public static int GetSourceTypePreference(string? sourceType) => sourceType switch
+    {
+        VideoTranscriptSourceTypes.YouTubeCaption => 3,
+        VideoTranscriptSourceTypes.LocalWhisper => 2,
+        VideoTranscriptSourceTypes.YouTubeAutoCaption => 1,
+        _ => 0
+    };
 
     private static string ResolveUpstreamVideoId(Video video)
     {

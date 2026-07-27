@@ -17,6 +17,8 @@ using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
+using StreamingDigest.Application.AudioToText;
+using StreamingDigest.Infrastructure.AudioToText;
 using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
@@ -125,6 +127,7 @@ builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
 builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>(); // TODO: replace with the real caption provider when YouTube caption fetching is wired up.
+builder.Services.AddScoped<IAudioToTextProvider, StubAudioToTextProvider>(); // TODO: replace with the real whisper adapter (Task 6.3) before production use.
 builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);
