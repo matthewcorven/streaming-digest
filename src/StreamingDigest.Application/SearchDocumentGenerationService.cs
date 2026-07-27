@@ -77,7 +77,11 @@ public sealed class SearchDocumentGenerationService : ISearchDocumentGenerationS
 
     private static string ComputeContentHash(string? title, string? body)
     {
-        var normalized = string.Join("\n", new[] { title ?? string.Empty, body ?? string.Empty });
+        // Length-delimited segments prevent cross-boundary collisions where a newline
+        // at the end of title would produce the same hash as one at the start of body.
+        var t = title ?? string.Empty;
+        var b = body ?? string.Empty;
+        var normalized = $"{t.Length}:{t}|{b.Length}:{b}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
         return Convert.ToHexString(bytes);
     }

@@ -72,4 +72,27 @@ public sealed class SearchDocumentGenerationServiceTests
         Assert.Equal("Remember to review this later", noteDocument.BodyEffective);
         Assert.True(noteDocument.EmbeddingRequired);
     }
+
+    [Fact]
+    public void CreateDocument_content_hash_distinguishes_title_body_boundary()
+    {
+        // "foo\n" + "bar" and "foo" + "\nbar" would collide under naive newline-joining.
+        var sourceId = Guid.NewGuid();
+
+        var docA = _service.CreateDocument(new SearchDocumentCandidate(
+            DocumentType: "note",
+            SourceEntityType: "notes",
+            SourceEntityId: sourceId,
+            TitleOriginal: "foo\n",
+            BodyOriginal: "bar"));
+
+        var docB = _service.CreateDocument(new SearchDocumentCandidate(
+            DocumentType: "note",
+            SourceEntityType: "notes",
+            SourceEntityId: sourceId,
+            TitleOriginal: "foo",
+            BodyOriginal: "\nbar"));
+
+        Assert.NotEqual(docA.ContentHash, docB.ContentHash);
+    }
 }
