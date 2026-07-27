@@ -12,6 +12,7 @@ public static class DomainEventTypeCatalog
     public const string ChannelDegradedEntered = "channel_degraded_entered";
     public const string ChannelProbeSucceeded = "channel_probe_succeeded";
     public const string ChannelProbeFailed = "channel_probe_failed";
+    public const string VideoUnavailableEntered = "video_unavailable_entered";
     public const string OrphanedNoteSurfaced = "orphaned_note_surfaced";
     public const string TempMediaOrphanCleanup = "temp_media_orphan_cleanup";
     public const string EmbeddingReprocessQueued = "embedding_reprocess_queued";
@@ -32,6 +33,7 @@ public static class DomainEventTypeCatalog
         ChannelDegradedEntered,
         ChannelProbeSucceeded,
         ChannelProbeFailed,
+        VideoUnavailableEntered,
         OrphanedNoteSurfaced,
         TempMediaOrphanCleanup,
         EmbeddingReprocessQueued,

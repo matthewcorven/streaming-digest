@@ -19,6 +19,7 @@ public sealed class DomainEventTypeCatalogTests
             DomainEventTypeCatalog.ChannelDegradedEntered,
             DomainEventTypeCatalog.ChannelProbeSucceeded,
             DomainEventTypeCatalog.ChannelProbeFailed,
+            DomainEventTypeCatalog.VideoUnavailableEntered,
             DomainEventTypeCatalog.OrphanedNoteSurfaced,
             DomainEventTypeCatalog.TempMediaOrphanCleanup,
             DomainEventTypeCatalog.EmbeddingReprocessQueued,
