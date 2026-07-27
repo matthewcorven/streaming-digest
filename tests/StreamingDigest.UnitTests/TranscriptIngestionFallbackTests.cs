@@ -89,7 +89,7 @@ public sealed class TranscriptIngestionFallbackTests : IDisposable
         var result = await service.IngestAsync(video.Id, CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal("no_captions_available", result.ErrorMessage);
+        Assert.Equal("audio_transcription_failed", result.ErrorMessage);
         Assert.Empty(await _context.VideoTranscripts.ToListAsync());
         Assert.Equal(["/tmp/temp-media.mp4"], tempManager.CreatedPaths);
         Assert.Equal(["/tmp/temp-media.mp4"], tempManager.DeletedPaths);

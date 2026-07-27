@@ -53,7 +53,7 @@ public sealed class TranscriptIngestionService(
         }
         else
         {
-           var transcription = await TryTranscribeWithFallbackAsync(videoId, ct);
+           var (transcription, transcriptionProviderFailed) = await TryTranscribeWithFallbackAsync(videoId, ct);
            if (transcription is not null && !string.IsNullOrWhiteSpace(transcription.FullText))
            {
                sourceType = VideoTranscriptSourceTypes.LocalWhisper;
@@ -68,18 +68,21 @@ public sealed class TranscriptIngestionService(
            {
                // Caller contract: broader "video unavailable" handling is owned elsewhere.
                // This service records transcript-level unavailability only.
-               video.TranscriptStatus = "unavailable_captions";
+               var errorCode = transcriptionProviderFailed ? "audio_transcription_failed" : "no_captions_available";
+               video.TranscriptStatus = transcriptionProviderFailed ? errorCode : "unavailable_captions";
                context.DomainEvents.Add(new DomainEvent
                {
                    EventType = DomainEventTypeCatalog.RequireDefined(DomainEventTypeCatalog.TranscriptIngestFailed),
-                   Severity = "warning",
+                   Severity = transcriptionProviderFailed ? "error" : "warning",
                    EntityType = "video",
                    EntityId = videoId,
-                   Message = $"No captions were available for video {videoId}",
+                   Message = transcriptionProviderFailed
+                       ? $"Audio transcription provider failed for video {videoId}"
+                       : $"No captions were available for video {videoId}",
                    DetailsJson = JsonSerializer.Serialize(new
                    {
                        VideoId = videoId,
-                       Error = "no_captions_available"
+                       Error = errorCode
                    })
                });
                await context.SaveChangesAsync(ct);
@@ -90,7 +93,7 @@ public sealed class TranscriptIngestionService(
                    SourceType: null,
                    LanguageCode: null,
                    CueCount: 0,
-                   ErrorMessage: "no_captions_available",
+                   ErrorMessage: errorCode,
                    Skipped: false);
            }
         }
@@ -213,17 +216,17 @@ public sealed class TranscriptIngestionService(
            Skipped: false);
     }
 
-    private async Task<AudioTranscriptionResult?> TryTranscribeWithFallbackAsync(Guid videoId, CancellationToken ct)
+    private async Task<(AudioTranscriptionResult? Transcription, bool ProviderFailed)> TryTranscribeWithFallbackAsync(Guid videoId, CancellationToken ct)
     {
         if (_audioToTextProvider is null)
         {
-           return null;
+           return (null, false);
         }
 
         var mediaFilePath = await ResolveMediaFilePathAsync(videoId, ct);
         if (string.IsNullOrWhiteSpace(mediaFilePath))
         {
-           return null;
+           return (null, false);
         }
 
         var tempMediaFilePath = mediaFilePath;
@@ -236,7 +239,7 @@ public sealed class TranscriptIngestionService(
 
         try
         {
-           return await _audioToTextProvider.TranscribeAsync(new AudioTranscriptionRequest(tempMediaFilePath), ct);
+           return (await _audioToTextProvider.TranscribeAsync(new AudioTranscriptionRequest(tempMediaFilePath), ct), false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -244,7 +247,7 @@ public sealed class TranscriptIngestionService(
         }
         catch (Exception)
         {
-           return null;
+           return (null, true);
         }
         finally
         {
