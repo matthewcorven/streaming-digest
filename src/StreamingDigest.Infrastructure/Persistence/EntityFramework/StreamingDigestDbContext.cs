@@ -15,6 +15,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     public DbSet<OperationRecord> Operations => Set<OperationRecord>();
     public DbSet<IngestionRun> IngestionRuns => Set<IngestionRun>();
     public DbSet<IngestionItem> IngestionItems => Set<IngestionItem>();
+    public DbSet<ScrapedPage> ScrapedPages => Set<ScrapedPage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -28,6 +29,7 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
         modelBuilder.ApplyConfiguration(new OperationRecordConfiguration());
         modelBuilder.ApplyConfiguration(new IngestionRunConfiguration());
         modelBuilder.ApplyConfiguration(new IngestionItemConfiguration());
+        modelBuilder.ApplyConfiguration(new ScrapedPageConfiguration());
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

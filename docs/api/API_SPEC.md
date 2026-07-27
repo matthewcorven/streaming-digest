@@ -326,7 +326,7 @@ Response:
   "modelChanged": true,
   "staleEmbeddingCount": 12492,
   "operationId": "uuid",
-  "statusUrl": "/api/operations/{operationId}"
+  "statusUrl": "/api/admin/operations/{operationId}"
 }
 ```
 

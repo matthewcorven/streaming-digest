@@ -61,7 +61,7 @@ public sealed class ScraperClientTests
             new WorkerOperationConcurrencyController(new WorkerConcurrencySettings()),
             configuration);
 
-        var response = await client.ScrapeFirstPageAsync(new ScrapeFirstPageRequest("https://www.example.com/article", RespectRobotsTxt: true));
+        var response = await client.ScrapeFirstPageAsync(new ScrapeFirstPageRequest("https://www.example.com/article", Guid.NewGuid(), RespectRobotsTxt: true));
 
         Assert.NotNull(capturedRequest);
         Assert.Equal("https://www.example.com/article", capturedRequest.Url);
@@ -108,7 +108,7 @@ public sealed class ScraperClientTests
             new WorkerOperationConcurrencyController(new WorkerConcurrencySettings()),
             new ApplicationConfiguration());
 
-        var response = await client.ScrapeFirstPageAsync(new ScrapeFirstPageRequest("https://www.example.com/blocked", RespectRobotsTxt: true));
+        var response = await client.ScrapeFirstPageAsync(new ScrapeFirstPageRequest("https://www.example.com/blocked", Guid.NewGuid(), RespectRobotsTxt: true));
 
         Assert.False(response.RobotsAllowed);
         Assert.Equal("https://www.example.com/blocked", response.RequestedUrl);
