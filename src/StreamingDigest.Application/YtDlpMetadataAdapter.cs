@@ -32,7 +32,7 @@ public sealed class YtDlpMetadataAdapter
         return channel;
     }
 
-    public Video AdaptVideoMetadata(string? payload, Guid? channelId = null, DateTimeOffset? fetchedAt = null)
+    public Video AdaptVideoMetadata(string? payload, Guid? channelId = null, DateTimeOffset? fetchedAt = null, int? minDurationSeconds = null)
     {
         var metadata = ParseVideoMetadata(payload);
         var video = new Video(Guid.NewGuid(), string.IsNullOrWhiteSpace(metadata.Title) ? "Untitled video" : metadata.Title.Trim())
@@ -47,7 +47,10 @@ public sealed class YtDlpMetadataAdapter
             ChaptersJson = metadata.Chapters is { Count: > 0 } ? JsonSerializer.Serialize(metadata.Chapters, JsonOptions) : null,
             CaptionsJson = metadata.Captions is { Count: > 0 } ? JsonSerializer.Serialize(metadata.Captions, JsonOptions) : null,
             RawMetadataJson = payload,
-            MetadataFetchedAt = fetchedAt
+            MetadataFetchedAt = fetchedAt,
+            IsLongForm = minDurationSeconds.HasValue
+                ? VideoIngestionFilter.ClassifyIsLongForm(metadata.DurationSeconds, minDurationSeconds.Value)
+                : true
         };
 
         return video;

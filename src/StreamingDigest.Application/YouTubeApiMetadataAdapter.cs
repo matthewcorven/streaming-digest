@@ -99,7 +99,7 @@ public sealed class YouTubeApiMetadataAdapter
         }
     }
 
-    public async Task<YouTubeApiVideoResult> FetchVideoAsync(string videoId, Guid? channelId = null, CancellationToken cancellationToken = default)
+    public async Task<YouTubeApiVideoResult> FetchVideoAsync(string videoId, Guid? channelId = null, int? minDurationSeconds = null, CancellationToken cancellationToken = default)
     {
         if (!IsConfigured)
         {
@@ -136,7 +136,7 @@ public sealed class YouTubeApiMetadataAdapter
                 return new YouTubeApiVideoResult(null, false, false, false, (int)response.StatusCode, $"Video '{videoId}' not found in YouTube API response.");
             }
 
-            var video = AdaptVideo(item, channelId);
+            var video = AdaptVideo(item, channelId, minDurationSeconds);
             return new YouTubeApiVideoResult(video, true, false, false, (int)response.StatusCode, null);
         }
         catch (HttpRequestException ex)
@@ -219,10 +219,11 @@ public sealed class YouTubeApiMetadataAdapter
         };
     }
 
-    private static Video AdaptVideo(YouTubeApiVideoItem item, Guid? channelId)
+    private static Video AdaptVideo(YouTubeApiVideoItem item, Guid? channelId, int? minDurationSeconds)
     {
         var id = item.Id ?? string.Empty;
         var title = string.IsNullOrWhiteSpace(item.Snippet?.Title) ? "Untitled video" : item.Snippet.Title.Trim();
+        var durationSeconds = ParseIso8601Duration(item.ContentDetails?.Duration);
 
         return new Video(Guid.NewGuid(), title)
         {
@@ -232,7 +233,10 @@ public sealed class YouTubeApiMetadataAdapter
             AuthorOriginal = item.Snippet?.ChannelTitle?.Trim() ?? string.Empty,
             DescriptionOriginal = item.Snippet?.Description,
             PublishedAt = item.Snippet?.PublishedAt,
-            DurationSeconds = ParseIso8601Duration(item.ContentDetails?.Duration)
+            DurationSeconds = durationSeconds,
+            IsLongForm = minDurationSeconds.HasValue
+                ? VideoIngestionFilter.ClassifyIsLongForm(durationSeconds, minDurationSeconds.Value)
+                : true
         };
     }
 
