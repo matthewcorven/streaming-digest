@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
 
 namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
-public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbContext> options) : DbContext(options)
+public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbContext> options) : DbContext(options), IStreamingDigestDbContext
 {
     public DbSet<Channel> Channels => Set<Channel>();
     public DbSet<Video> Videos => Set<Video>();
@@ -17,6 +18,8 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
     public DbSet<IngestionItem> IngestionItems => Set<IngestionItem>();
     public DbSet<ScrapedPage> ScrapedPages => Set<ScrapedPage>();
     public DbSet<RateLimitDeferment> RateLimitDeferments => Set<RateLimitDeferment>();
+    public DbSet<VideoTranscript> VideoTranscripts => Set<VideoTranscript>();
+    public DbSet<TranscriptCue> TranscriptCues => Set<TranscriptCue>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -32,6 +35,8 @@ public sealed class StreamingDigestDbContext(DbContextOptions<StreamingDigestDbC
         modelBuilder.ApplyConfiguration(new IngestionItemConfiguration());
         modelBuilder.ApplyConfiguration(new ScrapedPageConfiguration());
         modelBuilder.ApplyConfiguration(new RateLimitDefermentConfiguration());
+        modelBuilder.ApplyConfiguration(new VideoTranscriptConfiguration());
+        modelBuilder.ApplyConfiguration(new TranscriptCueConfiguration());
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

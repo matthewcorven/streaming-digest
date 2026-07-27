@@ -3,6 +3,9 @@ namespace StreamingDigest.Domain;
 public static class DomainEventTypeCatalog
 {
     public const string ScreenshotFileMissing = "screenshot_file_missing";
+    public const string TranscriptIngested = "transcript_ingested";
+    public const string TranscriptIngestFailed = "transcript_ingest_failed";
+    public const string TranscriptCutoverCompleted = "transcript_cutover_completed";
     public const string TranscriptCutoverOverrideInert = "transcript_cutover_override_inert";
     public const string ScrapeExcluded = "scrape_excluded";
     public const string ScrapeFailed = "scrape_failed";
@@ -24,6 +27,9 @@ public static class DomainEventTypeCatalog
     public static IReadOnlyList<string> All { get; } =
     [
         ScreenshotFileMissing,
+        TranscriptIngested,
+        TranscriptIngestFailed,
+        TranscriptCutoverCompleted,
         TranscriptCutoverOverrideInert,
         ScrapeExcluded,
         ScrapeFailed,
