@@ -1,0 +1,22 @@
+{
+  "kind": "youtube#searchListResponse",
+  "etag": "fixture-etag",
+  "pageInfo": { "totalResults": 3, "resultsPerPage": 50 },
+  "items": [
+    {
+      "kind": "youtube#searchResult",
+      "etag": "fixture-search-etag-1",
+      "id": { "kind": "youtube#video", "videoId": "fixture-video-id-1" }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "fixture-search-etag-2",
+      "id": { "kind": "youtube#video", "videoId": "fixture-video-id-2" }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "fixture-search-etag-3",
+      "id": { "kind": "youtube#video", "videoId": "fixture-video-id-3" }
+    }
+  ]
+}

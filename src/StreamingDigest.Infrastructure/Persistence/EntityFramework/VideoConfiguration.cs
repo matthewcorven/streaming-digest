@@ -25,6 +25,8 @@ internal sealed class VideoConfiguration : IEntityTypeConfiguration<Video>
         builder.Property(video => video.VideoUrl).HasColumnName("video_url").IsRequired().HasMaxLength(2048);
         builder.Property(video => video.PublishedAt).HasColumnName("published_at");
         builder.Property(video => video.DurationSeconds).HasColumnName("duration_seconds");
+        builder.Property(video => video.ChaptersJson).HasColumnName("chapters_json");
+        builder.Property(video => video.CaptionsJson).HasColumnName("captions_json");
         builder.Property(video => video.ThumbnailUrl).HasColumnName("thumbnail_url");
         builder.Property(video => video.IsLongForm).HasColumnName("is_long_form");
         builder.Property(video => video.IngestionStatus).HasColumnName("ingestion_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
