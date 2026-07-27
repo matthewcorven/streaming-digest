@@ -67,6 +67,8 @@ public sealed class Video : AuditedEntity
 
     public DateTimeOffset? PublishedAt { get; set; }
     public int? DurationSeconds { get; set; }
+    public string? ChaptersJson { get; set; }
+    public string? CaptionsJson { get; set; }
     public string? ThumbnailUrl
     {
         get => _thumbnailUrl;
