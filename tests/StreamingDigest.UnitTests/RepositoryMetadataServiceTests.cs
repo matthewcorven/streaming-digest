@@ -190,6 +190,47 @@ public sealed class RepositoryMetadataServiceTests
     }
 
     [Fact]
+    public void YtDlpMetadataAdapter_maps_channel_fixture_into_domain_model()
+    {
+        var fixturePath = ResolveFixturePath("ytdlp/channel-metadata.json");
+        var adapter = new YtDlpMetadataAdapter();
+
+        var channel = adapter.AdaptChannelMetadata(File.ReadAllText(fixturePath), DateTimeOffset.Parse("2026-07-27T13:26:17.096-04:00"));
+
+        Assert.Equal("UC_fixture_channel", channel.YoutubeChannelId);
+        Assert.Equal("Fixture Channel", channel.NameOriginal);
+        Assert.Equal("Synthetic channel metadata used by scraper tests.", channel.DescriptionOriginal);
+        Assert.Equal("https://www.youtube.com/channel/UC_fixture_channel", channel.SourceUrl);
+        Assert.Equal("https://www.youtube.com/channel/UC_fixture_channel", channel.ProfileUrl);
+        Assert.Equal(DateTimeOffset.Parse("2026-07-27T13:26:17.096-04:00"), channel.LastProbeAt);
+    }
+
+    [Fact]
+    public void YtDlpMetadataAdapter_maps_video_fixture_into_domain_model()
+    {
+        var fixturePath = ResolveFixturePath("ytdlp/video-metadata.json");
+        var adapter = new YtDlpMetadataAdapter();
+
+        var video = adapter.AdaptVideoMetadata(File.ReadAllText(fixturePath), Guid.Parse("00000000-0000-0000-0000-000000000123"), DateTimeOffset.Parse("2026-07-27T13:26:17.096-04:00"));
+
+        Assert.Equal("fixture-video-id", video.YoutubeVideoId);
+        Assert.Equal("Fixture video", video.Title);
+        Assert.Equal("Synthetic video metadata including chapters and captions variants.", video.DescriptionOriginal);
+        Assert.Equal(84, video.DurationSeconds);
+        Assert.Equal("https://www.youtube.com/watch?v=fixture-video-id", video.VideoUrl);
+        Assert.Equal(Guid.Parse("00000000-0000-0000-0000-000000000123"), video.ChannelId);
+        Assert.Equal("Fixture Uploader", video.AuthorOriginal);
+        Assert.Equal(new DateTimeOffset(2026, 7, 27, 0, 0, 0, TimeSpan.Zero), video.PublishedAt);
+        Assert.NotNull(video.RawMetadataJson);
+        Assert.Equal(DateTimeOffset.Parse("2026-07-27T13:26:17.096-04:00"), video.MetadataFetchedAt);
+
+        Assert.Contains("Opening", video.ChaptersJson ?? string.Empty);
+        Assert.Contains("Summary", video.ChaptersJson ?? string.Empty);
+        Assert.Contains("https://example.test/captions/en.vtt", video.CaptionsJson ?? string.Empty);
+        Assert.Contains("https://example.test/captions/fr.vtt", video.CaptionsJson ?? string.Empty);
+    }
+
+    [Fact]
     public void Fetch_returns_failure_for_unsupported_repository_urls()
     {
         var service = new RepositoryMetadataService(new RepositoryHostDetectionService(), new HttpClient());
@@ -215,6 +256,23 @@ public sealed class RepositoryMetadataServiceTests
         Assert.True(result.IsRateLimited);
         Assert.Equal(429, result.StatusCode);
         Assert.Equal("GitHub API rate limit exceeded.", result.ErrorMessage);
+    }
+
+    private static string ResolveFixturePath(string relativePath)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidatePath = Path.Combine(directory.FullName, "tests", "Fixtures", relativePath);
+            if (File.Exists(candidatePath))
+            {
+                return candidatePath;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException($"Could not resolve fixture '{relativePath}'.");
     }
 
     private sealed class StubHttpMessageHandler : HttpMessageHandler
