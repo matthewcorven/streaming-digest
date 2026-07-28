@@ -9,6 +9,14 @@ namespace StreamingDigest.UnitTests;
 public sealed class DigestAssemblyServiceTests
 {
     [Fact]
+    public void DigestAssemblyRequest_defaults_high_signal_threshold_to_calibrated_value()
+    {
+        var request = new DigestAssemblyRequest();
+
+        Assert.Equal(70, request.HighSignalThresholdPercent);
+    }
+
+    [Fact]
     public async Task Assemble_and_persist_digest_with_transition_and_threshold_rules()
     {
         var (context, databaseFilePath) = await CreateContextAsync();
@@ -26,13 +34,13 @@ public sealed class DigestAssemblyServiceTests
                 NewResources = new[] { new DigestResource { Id = "repo-1", Name = "Example repo", ResourceType = "repository" } },
                 HighSignalMatches = new[]
                 {
-                    new HighSignalMatch { Id = "match-1", Label = "High match", SimilarityPercent = 0.91 },
-                    new HighSignalMatch { Id = "match-2", Label = "Low match", SimilarityPercent = 0.70 }
+                    new HighSignalMatch { Id = "match-1", Label = "High match", SimilarityPercent = 91 },
+                    new HighSignalMatch { Id = "match-2", Label = "Low match", SimilarityPercent = 70 }
                 },
                 FailedItems = new[] { new DigestItem { Id = "fail-1", Label = "Failed video" } },
                 SkippedItems = new[] { new DigestItem { Id = "skip-1", Label = "Skipped video" } },
                 ActiveDeferments = new[] { new ActiveDeferment { Id = "defer-1", Label = "Needs review", Reason = "rate limit" } },
-                HighSignalThresholdPercent = 0.80,
+                HighSignalThresholdPercent = 80,
                 IsEmbeddingTransitionActive = true,
                 IsBackfillRun = true
             };
@@ -46,7 +54,7 @@ public sealed class DigestAssemblyServiceTests
             Assert.Single(payload.NewResources);
             Assert.Empty(payload.HighSignalMatches);
             Assert.True(payload.HighSignalEvaluationSkipped);
-            Assert.Equal(0.80, payload.HighSignalThresholdPercent);
+            Assert.Equal(80, payload.HighSignalThresholdPercent);
             Assert.True(payload.IsBackfillRun);
         }
         finally
