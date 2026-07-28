@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using StreamingDigest.Application.Configuration;
@@ -95,24 +94,27 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task High_signal_threshold_migration_only_rewrites_legacy_default_value()
+    public async Task Seed_defaults_preserves_existing_high_signal_threshold_override()
     {
         var runner = new PostgresMigrationRunner(_connectionString!);
         await runner.ApplyAsync();
 
-        var seeder = new AppSettingsSeeder();
-        await seeder.SeedDefaultsAsync(_connectionString!);
-
         await using var connection = new NpgsqlConnection(_connectionString!);
         await connection.OpenAsync();
 
-        await UpdateSettingValueAsync(connection, "search.highSignalThresholdPercent", "80");
-        await ExecuteMigrationScriptAsync(connection, "013_calibrate_high_signal_threshold_default.sql");
-        Assert.Equal("70", await GetSettingValueAsync(connection, "search.highSignalThresholdPercent"));
+        await using (var command = new NpgsqlCommand(
+            "INSERT INTO public.app_settings (key, value_json, updated_at) VALUES (@key, CAST(@valueJson AS jsonb), CURRENT_TIMESTAMP)",
+            connection))
+        {
+            command.Parameters.AddWithValue("key", "search.highSignalThresholdPercent");
+            command.Parameters.AddWithValue("valueJson", "80");
+            await command.ExecuteNonQueryAsync();
+        }
 
-        await UpdateSettingValueAsync(connection, "search.highSignalThresholdPercent", "75");
-        await ExecuteMigrationScriptAsync(connection, "013_calibrate_high_signal_threshold_default.sql");
-        Assert.Equal("75", await GetSettingValueAsync(connection, "search.highSignalThresholdPercent"));
+        var seeder = new AppSettingsSeeder();
+        await seeder.SeedDefaultsAsync(_connectionString!);
+
+        Assert.Equal("80", await GetSettingValueAsync(connection, "search.highSignalThresholdPercent"));
     }
 
     [Fact]
@@ -186,23 +188,6 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
             connection);
         command.Parameters.AddWithValue("key", key);
         command.Parameters.AddWithValue("valueJson", valueJson);
-        await command.ExecuteNonQueryAsync();
-    }
-
-    private static async Task ExecuteMigrationScriptAsync(NpgsqlConnection connection, string scriptName)
-    {
-        var assembly = typeof(PostgresMigrationRunner).Assembly;
-        var resourceName = assembly
-            .GetManifestResourceNames()
-            .SingleOrDefault(name => name.EndsWith(scriptName, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException($"Could not find embedded migration script '{scriptName}'.");
-
-        await using var stream = assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException($"Could not load embedded migration script '{resourceName}'.");
-        using var reader = new StreamReader(stream);
-        var script = await reader.ReadToEndAsync();
-
-        await using var command = new NpgsqlCommand(script, connection);
         await command.ExecuteNonQueryAsync();
     }
 

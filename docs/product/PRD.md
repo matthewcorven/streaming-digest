@@ -112,7 +112,7 @@ MVP must generate vector embeddings for:
 
 User-authored notes are searchable weighting content, not a major MVP product surface. A note attached to a video, segment, repository, or link is embedded and evaluated for search weighting, and its presence/content can affect the parent video cluster score. Recent searches are a major product primitive: they provide UI convenience, long-term user-interest memory, digest subscription signals, and ranking personalization. They are stored in PostgreSQL, embedded with the active embedding model, visible in a recent-searches panel, and clearable as a whole by the user. Granular per-query deletion is MVP+.
 
-MVP must support similarity discovery: search results show related items with `Relative similarity` percentages; the daily digest can include new videos/items similar to recent searches; and high-signal candidates are items above a configurable global similarity threshold, defaulting to 70%, against recent-search embeddings. Notes and clicked/opened results boost future signal strength.
+MVP must support similarity discovery: search results show related items with `Relative similarity` percentages; the daily digest can include new videos/items similar to recent searches; and high-signal candidates are items above a configurable global similarity threshold, with new installs defaulting to 70%, against recent-search embeddings. Notes and clicked/opened results boost future signal strength.
 
 MVP must store LICENSE text but does not embed LICENSE text by default.
 
