@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using Npgsql;
@@ -8,7 +9,7 @@ namespace StreamingDigest.UnitTests;
 
 public sealed class PostgresMigrationSupportTests : IAsyncLifetime
 {
-    private const string ImageName = "postgres:16-alpine";
+    private const string ImageName = "pgvector/pgvector:pg16";
     private const string DatabaseName = "postgres";
     private const string Username = "postgres";
     private const string Password = "postgres";
@@ -254,6 +255,115 @@ public sealed class PostgresMigrationSupportTests : IAsyncLifetime
         Assert.True(await fullTextReader.ReadAsync());
         Assert.Equal("Space Exploration: The Future", fullTextReader.GetString(0));
         Assert.False(await fullTextReader.ReadAsync());
+    }
+
+    [Fact]
+    public async Task Search_videos_uses_vector_similarity_when_query_vector_is_provided()
+    {
+        var runner = new PostgresMigrationRunner(_connectionString!);
+        await runner.ApplyAsync();
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+
+        var channelId = Guid.NewGuid();
+        var videoId = Guid.NewGuid();
+        var embedding = CreateVectorLiteral(384, 0, 1);
+
+        await using (var insertChannel = new NpgsqlCommand(@"
+            INSERT INTO public.channels (
+                id,
+                youtube_channel_id,
+                name_original,
+                profile_url,
+                source_url,
+                description_original,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                @channelId,
+                'vector-channel',
+                'Vector Channel',
+                'https://example.com/vector-channel',
+                'https://example.com/vector-source',
+                'Vector channel description',
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            );
+        ", connection))
+        {
+            insertChannel.Parameters.AddWithValue("channelId", channelId);
+            await insertChannel.ExecuteNonQueryAsync();
+        }
+
+        await using (var insertVideo = new NpgsqlCommand(@"
+            INSERT INTO public.videos (
+                id,
+                platform,
+                platform_video_url,
+                platform_video_id,
+                youtube_video_id,
+                channel_id,
+                author_original,
+                title_original,
+                description_original,
+                video_url,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                @videoId,
+                'youtube',
+                'https://youtube.com/watch?v=vectorfixture',
+                'vectorfixture',
+                'vectorfixture',
+                @channelId,
+                'Vector Author',
+                'Fixture Vector Search Document',
+                'A semantic description that should score well with a matching vector.',
+                'https://youtube.com/watch?v=vectorfixture',
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            );
+        ", connection))
+        {
+            insertVideo.Parameters.AddWithValue("videoId", videoId);
+            insertVideo.Parameters.AddWithValue("channelId", channelId);
+            await insertVideo.ExecuteNonQueryAsync();
+        }
+
+        await using (var updateEmbedding = new NpgsqlCommand(@"
+            UPDATE public.videos
+            SET embedding_vector = @embedding::vector(384)
+            WHERE id = @videoId;
+        ", connection))
+        {
+            updateEmbedding.Parameters.AddWithValue("embedding", embedding);
+            updateEmbedding.Parameters.AddWithValue("videoId", videoId);
+            await updateEmbedding.ExecuteNonQueryAsync();
+        }
+
+        await using var refreshView = new NpgsqlCommand("REFRESH MATERIALIZED VIEW public.video_search_documents;", connection);
+        await refreshView.ExecuteNonQueryAsync();
+
+        await using var command = new NpgsqlCommand(@"
+            SELECT title, vector_similarity
+            FROM public.search_videos('', @queryVector::vector(384), 5);
+        ", connection);
+        command.Parameters.AddWithValue("queryVector", embedding);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("Fixture Vector Search Document", reader.GetString(0));
+        Assert.True(reader.GetDouble(1) > 0.99, $"Expected a strong vector similarity score but got {reader.GetDouble(1)}.");
+    }
+
+    private static string CreateVectorLiteral(int dimensions, int activeIndex, double activeValue = 1.0)
+    {
+        var values = new double[dimensions];
+        values[activeIndex] = activeValue;
+        return "[" + string.Join(",", values.Select(value => value.ToString(CultureInfo.InvariantCulture))) + "]";
     }
 
     private static async Task<bool> IsExtensionAvailableAsync(NpgsqlConnection connection, string extensionName)

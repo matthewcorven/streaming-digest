@@ -83,6 +83,69 @@ public sealed class OllamaEmbeddingServiceTests
     }
 
     [Fact]
+    public async Task GenerateEmbeddingAsync_UsesHostOnlyEndpointWithoutScheme()
+    {
+        var requests = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHttpMessageHandler((request, cancellationToken) =>
+        {
+            requests.Add(request.RequestUri!);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"model\":\"nomic-embed-text\",\"embedding\":[0.4,0.5]}", Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:ollamaEndpoint"] = "localhost:11434"
+            })
+            .Build();
+
+        var service = new OllamaEmbeddingService(httpClient, configuration);
+
+        var result = await service.GenerateEmbeddingAsync("host-only endpoint");
+
+        Assert.Single(requests);
+        Assert.Equal("http://localhost:11434/api/embeddings", requests[0].ToString());
+        Assert.Equal(2, result.Dimensions);
+    }
+
+    [Fact]
+    public async Task GenerateEmbeddingAsync_UsesAlternativeConfigurationKeysAndDimensionsAlias()
+    {
+        var requests = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHttpMessageHandler((request, cancellationToken) =>
+        {
+            requests.Add(request.RequestUri!);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"model\":\"alt-model\",\"embedding\":[0.1,0.2,0.3]}", Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:endpoint"] = "https://ollama.example.com/api",
+                ["embedding:model"] = "alt-model",
+                ["embedding:dimensions"] = "3"
+            })
+            .Build();
+
+        var service = new OllamaEmbeddingService(httpClient, configuration);
+
+        var result = await service.GenerateEmbeddingAsync("alternative config");
+
+        Assert.Single(requests);
+        Assert.Equal("https://ollama.example.com/api/embeddings", requests[0].ToString());
+        Assert.Equal("alt-model", result.Model);
+        Assert.Equal(3, result.Dimensions);
+    }
+
+    [Fact]
     public async Task GenerateEmbeddingAsync_UsesDefaultValuesWhenConfigurationIsMissing()
     {
         var requests = new List<Uri>();
