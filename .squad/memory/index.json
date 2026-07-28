@@ -67,5 +67,15 @@
     "status": "active",
     "createdAt": "2026-07-27T23:21:56.138Z",
     "updatedAt": "2026-07-27T23:21:56.138Z"
+  },
+  {
+    "id": "537f3817-af8e-4d16-9d86-2b62d44a8f55",
+    "class": "POLICY",
+    "loadGuidance": "ALWAYS",
+    "title": "Ralph foreground sessions outside cloud",
+    "path": ".squad/memory/policy-inbox/squad-ralph-foreground-sessions-outside-cloud-537f3817.md",
+    "status": "active",
+    "createdAt": "2026-07-28T00:46:19.058Z",
+    "updatedAt": "2026-07-28T00:46:19.058Z"
   }
 ]

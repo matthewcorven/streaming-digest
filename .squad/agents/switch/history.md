@@ -21,3 +21,7 @@ Streaming Digest quality work spans API behavior, ingestion resilience, search r
 ## Learnings
 
 Switch is the primary tester and reviewer gate for the squad.
+
+## 2026-07-28 — Independent re-review: PR #180 final verdict
+
+Completed final independent re-review of PR #180 ([Task 11.4] Store embeddings in pgvector), revision commit 4b34e19 (Morpheus). All prior blockers verified resolved: production path into transcript ingestion + embedding persistence; host wiring for whisper fallback/media resolver; API host wiring for IStreamingDigestDbContext mapping; regression coverage alignment with shipped DI wiring. **Verdict: ready for review.** Ralph is in stopped state; this is a one-off sign-off entry, not a resumed queue loop.
