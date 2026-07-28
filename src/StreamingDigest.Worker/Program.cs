@@ -14,8 +14,12 @@ using StreamingDigest.Application;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
 using StreamingDigest.Application.Screenshots;
+using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
+using StreamingDigest.Application.AudioToText;
+using StreamingDigest.Infrastructure.AudioToText;
+using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
 using StreamingDigest.Worker.Scraping;
@@ -118,10 +122,26 @@ else
 
 builder.Services.AddSingleton(compatibilityEvaluation);
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
+builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
+builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
+builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
+builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>(); // TODO: replace with the real caption provider when YouTube caption fetching is wired up.
+builder.Services.AddScoped<ITemporaryMediaManager, TemporaryMediaManager>();
+builder.Services.AddHttpClient<IAudioToTextProvider, LocalWhisperAudioToTextProvider>(client =>
+{
+    var whisperBaseUrl = builder.Configuration["whisper:baseUrl"]
+        ?? Environment.GetEnvironmentVariable("STREAMINGDIGEST_WHISPER_BASE_URL");
+    if (!string.IsNullOrWhiteSpace(whisperBaseUrl))
+    {
+        client.BaseAddress = new Uri(whisperBaseUrl);
+    }
+    client.Timeout = TimeSpan.FromMinutes(10); // transcription of long audio can take several minutes
+});
 builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);
@@ -134,6 +154,20 @@ builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationSer
         client.BaseAddress = new Uri(llmBaseUrl);
     }
 });
+builder.Services.AddHttpClient<DeterministicTranscriptChunkingService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+    var baseUrl = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
+        ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
+        ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
+    if (!string.IsNullOrWhiteSpace(baseUrl))
+    {
+        client.BaseAddress = new Uri(baseUrl);
+    }
+});
+builder.Services.AddScoped(sp => ActivatorUtilities.CreateInstance<DeterministicTranscriptChunkingService>(
+    sp,
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(DeterministicTranscriptChunkingService))));
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {

@@ -116,6 +116,8 @@ builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
+builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
+builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
 builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>()));
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
@@ -260,18 +262,27 @@ static string ResolveChannelFallbackId(string? sourceUrl)
     return $"channel-{Convert.ToHexString(bytes)[..12].ToLowerInvariant()}";
 }
 
-static ChannelValueResponse CreateValueResponse(string? original, string? overrideValue)
-    => new(original, overrideValue, string.IsNullOrWhiteSpace(overrideValue) ? original : overrideValue);
+static ChannelValueResponse CreateValueResponse(IEffectiveValueService effectiveValueService, string? original, string? overrideValue)
+{
+    var resolvedValue = effectiveValueService.Resolve(original, overrideValue);
+    return new(resolvedValue.Original, resolvedValue.Override, resolvedValue.Effective);
+}
 
-static ChannelListItemResponse MapChannelListItem(Channel channel)
-    => new(channel.Id, channel.YoutubeChannelId, channel.NameOverride ?? channel.NameOriginal ?? channel.YoutubeChannelId, channel.ProfileUrl, channel.IsPaused, channel.IsDegraded, channel.ConsecutiveFailures, channel.LastIngestedAt, channel.LastIngestionStatus);
+static string ResolveChannelDisplayName(EffectiveValue resolvedNameValue, string youtubeChannelId)
+    => string.IsNullOrWhiteSpace(resolvedNameValue.Effective) ? youtubeChannelId : resolvedNameValue.Effective;
 
-static ChannelDetailResponse MapChannelDetail(Channel channel)
+static ChannelListItemResponse MapChannelListItem(IEffectiveValueService effectiveValueService, Channel channel)
+{
+    var resolvedNameValue = effectiveValueService.Resolve(channel.NameOriginal, channel.NameOverride);
+    return new(channel.Id, channel.YoutubeChannelId, ResolveChannelDisplayName(resolvedNameValue, channel.YoutubeChannelId), channel.ProfileUrl, channel.IsPaused, channel.IsDegraded, channel.ConsecutiveFailures, channel.LastIngestedAt, channel.LastIngestionStatus);
+}
+
+static ChannelDetailResponse MapChannelDetail(IEffectiveValueService effectiveValueService, Channel channel)
     => new(
         channel.Id,
         channel.YoutubeChannelId,
-        CreateValueResponse(channel.NameOriginal, channel.NameOverride),
-        CreateValueResponse(channel.DescriptionOriginal, channel.DescriptionOverride),
+        CreateValueResponse(effectiveValueService, channel.NameOriginal, channel.NameOverride),
+        CreateValueResponse(effectiveValueService, channel.DescriptionOriginal, channel.DescriptionOverride),
         channel.ProfileUrl,
         channel.SourceUrl,
         channel.IsPaused,
@@ -414,7 +425,7 @@ app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
     Authorization = new[] { new PassThroughDashboardAuthorizationFilter() }
 });
 
-app.MapGet("/api/channels", async (HttpContext context, StreamingDigestDbContext dbContext) =>
+app.MapGet("/api/channels", async (HttpContext context, StreamingDigestDbContext dbContext, IEffectiveValueService effectiveValueService) =>
 {
     var query = context.Request.Query;
     var includePaused = bool.TryParse(query["includePaused"], out var includePausedValue) && includePausedValue;
@@ -430,11 +441,11 @@ app.MapGet("/api/channels", async (HttpContext context, StreamingDigestDbContext
         .Take(pageSize)
         .ToListAsync();
 
-    var items = channels.Select(MapChannelListItem).ToList();
+    var items = channels.Select(channel => MapChannelListItem(effectiveValueService, channel)).ToList();
     return Results.Ok(new { items, page, pageSize, totalCount });
 });
 
-app.MapPost("/api/channels", async (CreateChannelRequest request, IChannelRepository channelRepository) =>
+app.MapPost("/api/channels", async (CreateChannelRequest request, IChannelRepository channelRepository, IEffectiveValueService effectiveValueService) =>
 {
     if (string.IsNullOrWhiteSpace(request.SourceUrl))
     {
@@ -465,16 +476,16 @@ app.MapPost("/api/channels", async (CreateChannelRequest request, IChannelReposi
     };
 
     await channelRepository.AddAsync(channel);
-    return Results.Created($"/api/channels/{channel.Id}", MapChannelDetail(channel));
+    return Results.Created($"/api/channels/{channel.Id}", MapChannelDetail(effectiveValueService, channel));
 });
 
-app.MapGet("/api/channels/{channelId:guid}", async (Guid channelId, IChannelRepository channelRepository) =>
+app.MapGet("/api/channels/{channelId:guid}", async (Guid channelId, IChannelRepository channelRepository, IEffectiveValueService effectiveValueService) =>
 {
     var channel = await channelRepository.GetByIdAsync(channelId);
-    return channel is null ? Results.NotFound() : Results.Ok(MapChannelDetail(channel));
+    return channel is null ? Results.NotFound() : Results.Ok(MapChannelDetail(effectiveValueService, channel));
 });
 
-app.MapPut("/api/channels/{channelId:guid}", async (Guid channelId, UpdateChannelRequest request, IChannelRepository channelRepository) =>
+app.MapPut("/api/channels/{channelId:guid}", async (Guid channelId, UpdateChannelRequest request, IChannelRepository channelRepository, IEffectiveValueService effectiveValueService) =>
 {
     var channel = await channelRepository.GetByIdAsync(channelId);
     if (channel is null)
@@ -508,7 +519,7 @@ app.MapPut("/api/channels/{channelId:guid}", async (Guid channelId, UpdateChanne
     }
 
     await channelRepository.UpdateAsync(channel);
-    return Results.Ok(new { status = "updated", entityType = "channel", entityId = channel.Id, resource = MapChannelDetail(channel) });
+    return Results.Ok(new { status = "updated", entityType = "channel", entityId = channel.Id, resource = MapChannelDetail(effectiveValueService, channel) });
 });
 
 app.MapDelete("/api/channels/{channelId:guid}", async (Guid channelId, HttpContext context, IChannelRepository channelRepository) =>
@@ -824,6 +835,248 @@ app.MapGet("/api/internal/ingestion-runs/{ingestionRunId:guid}/notifications", a
 
     return Results.Ok(notifications);
 });
+app.MapGet("/api/videos/{videoId:guid}/transcript", async (Guid videoId, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var transcript = await context.VideoTranscripts
+        .AsNoTracking()
+        .Include(candidate => candidate.Cues)
+        .SingleOrDefaultAsync(candidate => candidate.VideoId == videoId && candidate.IsActive, cancellationToken);
+
+    if (transcript is null)
+    {
+        return Results.NotFound();
+    }
+
+    var response = new VideoTranscriptResponse(
+        transcript.Id,
+        transcript.VideoId,
+        transcript.SourceType,
+        transcript.LanguageCode,
+        transcript.Cues
+            .OrderBy(cue => cue.Sequence)
+            .Select(cue => new TranscriptCueResponse(
+                cue.Id,
+                cue.Sequence,
+                cue.StartSeconds,
+                cue.EndSeconds,
+                cue.TextOriginal,
+                cue.TextOverride,
+                cue.TextOverride ?? cue.TextOriginal))
+            .ToArray());
+
+    return Results.Ok(response);
+});
+app.MapGet("/api/videos/{videoId:guid}/overrides", async (Guid videoId, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var video = await context.Videos
+        .AsNoTracking()
+        .SingleOrDefaultAsync(v => v.Id == videoId, cancellationToken);
+
+    if (video is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new
+    {
+        titleOriginal = video.Title,
+        titleOverride = video.TitleOverride,
+        authorOriginal = video.AuthorOriginal,
+        authorOverride = video.AuthorOverride,
+        descriptionOriginal = video.DescriptionOriginal,
+        descriptionOverride = video.DescriptionOverride
+    });
+});
+
+app.MapGet("/api/external-resources/{resourceId:guid}/overrides", async (Guid resourceId, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var resource = await context.ExternalResources
+        .AsNoTracking()
+        .SingleOrDefaultAsync(r => r.Id == resourceId, cancellationToken);
+
+    if (resource is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new
+    {
+        titleOriginal = resource.TitleOriginal,
+        titleOverride = resource.TitleOverride,
+        descriptionOriginal = resource.DescriptionOriginal,
+        descriptionOverride = resource.DescriptionOverride,
+        classificationOriginal = resource.ClassificationOriginal,
+        classificationOverride = resource.ClassificationOverride
+    });
+});
+
+app.MapPut("/api/videos/{videoId:guid}/overrides", async (Guid videoId, UpdateVideoOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var video = await context.Videos.SingleOrDefaultAsync(v => v.Id == videoId, cancellationToken);
+    if (video is null)
+    {
+        return Results.NotFound();
+    }
+
+    var historyEntries = new List<FieldOverrideHistory>();
+    if (request.Title is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "video", EntityId = videoId, FieldName = "title", PreviousValue = video.TitleOverride, NewValue = newValue });
+        video.TitleOverride = newValue;
+    }
+    if (request.Author is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Author) ? null : request.Author.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "video", EntityId = videoId, FieldName = "author", PreviousValue = video.AuthorOverride, NewValue = newValue });
+        video.AuthorOverride = newValue;
+    }
+    if (request.Description is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "video", EntityId = videoId, FieldName = "description", PreviousValue = video.DescriptionOverride, NewValue = newValue });
+        video.DescriptionOverride = newValue;
+    }
+
+    context.FieldOverrideHistories.AddRange(historyEntries);
+    await context.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
+app.MapPut("/api/segments/{segmentId:guid}/overrides", async (Guid segmentId, UpdateSegmentOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var segment = await context.Segments.SingleOrDefaultAsync(s => s.Id == segmentId, cancellationToken);
+    if (segment is null)
+    {
+        return Results.NotFound();
+    }
+
+    var historyEntries = new List<FieldOverrideHistory>();
+    if (request.Title is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "segment", EntityId = segmentId, FieldName = "title", PreviousValue = segment.TitleOverride, NewValue = newValue });
+        segment.TitleOverride = newValue;
+    }
+    if (request.Summary is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Summary) ? null : request.Summary.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "segment", EntityId = segmentId, FieldName = "summary", PreviousValue = segment.SummaryOverride, NewValue = newValue });
+        segment.SummaryOverride = newValue;
+    }
+
+    context.FieldOverrideHistories.AddRange(historyEntries);
+    await context.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
+app.MapPut("/api/transcript-cues/{cueId:guid}/overrides", async (Guid cueId, UpdateTranscriptCueOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var cue = await context.TranscriptCues.SingleOrDefaultAsync(candidate => candidate.Id == cueId, cancellationToken);
+    if (cue is null)
+    {
+        return Results.NotFound();
+    }
+
+    var newValue = string.IsNullOrWhiteSpace(request.Text) ? null : request.Text.Trim();
+    context.FieldOverrideHistories.Add(new FieldOverrideHistory { EntityType = "transcript_cue", EntityId = cueId, FieldName = "text", PreviousValue = cue.TextOverride, NewValue = newValue });
+    cue.TextOverride = newValue;
+    await context.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
+app.MapPut("/api/external-resources/{resourceId:guid}/overrides", async (Guid resourceId, UpdateExternalResourceOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var resource = await context.ExternalResources.SingleOrDefaultAsync(r => r.Id == resourceId, cancellationToken);
+    if (resource is null)
+    {
+        return Results.NotFound();
+    }
+
+    var historyEntries = new List<FieldOverrideHistory>();
+    if (request.Title is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "external_resource", EntityId = resourceId, FieldName = "title", PreviousValue = resource.TitleOverride, NewValue = newValue });
+        resource.TitleOverride = newValue;
+    }
+    if (request.Description is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "external_resource", EntityId = resourceId, FieldName = "description", PreviousValue = resource.DescriptionOverride, NewValue = newValue });
+        resource.DescriptionOverride = newValue;
+    }
+    if (request.Classification is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Classification) ? null : request.Classification.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "external_resource", EntityId = resourceId, FieldName = "classification", PreviousValue = resource.ClassificationOverride, NewValue = newValue });
+        resource.ClassificationOverride = newValue;
+    }
+
+    context.FieldOverrideHistories.AddRange(historyEntries);
+    await context.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
+app.MapPut("/api/repositories/{repositoryId:guid}/overrides", async (Guid repositoryId, UpdateRepositoryOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var repo = await context.Repositories.SingleOrDefaultAsync(r => r.Id == repositoryId, cancellationToken);
+    if (repo is null)
+    {
+        return Results.NotFound();
+    }
+
+    var historyEntries = new List<FieldOverrideHistory>();
+    if (request.Description is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "repository", EntityId = repositoryId, FieldName = "description", PreviousValue = repo.DescriptionOverride, NewValue = newValue });
+        repo.DescriptionOverride = newValue;
+    }
+    if (request.PrimaryLanguage is not null)
+    {
+        var newValue = string.IsNullOrWhiteSpace(request.PrimaryLanguage) ? null : request.PrimaryLanguage.Trim();
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "repository", EntityId = repositoryId, FieldName = "primary_language", PreviousValue = repo.PrimaryLanguage, NewValue = newValue });
+        repo.PrimaryLanguage = newValue;
+    }
+    if (request.Topics is not null)
+    {
+        var newTopics = request.Topics.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToArray();
+        var previousTopics = repo.Topics is { Length: > 0 } ? string.Join(",", repo.Topics) : null;
+        var newTopicsStr = newTopics.Length > 0 ? string.Join(",", newTopics) : null;
+        historyEntries.Add(new FieldOverrideHistory { EntityType = "repository", EntityId = repositoryId, FieldName = "topics", PreviousValue = previousTopics, NewValue = newTopicsStr });
+        repo.Topics = newTopics.Length > 0 ? newTopics : null;
+    }
+
+    context.FieldOverrideHistories.AddRange(historyEntries);
+    await context.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
+app.MapGet("/api/overrides/history", async (string? entityType, Guid? entityId, string? fieldName, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+{
+    var query = context.FieldOverrideHistories.AsQueryable();
+    if (!string.IsNullOrWhiteSpace(entityType))
+    {
+        query = query.Where(h => h.EntityType == entityType);
+    }
+    if (entityId.HasValue)
+    {
+        query = query.Where(h => h.EntityId == entityId.Value);
+    }
+    if (!string.IsNullOrWhiteSpace(fieldName))
+    {
+        query = query.Where(h => h.FieldName == fieldName);
+    }
+
+    var entries = await query
+        .OrderByDescending(h => h.ChangedAt)
+        .Select(h => new FieldOverrideHistoryResponse(h.Id, h.EntityType, h.EntityId, h.FieldName, h.PreviousValue, h.NewValue, h.ChangedAt))
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(entries);
+});
+
 
 app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
 {
@@ -1168,6 +1421,123 @@ app.MapPost("/api/models/verify", async (HttpContext context, ModelDiscoveryServ
         return Results.BadRequest(new { title = "Unsupported model", detail = ex.Message });
     }
 });
+
+app.MapGet("/api/notes", async (string? targetType, Guid? targetId, StreamingDigestDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var query = dbContext.Notes.AsNoTracking().Where(n => n.DeletedAt == null);
+    if (!string.IsNullOrWhiteSpace(targetType))
+    {
+        query = query.Where(n => n.TargetType == targetType);
+    }
+    if (targetId.HasValue)
+    {
+        query = query.Where(n => n.TargetId == targetId.Value);
+    }
+
+    var notes = await query
+        .OrderByDescending(n => n.UpdatedAt)
+        .Select(n => new NoteResponse(n.Id, n.TargetType, n.TargetId, n.Title, n.Markdown, n.EmbeddingStatus, n.CreatedAt, n.UpdatedAt))
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(new { items = notes });
+});
+
+app.MapPost("/api/notes", async (CreateNoteRequest request, StreamingDigestDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.TargetType))
+    {
+        return Results.BadRequest(new { error = "targetType is required." });
+    }
+
+    if (request.TargetId == Guid.Empty)
+    {
+        return Results.BadRequest(new { error = "targetId is required." });
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Markdown))
+    {
+        return Results.BadRequest(new { error = "markdown is required." });
+    }
+
+    var liveNoteExists = await dbContext.Notes
+        .AnyAsync(n => n.TargetType == request.TargetType && n.TargetId == request.TargetId && n.DeletedAt == null, cancellationToken);
+
+    if (liveNoteExists)
+    {
+        return Results.Conflict(new { error = "A live note already exists for this target. Use PUT to update it." });
+    }
+
+    var note = new StreamingDigest.Domain.Note
+    {
+        TargetType = request.TargetType.Trim(),
+        TargetId = request.TargetId,
+        Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim(),
+        Markdown = request.Markdown.Trim(),
+        EmbeddingStatus = "stale"
+    };
+
+    dbContext.Notes.Add(note);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    var response = new NoteResponse(note.Id, note.TargetType, note.TargetId, note.Title, note.Markdown, note.EmbeddingStatus, note.CreatedAt, note.UpdatedAt);
+    return Results.Created($"/api/notes/{note.Id}", response);
+});
+
+app.MapGet("/api/notes/{noteId:guid}", async (Guid noteId, StreamingDigestDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var note = await dbContext.Notes
+        .AsNoTracking()
+        .Where(n => n.Id == noteId && n.DeletedAt == null)
+        .Select(n => new NoteResponse(n.Id, n.TargetType, n.TargetId, n.Title, n.Markdown, n.EmbeddingStatus, n.CreatedAt, n.UpdatedAt))
+        .SingleOrDefaultAsync(cancellationToken);
+
+    return note is null ? Results.NotFound() : Results.Ok(note);
+});
+
+app.MapPut("/api/notes/{noteId:guid}", async (Guid noteId, UpdateNoteRequest request, StreamingDigestDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var note = await dbContext.Notes.SingleOrDefaultAsync(n => n.Id == noteId && n.DeletedAt == null, cancellationToken);
+    if (note is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (request.Title is not null)
+    {
+        note.Title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
+    }
+
+    if (request.Markdown is not null)
+    {
+        if (string.IsNullOrWhiteSpace(request.Markdown))
+        {
+            return Results.BadRequest(new { error = "markdown cannot be blank." });
+        }
+
+        note.Markdown = request.Markdown.Trim();
+    }
+
+    note.EmbeddingStatus = "stale";
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    var response = new NoteResponse(note.Id, note.TargetType, note.TargetId, note.Title, note.Markdown, note.EmbeddingStatus, note.CreatedAt, note.UpdatedAt);
+    return Results.Ok(new { status = "updated", entityType = "note", entityId = note.Id, resource = response });
+});
+
+app.MapDelete("/api/notes/{noteId:guid}", async (Guid noteId, StreamingDigestDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var note = await dbContext.Notes.SingleOrDefaultAsync(n => n.Id == noteId && n.DeletedAt == null, cancellationToken);
+    if (note is null)
+    {
+        return Results.NotFound();
+    }
+
+    note.DeletedAt = DateTimeOffset.UtcNow;
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(new { status = "deleted", entityType = "note", entityId = noteId });
+});
+
 app.MapGet("/{*path}", async context =>
 {
     if (!ShouldServeSpaFallback(context.Request.Path))
@@ -1629,10 +1999,21 @@ static bool ShouldServeSpaFallback(PathString path)
 
 internal sealed record CreateChannelRequest(string? SourceUrl, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
 internal sealed record UpdateChannelRequest(string? NameOverride, string? DescriptionOverride, bool? IsPaused, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
+internal sealed record UpdateTranscriptCueOverrideRequest(string? Text);
 internal sealed record ChannelListItemResponse(Guid Id, string YoutubeChannelId, string Name, string ProfileUrl, bool IsPaused, bool IsDegraded, int ConsecutiveFailures, DateTimeOffset? LastIngestedAt, string? LastIngestionStatus);
 internal sealed record ChannelDetailResponse(Guid Id, string YoutubeChannelId, ChannelValueResponse Name, ChannelValueResponse Description, string ProfileUrl, string SourceUrl, bool IsPaused, bool IsDegraded, int ConsecutiveFailures, DateTimeOffset? LastIngestedAt, string? LastIngestionStatus, ChannelIngestionDefaultsResponse IngestionDefaults);
 internal sealed record ChannelValueResponse(string? Original, string? Override, string? Effective);
 internal sealed record ChannelIngestionDefaultsResponse(int? MaxAgeDays, int? BackfillMaxVideos);
+internal sealed record VideoTranscriptResponse(Guid Id, Guid VideoId, string SourceType, string? LanguageCode, IReadOnlyList<TranscriptCueResponse> Cues);
+internal sealed record TranscriptCueResponse(Guid Id, int Sequence, decimal StartSeconds, decimal? EndSeconds, string TextOriginal, string? TextOverride, string Text);
+internal sealed record UpdateVideoOverrideRequest(string? Title, string? Author, string? Description);
+internal sealed record UpdateSegmentOverrideRequest(string? Title, string? Summary);
+internal sealed record UpdateExternalResourceOverrideRequest(string? Title, string? Description, string? Classification);
+internal sealed record UpdateRepositoryOverrideRequest(string? Description, string? PrimaryLanguage, string[]? Topics);
+internal sealed record FieldOverrideHistoryResponse(Guid Id, string EntityType, Guid EntityId, string FieldName, string? PreviousValue, string? NewValue, DateTimeOffset ChangedAt);
+internal sealed record CreateNoteRequest(string TargetType, Guid TargetId, string? Title, string Markdown);
+internal sealed record UpdateNoteRequest(string? Title, string? Markdown);
+internal sealed record NoteResponse(Guid Id, string TargetType, Guid TargetId, string? Title, string Markdown, string EmbeddingStatus, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 sealed class PassThroughDashboardAuthorizationFilter : IDashboardAuthorizationFilter
 {

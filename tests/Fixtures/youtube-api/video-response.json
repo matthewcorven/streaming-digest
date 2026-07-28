@@ -1,0 +1,22 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "fixture-etag",
+  "pageInfo": { "totalResults": 1, "resultsPerPage": 1 },
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "fixture-video-etag",
+      "id": "fixture-yt-api-video-id",
+      "snippet": {
+        "publishedAt": "2026-07-27T12:00:00Z",
+        "channelId": "UC_fixture_yt_api_channel",
+        "title": "Fixture API Video",
+        "description": "Synthetic video metadata returned by the YouTube Data API fixture.",
+        "channelTitle": "Fixture API Channel"
+      },
+      "contentDetails": {
+        "duration": "PT10M30S"
+      }
+    }
+  ]
+}

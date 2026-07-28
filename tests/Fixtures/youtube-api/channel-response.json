@@ -1,0 +1,18 @@
+{
+  "kind": "youtube#channelListResponse",
+  "etag": "fixture-etag",
+  "pageInfo": { "totalResults": 1, "resultsPerPage": 5 },
+  "items": [
+    {
+      "kind": "youtube#channel",
+      "etag": "fixture-channel-etag",
+      "id": "UC_fixture_yt_api_channel",
+      "snippet": {
+        "title": "Fixture API Channel",
+        "description": "Synthetic channel metadata returned by the YouTube Data API fixture.",
+        "customUrl": "@fixture-api-channel",
+        "publishedAt": "2020-01-15T00:00:00Z"
+      }
+    }
+  ]
+}

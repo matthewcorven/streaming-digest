@@ -2,6 +2,10 @@
   "id": "fixture-video-id",
   "title": "Fixture video",
   "description": "Synthetic video metadata including chapters and captions variants.",
+  "uploader": "Fixture Uploader",
+  "upload_date": "20260727",
+  "release_timestamp": 1753632000,
+  "timestamp": 1753632000,
   "duration": 84,
   "chapters": [
     {"title": "Opening", "start_time": 0, "end_time": 12},
