@@ -123,20 +123,7 @@ builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
-builder.Services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
-builder.Services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>();
-builder.Services.AddScoped<ITemporaryMediaManager, TemporaryMediaManager>();
-builder.Services.AddHttpClient<IAudioToTextProvider, LocalWhisperAudioToTextProvider>(client =>
-{
-    var whisperBaseUrl = builder.Configuration["whisper:baseUrl"]
-        ?? Environment.GetEnvironmentVariable("STREAMINGDIGEST_WHISPER_BASE_URL");
-    if (!string.IsNullOrWhiteSpace(whisperBaseUrl))
-    {
-        client.BaseAddress = new Uri(whisperBaseUrl);
-    }
-
-    client.Timeout = TimeSpan.FromMinutes(10);
-});
+builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
 builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(
     applicationConfiguration,
