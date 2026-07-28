@@ -121,17 +121,11 @@ builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
-builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
-builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(
-    applicationConfiguration,
-    builder.Environment.ContentRootPath,
-    sp.GetRequiredService<IAdminOperationStore>(),
-    sp.GetService<IEmbeddingService>(),
-    sp.GetService<ITranscriptIngestionService>()));
+builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>()));
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
 builder.Services.AddScoped<IChannelRepository, ChannelRepository>();

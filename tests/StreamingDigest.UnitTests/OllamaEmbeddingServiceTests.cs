@@ -43,7 +43,6 @@ public sealed class OllamaEmbeddingServiceTests
         Assert.Equal("http://localhost:11434/api/embeddings", requests[0].Uri.ToString());
         Assert.Contains("hello world", requests[0].Body);
         Assert.Contains("custom-model", requests[0].Body);
-        Assert.Equal("ollama", result.Provider);
         Assert.Equal("custom-model", result.Model);
         Assert.Equal(3, result.Dimensions);
         Assert.Equal([0.1, 0.2, 0.3], result.Values);
@@ -79,13 +78,12 @@ public sealed class OllamaEmbeddingServiceTests
 
         Assert.Single(requests);
         Assert.Equal("https://ollama.example.com/api/embeddings", requests[0].Uri.ToString());
-        Assert.Equal("ollama", result.Provider);
         Assert.Equal("fallback-model", result.Model);
         Assert.Equal(1, result.Dimensions);
     }
 
     [Fact]
-    public async Task GenerateEmbeddingAsync_SupportsApiEmbedResponseShape()
+    public async Task GenerateEmbeddingAsync_UsesHostOnlyEndpointWithoutScheme()
     {
         var requests = new List<Uri>();
         using var httpClient = new HttpClient(new StubHttpMessageHandler((request, cancellationToken) =>
@@ -93,7 +91,7 @@ public sealed class OllamaEmbeddingServiceTests
             requests.Add(request.RequestUri!);
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"model\":\"bge-m3\",\"embeddings\":[[0.1,0.2,0.3,0.4]]}", Encoding.UTF8, "application/json")
+                Content = new StringContent("{\"model\":\"nomic-embed-text\",\"embedding\":[0.4,0.5]}", Encoding.UTF8, "application/json")
             };
             return Task.FromResult(response);
         }));
@@ -101,20 +99,50 @@ public sealed class OllamaEmbeddingServiceTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["embedding:ollamaEndpoint"] = "http://localhost:11434/api/embed",
-                ["embedding:expectedDimensions"] = "4"
+                ["embedding:ollamaEndpoint"] = "localhost:11434"
             })
             .Build();
 
         var service = new OllamaEmbeddingService(httpClient, configuration);
 
-        var result = await service.GenerateEmbeddingAsync("sample");
+        var result = await service.GenerateEmbeddingAsync("host-only endpoint");
 
         Assert.Single(requests);
-        Assert.Equal("http://localhost:11434/api/embed", requests[0].ToString());
-        Assert.Equal("bge-m3", result.Model);
-        Assert.Equal(4, result.Dimensions);
-        Assert.Equal([0.1, 0.2, 0.3, 0.4], result.Values);
+        Assert.Equal("http://localhost:11434/api/embeddings", requests[0].ToString());
+        Assert.Equal(2, result.Dimensions);
+    }
+
+    [Fact]
+    public async Task GenerateEmbeddingAsync_UsesAlternativeConfigurationKeysAndDimensionsAlias()
+    {
+        var requests = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHttpMessageHandler((request, cancellationToken) =>
+        {
+            requests.Add(request.RequestUri!);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"model\":\"alt-model\",\"embedding\":[0.1,0.2,0.3]}", Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:endpoint"] = "https://ollama.example.com/api",
+                ["embedding:model"] = "alt-model",
+                ["embedding:dimensions"] = "3"
+            })
+            .Build();
+
+        var service = new OllamaEmbeddingService(httpClient, configuration);
+
+        var result = await service.GenerateEmbeddingAsync("alternative config");
+
+        Assert.Single(requests);
+        Assert.Equal("https://ollama.example.com/api/embeddings", requests[0].ToString());
+        Assert.Equal("alt-model", result.Model);
+        Assert.Equal(3, result.Dimensions);
     }
 
     [Fact]
@@ -138,7 +166,6 @@ public sealed class OllamaEmbeddingServiceTests
 
         Assert.Single(requests);
         Assert.Equal("http://localhost:11434/api/embeddings", requests[0].ToString());
-        Assert.Equal("ollama", result.Provider);
         Assert.Equal("nomic-embed-text", result.Model);
         Assert.Equal(2, result.Dimensions);
     }

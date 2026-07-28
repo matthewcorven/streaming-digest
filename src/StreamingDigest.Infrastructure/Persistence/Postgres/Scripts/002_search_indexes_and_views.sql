@@ -14,6 +14,9 @@ BEGIN
     DROP MATERIALIZED VIEW IF EXISTS public.video_search_documents CASCADE;
     IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
         EXECUTE $exec1$
+            ALTER TABLE public.videos ADD COLUMN IF NOT EXISTS embedding_vector vector(384);
+
+            DROP MATERIALIZED VIEW IF EXISTS public.video_search_documents;
             CREATE MATERIALIZED VIEW public.video_search_documents AS
             SELECT
                 s.id,
@@ -21,7 +24,7 @@ BEGIN
                 s.description_original,
                 to_tsvector('english', coalesce(s.title_original, '') || ' ' || coalesce(s.description_original, '')) AS search_vector,
                 coalesce(s.title_original, '') || ' ' || coalesce(s.description_original, '') AS search_text,
-                NULL::vector(384) AS embedding_vector
+                s.embedding_vector
             FROM public.videos AS s;
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_video_search_documents_id ON public.video_search_documents (id);
@@ -49,40 +52,45 @@ BEGIN
                 ),
                 scored AS (
                     SELECT
-                        s.id AS video_id,
-                        s.title_original AS title,
-                        s.description_original AS description,
-                        s.search_vector,
-                        q.normalized_query_text,
-                        GREATEST(
-                            similarity(coalesce(s.title_original, ''), q.normalized_query_text)::real,
-                            similarity(coalesce(s.description_original, ''), q.normalized_query_text)::real,
-                            similarity(s.search_text, q.normalized_query_text)::real
-                        ) AS trigram_similarity
+                       s.id AS video_id,
+                       s.title_original AS title,
+                       s.description_original AS description,
+                       s.search_vector,
+                       q.normalized_query_text,
+                       GREATEST(
+                           similarity(coalesce(s.title_original, ''), q.normalized_query_text)::real,
+                           similarity(coalesce(s.description_original, ''), q.normalized_query_text)::real,
+                           similarity(s.search_text, q.normalized_query_text)::real
+                       ) AS trigram_similarity,
+                       CASE
+                           WHEN query_vector IS NULL OR s.embedding_vector IS NULL THEN 0.0::double precision
+                           ELSE greatest(0.0::double precision, 1.0::double precision - (s.embedding_vector <=> query_vector))
+                       END AS vector_similarity
                     FROM public.video_search_documents AS s
                     CROSS JOIN query_terms AS q
                     WHERE q.normalized_query_text = ''
                        OR s.search_vector @@ websearch_to_tsquery('english', q.normalized_query_text)
                        OR GREATEST(
-                            similarity(coalesce(s.title_original, ''), q.normalized_query_text)::real,
-                            similarity(coalesce(s.description_original, ''), q.normalized_query_text)::real,
-                            similarity(s.search_text, q.normalized_query_text)::real
-                        ) >= 0.15
+                           similarity(coalesce(s.title_original, ''), q.normalized_query_text)::real,
+                           similarity(coalesce(s.description_original, ''), q.normalized_query_text)::real,
+                           similarity(s.search_text, q.normalized_query_text)::real
+                       ) >= 0.15
                 ),
                 ranked AS (
                     SELECT
-                        video_id,
-                        title,
-                        description,
-                        CASE
-                            WHEN normalized_query_text = '' THEN 0.0::real
-                            WHEN search_vector @@ websearch_to_tsquery('english', normalized_query_text) THEN
-                                GREATEST(
-                                    ts_rank_cd(search_vector, websearch_to_tsquery('english', normalized_query_text)),
-                                    trigram_similarity
-                                )
-                            ELSE trigram_similarity
-                        END AS text_rank
+                       video_id,
+                       title,
+                       description,
+                       CASE
+                           WHEN normalized_query_text = '' THEN 0.0::real
+                           WHEN search_vector @@ websearch_to_tsquery('english', normalized_query_text) THEN
+                               GREATEST(
+                                   ts_rank_cd(search_vector, websearch_to_tsquery('english', normalized_query_text)),
+                                   trigram_similarity
+                               )
+                           ELSE trigram_similarity
+                       END AS text_rank,
+                       vector_similarity
                     FROM scored
                 )
                 SELECT
@@ -90,9 +98,15 @@ BEGIN
                     title,
                     description,
                     text_rank,
-                    0.0::double precision AS vector_similarity
+                    vector_similarity
                 FROM ranked
-                ORDER BY text_rank DESC
+                ORDER BY
+                    CASE
+                       WHEN query_vector IS NULL THEN text_rank::double precision
+                       ELSE greatest(text_rank::double precision, vector_similarity)
+                    END DESC,
+                    vector_similarity DESC,
+                    title ASC
                 LIMIT greatest(coalesce(limit_count, 10), 1);
             $func1$;
         $exec1$;
