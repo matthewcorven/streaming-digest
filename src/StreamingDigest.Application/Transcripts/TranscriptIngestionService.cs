@@ -264,7 +264,8 @@ public sealed class TranscriptIngestionService(
                .Select(cue => new TranscriptChunkDocumentInput(
                    cue.Id,
                    cue.TextOriginal,
-                   cue.TextOverride))
+                   cue.TextOverride,
+                   cue.Sequence))
                .ToArray(),
            Notes = notes
                .Select(note => new NoteDocumentInput(
