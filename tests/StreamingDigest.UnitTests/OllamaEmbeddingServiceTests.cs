@@ -43,6 +43,7 @@ public sealed class OllamaEmbeddingServiceTests
         Assert.Equal("http://localhost:11434/api/embeddings", requests[0].Uri.ToString());
         Assert.Contains("hello world", requests[0].Body);
         Assert.Contains("custom-model", requests[0].Body);
+        Assert.Equal("ollama", result.Provider);
         Assert.Equal("custom-model", result.Model);
         Assert.Equal(3, result.Dimensions);
         Assert.Equal([0.1, 0.2, 0.3], result.Values);
@@ -78,6 +79,7 @@ public sealed class OllamaEmbeddingServiceTests
 
         Assert.Single(requests);
         Assert.Equal("https://ollama.example.com/api/embeddings", requests[0].Uri.ToString());
+        Assert.Equal("ollama", result.Provider);
         Assert.Equal("fallback-model", result.Model);
         Assert.Equal(1, result.Dimensions);
     }
@@ -103,6 +105,7 @@ public sealed class OllamaEmbeddingServiceTests
 
         Assert.Single(requests);
         Assert.Equal("http://localhost:11434/api/embeddings", requests[0].ToString());
+        Assert.Equal("ollama", result.Provider);
         Assert.Equal("nomic-embed-text", result.Model);
         Assert.Equal(2, result.Dimensions);
     }

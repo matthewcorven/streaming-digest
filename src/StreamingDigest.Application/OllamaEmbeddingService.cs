@@ -6,6 +6,7 @@ namespace StreamingDigest.Application;
 
 public sealed class OllamaEmbeddingService : IEmbeddingService
 {
+    internal const string ProviderName = "ollama";
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
 
@@ -40,7 +41,7 @@ public sealed class OllamaEmbeddingService : IEmbeddingService
             throw new InvalidOperationException($"Ollama returned {embedding.Count} dimensions, but expected {expectedDimensions}.");
         }
 
-        return new EmbeddingGenerationResult(payload.Model ?? model, embedding.Count, embedding);
+        return new EmbeddingGenerationResult(ProviderName, payload.Model ?? model, embedding.Count, embedding);
     }
 
     private string ResolveEndpoint()

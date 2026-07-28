@@ -17,12 +17,16 @@ using OpenTelemetry.Trace;
 using StreamingDigest.Api.Observability;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
+using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Domain;
 using StreamingDigest.Application.Observability;
 using Npgsql;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Application.Transcripts;
+using StreamingDigest.Infrastructure.AudioToText;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
+using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Web.Models;
 
@@ -110,16 +114,24 @@ if (!databaseStatus.Connected)
 
 builder.Services.AddHangfire(config => config.UseStorage(hangfireStorage));
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
+builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
+builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
-builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>()));
+builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(
+    applicationConfiguration,
+    builder.Environment.ContentRootPath,
+    sp.GetRequiredService<IAdminOperationStore>(),
+    sp.GetService<IEmbeddingService>(),
+    sp.GetService<ITranscriptIngestionService>()));
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
 builder.Services.AddScoped<IChannelRepository, ChannelRepository>();

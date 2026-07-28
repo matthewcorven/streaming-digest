@@ -16,7 +16,7 @@ namespace StreamingDigest.IntegrationTests;
 
 public sealed class ScrapedPagePersistenceIntegrationTests : IAsyncLifetime
 {
-    private const string ImageName = "postgres:16-alpine";
+    private const string ImageName = "pgvector/pgvector:pg17";
     private const string DatabaseName = "postgres";
     private const string Username = "postgres";
     private const string Password = "postgres";

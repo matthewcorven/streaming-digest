@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
+using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Application.Configuration;
 
 namespace StreamingDigest.Application.Admin;
@@ -15,13 +16,20 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly string? _contentRootPath;
     private readonly IAdminOperationStore? _operationStore;
     private readonly IEmbeddingService _embeddingService;
+    private readonly ITranscriptIngestionService? _transcriptIngestionService;
 
-    public AdminOperationsService(ApplicationConfiguration? configuration = null, string? contentRootPath = null, IAdminOperationStore? operationStore = null, IEmbeddingService? embeddingService = null)
+    public AdminOperationsService(
+        ApplicationConfiguration? configuration = null,
+        string? contentRootPath = null,
+        IAdminOperationStore? operationStore = null,
+        IEmbeddingService? embeddingService = null,
+        ITranscriptIngestionService? transcriptIngestionService = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
         _contentRootPath = contentRootPath;
         _operationStore = operationStore;
         _embeddingService = embeddingService ?? new NullEmbeddingService();
+        _transcriptIngestionService = transcriptIngestionService;
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
@@ -57,9 +65,12 @@ public sealed class AdminOperationsService : IAdminOperationsService
             return await CreateResultAsync("retry.video", videoId, "failed", $"Video id '{videoId}' is not a valid GUID.", "error", cancellationToken);
         }
 
-        var result = await CreateAcceptedResultAsync("retry.video", videoId, $"Retry queued for video '{videoId}'.", cancellationToken);
-        await TryRetryFailedEntityAsync(result.OperationId, "retry.video", "video", parsedVideoId, videoId, cancellationToken);
-        return result;
+        return await RunTranscriptIngestionAsync(
+            "retry.video",
+            parsedVideoId,
+            videoId,
+            "Retry completed",
+            cancellationToken);
     }
 
     public async Task<AdminActionResult> RetryFailedLinkAsync(string linkId, CancellationToken cancellationToken = default)
@@ -87,7 +98,19 @@ public sealed class AdminOperationsService : IAdminOperationsService
     }
 
     public async Task<AdminActionResult> ReprocessVideoAsync(string videoId, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("reprocess.video", videoId, $"Reprocess queued for video '{videoId}'.", cancellationToken);
+    {
+        if (!Guid.TryParse(videoId, out var parsedVideoId))
+        {
+            return await CreateResultAsync("reprocess.video", videoId, "failed", $"Video id '{videoId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        return await RunTranscriptIngestionAsync(
+            "reprocess.video",
+            parsedVideoId,
+            videoId,
+            "Reprocess completed",
+            cancellationToken);
+    }
 
     public async Task<AdminActionResult> ReprocessRepositoryAsync(string repositoryId, CancellationToken cancellationToken = default)
         => await CreateAcceptedResultAsync("reprocess.repository", repositoryId, $"Reprocess queued for repository '{repositoryId}'.", cancellationToken);
@@ -110,7 +133,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         {
             var sampleText = "The quick brown fox jumps over the lazy dog.";
             var embedding = await _embeddingService.GenerateEmbeddingAsync(sampleText, cancellationToken);
-            var message = $"Embedding service health check completed successfully. Model '{embedding.Model}' returned {embedding.Dimensions} dimensions for the sample text.";
+            var message = $"Embedding service health check completed successfully. Provider '{embedding.Provider}' model '{embedding.Model}' returned {embedding.Dimensions} dimensions for the sample text.";
             return await CreateCompletedResultAsync("test.embeddings", null, message, "healthy", cancellationToken);
         }
         catch (Exception ex)
@@ -549,7 +572,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private sealed class NullEmbeddingService : IEmbeddingService
     {
         public Task<EmbeddingGenerationResult> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default)
-            => Task.FromResult(new EmbeddingGenerationResult("null", 1, new[] { 0.0 }));
+        => Task.FromResult(new EmbeddingGenerationResult("null", "null", 1, new[] { 0.0 }));
     }
 
     private static void CopyDirectoryContents(string sourcePath, string destinationPath)
@@ -1044,6 +1067,57 @@ public sealed class AdminOperationsService : IAdminOperationsService
         _operations[operation.OperationId] = operation;
         await PersistOperationAsync(operation, cancellationToken);
         return new AdminActionResult(operation.OperationId, operation.OperationType, operation.Status, operation.Message, operation.Target, operation.JobId, operation.HealthStatus);
+    }
+
+    private async Task<AdminActionResult> RunTranscriptIngestionAsync(
+        string operationType,
+        Guid videoId,
+        string target,
+        string successPrefix,
+        CancellationToken cancellationToken)
+    {
+        if (_transcriptIngestionService is null)
+        {
+            return await CreateResultAsync(
+                operationType,
+                target,
+                "failed",
+                "Transcript ingestion service is not configured for video operations.",
+                "error",
+                cancellationToken);
+        }
+
+        var ingestionResult = await _transcriptIngestionService.IngestAsync(videoId, cancellationToken);
+        if (!ingestionResult.Succeeded)
+        {
+            var failureMessage = ingestionResult.ErrorMessage ?? "transcript_ingestion_failed";
+            return await CreateResultAsync(
+                operationType,
+                target,
+                "failed",
+                $"Transcript ingestion failed for video '{target}': {failureMessage}.",
+                "error",
+                cancellationToken);
+        }
+
+        if (ingestionResult.Skipped)
+        {
+            return await CreateCompletedResultAsync(
+                operationType,
+                target,
+                $"{successPrefix} for video '{target}' was skipped by transcript ingestion.",
+                "healthy",
+                cancellationToken);
+        }
+
+        var transcriptId = ingestionResult.TranscriptId?.ToString() ?? "unknown";
+        var sourceType = ingestionResult.SourceType ?? "unknown";
+        return await CreateCompletedResultAsync(
+            operationType,
+            target,
+            $"{successPrefix} for video '{target}'. Transcript '{transcriptId}' stored from '{sourceType}' with {ingestionResult.CueCount} cue(s).",
+            "healthy",
+            cancellationToken);
     }
 
     private async Task<AdminActionResult> CreateCompletedResultAsync(string operationType, string? target, string message, string healthStatus, CancellationToken cancellationToken)
