@@ -17,3 +17,7 @@ Streaming Digest backend work centers on API endpoints, ingestion jobs, and enri
 ## Learnings
 
 Tank owns core API and pipeline execution paths.
+
+## 2026-07-28 — PR #179 revision submitted for re-review (commit 80c983e)
+
+Submitted revision commit 80c983e on PR #179 ([Task 12.2] Implement vector search SQL) addressing prior review feedback. Re-reviewed independently by Morpheus; upgrade-path migration safety for legacy materialized view shape confirmed safe. **Verdict from Morpheus: ready for review.** PR approved for maintainer review; issue #25 now ready-for-review in Ralph's queue.

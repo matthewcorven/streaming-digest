@@ -38,3 +38,15 @@ Your synthesis review (PR #99) is OPEN, pending user review. Final series state 
 ## 2026-07-25 — Cross-agent update (via Scribe): prototype series final state
 
 Your synthesis review (PR #99) is OPEN, pending user review. Final series state for the record: PRs #96 (11.3a), #97 (11.3b), #98 (7.4) all MERGED; your synthesis produced `docs/verification/prototype-synthesis-11.3a-11.3b-7.4.md` + `spikes/README.md`. Your requested coordinator follow-up actions are recorded verbatim in `decisions.md` (2026-07-25 entry) as not-yet-done: author `docs/adr/0016-vector-index-hnsw.md`; DATA_MODEL edits (§3.22 name HNSW, §6 materialized-tsvector note, §3.21 index bullet consistency); ARCHITECTURE edits (§4.5 search-flow note, §12 Homebrew-vs-Debian ffmpeg skew note); create the ADR-0012 calibration issue (link #18/#19, Depends On 11.3, gate before 12.5a); comment the real-model re-verification list onto #17. Your OVERTURN of Neo's 11.3a "no ADR" call (ADR-0016 required) has been propagated to Neo's history.
+
+## 2026-07-28 — PR #179 re-review (independent) after Tank revision commit 80c983e
+
+Re-reviewed Tank's revision of PR #179 ([Task 12.2] Implement vector search SQL) end-to-end. Key finding resolved: upgrade-path migration safety for legacy materialized view shape confirmed safe. **Verdict: ready for review.** PR #179 now ready for maintainer review; issue #25 advanced to ready-for-review in Ralph's queue.
+
+## 2026-07-28 — PR #181 re-review (independent) after Dozer revision commit 19b67a8ab321c2f259390a3b70cfc7d40d9a66af
+
+Re-reviewed Dozer's revision of PR #181 ([Task 12.x] Calibrate ADR-0012 high-signal absolute-cosine threshold against the real embedding provider) end-to-end. Key finding resolved: threshold calibration against the real embedding provider confirmed; default seed 70 verified for fresh installs; upgrade paths correctly preserve existing stored values unless deliberately changed. **Verdict: ready for review.** PR #181 now ready for maintainer review; issue #100 advanced to ready-for-review in Ralph's queue.
+
+## 2026-07-28 — PR #180 final independent re-review after Morpheus revision commit 4b34e19
+
+Independent reviewer Switch completed re-review of PR #180 ([Task 11.4] Store embeddings in pgvector) against final revision commit 4b34e19. All prior blockers resolved: production path into transcript ingestion + embedding persistence, host wiring for whisper fallback/media resolver, API host wiring for IStreamingDigestDbContext mapping, regression coverage alignment with shipped DI wiring. **Verdict: ready for review.** PR #180 now ready for maintainer review.
