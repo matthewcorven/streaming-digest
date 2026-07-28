@@ -3,6 +3,9 @@ namespace StreamingDigest.Domain;
 public static class DomainEventTypeCatalog
 {
     public const string ScreenshotFileMissing = "screenshot_file_missing";
+    public const string TranscriptIngested = "transcript_ingested";
+    public const string TranscriptIngestFailed = "transcript_ingest_failed";
+    public const string TranscriptCutoverCompleted = "transcript_cutover_completed";
     public const string TranscriptCutoverOverrideInert = "transcript_cutover_override_inert";
     public const string ScrapeExcluded = "scrape_excluded";
     public const string ScrapeFailed = "scrape_failed";
@@ -12,6 +15,7 @@ public static class DomainEventTypeCatalog
     public const string ChannelDegradedEntered = "channel_degraded_entered";
     public const string ChannelProbeSucceeded = "channel_probe_succeeded";
     public const string ChannelProbeFailed = "channel_probe_failed";
+    public const string VideoUnavailableEntered = "video_unavailable_entered";
     public const string OrphanedNoteSurfaced = "orphaned_note_surfaced";
     public const string TempMediaOrphanCleanup = "temp_media_orphan_cleanup";
     public const string EmbeddingReprocessQueued = "embedding_reprocess_queued";
@@ -23,6 +27,9 @@ public static class DomainEventTypeCatalog
     public static IReadOnlyList<string> All { get; } =
     [
         ScreenshotFileMissing,
+        TranscriptIngested,
+        TranscriptIngestFailed,
+        TranscriptCutoverCompleted,
         TranscriptCutoverOverrideInert,
         ScrapeExcluded,
         ScrapeFailed,
@@ -32,6 +39,7 @@ public static class DomainEventTypeCatalog
         ChannelDegradedEntered,
         ChannelProbeSucceeded,
         ChannelProbeFailed,
+        VideoUnavailableEntered,
         OrphanedNoteSurfaced,
         TempMediaOrphanCleanup,
         EmbeddingReprocessQueued,

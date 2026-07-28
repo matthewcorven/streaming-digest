@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
+using StreamingDigest.Domain;
+using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
 namespace StreamingDigest.Worker.Scraping;
 
@@ -10,10 +12,17 @@ public sealed class ScraperClient(
     HttpClient httpClient,
     IScrapeFailureRecorder scrapeFailureRecorder,
     WorkerOperationConcurrencyController concurrencyController,
-    ApplicationConfiguration applicationConfiguration)
+    ApplicationConfiguration applicationConfiguration,
+    StreamingDigestDbContext? context = null)
 {
     public async Task<ScrapeFirstPageResponse> ScrapeFirstPageAsync(ScrapeFirstPageRequest request, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.ExternalResourceId == Guid.Empty)
+        {
+            throw new ArgumentException("An external resource identifier is required.", nameof(request));
+        }
+
         return await CorrelationContext.RunWithActivityAsync(
             "scraper.scrape_first_page",
             async activity =>
@@ -36,7 +45,14 @@ public sealed class ScraperClient(
                             using var response = await httpClient.PostAsJsonAsync("/internal/scrape/first-page", effectiveRequest, cancellationToken);
                             response.EnsureSuccessStatusCode();
                             var payload = await response.Content.ReadFromJsonAsync<ScrapeFirstPageResponse>(cancellationToken: cancellationToken);
-                            return payload ?? throw new InvalidOperationException("The scraper returned an empty payload.");
+                            var scrapeResult = payload ?? throw new InvalidOperationException("The scraper returned an empty payload.");
+                            if (context is not null)
+                            {
+                                context.ScrapedPages.Add(MapToScrapedPage(request.ExternalResourceId, scrapeResult));
+                                await context.SaveChangesAsync(cancellationToken);
+                            }
+
+                            return scrapeResult;
                         },
                         cancellationToken);
                 }
@@ -71,6 +87,28 @@ public sealed class ScraperClient(
         };
     }
 
+    private static ScrapedPage MapToScrapedPage(Guid externalResourceId, ScrapeFirstPageResponse response)
+    {
+        return new ScrapedPage
+        {
+            ExternalResourceId = externalResourceId,
+            FinalUrl = string.IsNullOrWhiteSpace(response.FinalUrl) ? response.RequestedUrl : response.FinalUrl,
+            TitleOriginal = response.Title,
+            DescriptionOriginal = response.Description,
+            OpenGraphJson = response.OpenGraph.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? null : response.OpenGraph.GetRawText(),
+            VisibleTextOriginal = response.VisibleText,
+            RobotsAllowed = response.RobotsAllowed,
+            ScrapeStatus = string.IsNullOrWhiteSpace(response.ExclusionReason) ? "succeeded" : "excluded",
+            ExclusionReason = response.ExclusionReason,
+            HttpStatus = response.HttpStatus,
+            ContentType = response.ContentType,
+            ContentHash = response.ContentHash,
+            RawHtmlDebugPath = response.RawHtmlDebugPath,
+            ScrapedAt = DateTimeOffset.UtcNow,
+            ErrorSummary = response.ExclusionReason
+        };
+    }
+
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
         return await CorrelationContext.RunWithActivityAsync(
@@ -99,6 +137,7 @@ public sealed class ScraperClient(
 
 public sealed record ScrapeFirstPageRequest(
     string Url,
+    Guid ExternalResourceId,
     bool RespectRobotsTxt = true,
     bool DebugCaptureRawHtml = false,
     int TimeoutSeconds = 30,

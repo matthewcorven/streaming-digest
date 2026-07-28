@@ -10,6 +10,9 @@ public sealed class DomainEventTypeCatalogTests
         var expected = new[]
         {
             DomainEventTypeCatalog.ScreenshotFileMissing,
+            DomainEventTypeCatalog.TranscriptIngested,
+            DomainEventTypeCatalog.TranscriptIngestFailed,
+            DomainEventTypeCatalog.TranscriptCutoverCompleted,
             DomainEventTypeCatalog.TranscriptCutoverOverrideInert,
             DomainEventTypeCatalog.ScrapeExcluded,
             DomainEventTypeCatalog.ScrapeFailed,
@@ -19,6 +22,7 @@ public sealed class DomainEventTypeCatalogTests
             DomainEventTypeCatalog.ChannelDegradedEntered,
             DomainEventTypeCatalog.ChannelProbeSucceeded,
             DomainEventTypeCatalog.ChannelProbeFailed,
+            DomainEventTypeCatalog.VideoUnavailableEntered,
             DomainEventTypeCatalog.OrphanedNoteSurfaced,
             DomainEventTypeCatalog.TempMediaOrphanCleanup,
             DomainEventTypeCatalog.EmbeddingReprocessQueued,

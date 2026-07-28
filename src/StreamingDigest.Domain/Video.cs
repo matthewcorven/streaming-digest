@@ -55,6 +55,7 @@ public sealed class Video : AuditedEntity
 
     public Guid ChannelId { get; set; }
     public Channel? Channel { get; set; }
+    public string? TitleOverride { get; set; }
     public string AuthorOriginal { get; set; } = string.Empty;
     public string? AuthorOverride { get; set; }
     public string? DescriptionOriginal { get; set; }
@@ -67,6 +68,8 @@ public sealed class Video : AuditedEntity
 
     public DateTimeOffset? PublishedAt { get; set; }
     public int? DurationSeconds { get; set; }
+    public string? ChaptersJson { get; set; }
+    public string? CaptionsJson { get; set; }
     public string? ThumbnailUrl
     {
         get => _thumbnailUrl;

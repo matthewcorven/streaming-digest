@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.Configuration;
 
@@ -38,6 +39,19 @@ public sealed class AdminOperationsServiceTests
         var operation = await service.GetOperationAsync(result.OperationId);
         Assert.NotNull(operation);
         Assert.Equal("healthy", operation!.HealthStatus);
+    }
+
+    [Fact]
+    public async Task TestEmbeddingServiceAsync_UsesInjectedEmbeddingProvider()
+    {
+        var embeddingService = new RecordingEmbeddingService();
+        var service = new AdminOperationsService(embeddingService: embeddingService);
+
+        var result = await service.TestEmbeddingServiceAsync();
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("The quick brown fox jumps over the lazy dog.", embeddingService.ReceivedText);
+        Assert.Contains("3 dimensions", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -357,5 +371,16 @@ public sealed class AdminOperationsServiceTests
 
         public Task<AdminActionStatus?> GetOperationAsync(Guid operationId, CancellationToken cancellationToken = default)
             => Task.FromResult<AdminActionStatus?>(_operations.TryGetValue(operationId, out var operation) ? operation : null);
+    }
+
+    private sealed class RecordingEmbeddingService : IEmbeddingService
+    {
+        public string? ReceivedText { get; private set; }
+
+        public Task<EmbeddingGenerationResult> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default)
+        {
+            ReceivedText = text;
+            return Task.FromResult(new EmbeddingGenerationResult("test-model", 3, [0.1, 0.2, 0.3]));
+        }
     }
 }
