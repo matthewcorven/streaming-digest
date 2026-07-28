@@ -11,9 +11,10 @@ END $$;
 
 DO $$
 BEGIN
+    DROP MATERIALIZED VIEW IF EXISTS public.video_search_documents CASCADE;
     IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
         EXECUTE $exec1$
-            CREATE MATERIALIZED VIEW IF NOT EXISTS public.video_search_documents AS
+            CREATE MATERIALIZED VIEW public.video_search_documents AS
             SELECT
                 s.id,
                 s.title_original,
@@ -97,7 +98,7 @@ BEGIN
         $exec1$;
     ELSE
         EXECUTE $exec2$
-            CREATE MATERIALIZED VIEW IF NOT EXISTS public.video_search_documents AS
+            CREATE MATERIALIZED VIEW public.video_search_documents AS
             SELECT
                 v.id,
                 v.title_original,
