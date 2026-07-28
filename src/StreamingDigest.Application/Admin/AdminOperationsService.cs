@@ -110,7 +110,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         {
             var sampleText = "The quick brown fox jumps over the lazy dog.";
             var embedding = await _embeddingService.GenerateEmbeddingAsync(sampleText, cancellationToken);
-            var message = $"Embedding service health check completed successfully. Model '{embedding.Model}' returned {embedding.Dimensions} dimensions for the sample text.";
+            var message = $"Embedding service health check completed successfully. Provider '{embedding.Provider}' model '{embedding.Model}' returned {embedding.Dimensions} dimensions for the sample text.";
             return await CreateCompletedResultAsync("test.embeddings", null, message, "healthy", cancellationToken);
         }
         catch (Exception ex)
@@ -549,7 +549,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private sealed class NullEmbeddingService : IEmbeddingService
     {
         public Task<EmbeddingGenerationResult> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default)
-            => Task.FromResult(new EmbeddingGenerationResult("null", 1, new[] { 0.0 }));
+        => Task.FromResult(new EmbeddingGenerationResult("null", "null", 1, new[] { 0.0 }));
     }
 
     private static void CopyDirectoryContents(string sourcePath, string destinationPath)

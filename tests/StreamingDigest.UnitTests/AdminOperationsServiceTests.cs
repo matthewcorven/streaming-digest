@@ -51,6 +51,7 @@ public sealed class AdminOperationsServiceTests
 
         Assert.Equal("completed", result.Status);
         Assert.Equal("The quick brown fox jumps over the lazy dog.", embeddingService.ReceivedText);
+        Assert.Contains("test-provider", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("3 dimensions", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -380,7 +381,7 @@ public sealed class AdminOperationsServiceTests
         public Task<EmbeddingGenerationResult> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default)
         {
             ReceivedText = text;
-            return Task.FromResult(new EmbeddingGenerationResult("test-model", 3, [0.1, 0.2, 0.3]));
+            return Task.FromResult(new EmbeddingGenerationResult("test-provider", "test-model", 3, [0.1, 0.2, 0.3]));
         }
     }
 }

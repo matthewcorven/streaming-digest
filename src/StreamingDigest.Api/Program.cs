@@ -116,6 +116,7 @@ builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
+builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();

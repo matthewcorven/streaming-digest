@@ -8,7 +8,7 @@ namespace StreamingDigest.UnitTests;
 
 public sealed class PostgresMigrationBaselineTests : IAsyncLifetime
 {
-    private const string ImageName = "postgres:16-alpine";
+    private const string ImageName = "pgvector/pgvector:pg17";
     private const string DatabaseName = "postgres";
     private const string Username = "postgres";
     private const string Password = "postgres";
@@ -38,7 +38,7 @@ public sealed class PostgresMigrationBaselineTests : IAsyncLifetime
         await using var connection = new NpgsqlConnection(_connectionString!);
         await connection.OpenAsync();
 
-        await using var command = new NpgsqlCommand("SELECT to_regclass('public.app_users') IS NOT NULL, to_regclass('public.channels') IS NOT NULL, to_regclass('public.videos') IS NOT NULL, to_regclass('public.domain_events') IS NOT NULL, to_regclass('public.digests') IS NOT NULL, to_regclass('public.media_artifacts') IS NOT NULL", connection);
+        await using var command = new NpgsqlCommand("SELECT to_regclass('public.app_users') IS NOT NULL, to_regclass('public.channels') IS NOT NULL, to_regclass('public.videos') IS NOT NULL, to_regclass('public.domain_events') IS NOT NULL, to_regclass('public.digests') IS NOT NULL, to_regclass('public.media_artifacts') IS NOT NULL, to_regclass('public.search_documents') IS NOT NULL, to_regclass('public.embeddings') IS NOT NULL", connection);
         await using var reader = await command.ExecuteReaderAsync();
 
         Assert.True(await reader.ReadAsync());
@@ -48,6 +48,8 @@ public sealed class PostgresMigrationBaselineTests : IAsyncLifetime
         Assert.True(reader.GetBoolean(3));
         Assert.True(reader.GetBoolean(4));
         Assert.True(reader.GetBoolean(5));
+        Assert.True(reader.GetBoolean(6));
+        Assert.True(reader.GetBoolean(7));
     }
 
     private async Task StartPostgresContainerAsync()
