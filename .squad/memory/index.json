@@ -28,5 +28,44 @@
     "status": "active",
     "createdAt": "2026-07-25T21:55:35.159Z",
     "updatedAt": "2026-07-25T21:55:35.159Z"
+  },
+  {
+    "id": "c11c997e-954d-4de9-98ab-d4f2bfc562d0",
+    "class": "DECISION",
+    "loadGuidance": "ALWAYS",
+    "title": "PR descriptions and issue links",
+    "path": ".squad/decisions/inbox/squad-pr-descriptions-and-issue-links-c11c997e.md",
+    "status": "active",
+    "createdAt": "2026-07-27T11:28:04.892Z",
+    "updatedAt": "2026-07-27T11:28:04.892Z"
+  },
+  {
+    "id": "d41cdb68-0602-4984-9354-d11d5b60c686",
+    "class": "decision",
+    "title": "PR quality directive",
+    "path": ".squad/memory/local/coordinator-pr-quality-directive-d41cdb68.md",
+    "status": "active",
+    "createdAt": "2026-07-27T11:45:18.433Z",
+    "updatedAt": "2026-07-27T11:45:18.433Z"
+  },
+  {
+    "id": "fce96309-678a-44e0-92c9-e58b0f0bd452",
+    "class": "DECISION",
+    "loadGuidance": "ALWAYS",
+    "title": "PR descriptions must include implementation, testing, and issue link",
+    "path": ".squad/decisions/inbox/squad-pr-descriptions-must-include-implementation-testing-and-issue-li-fce96309.md",
+    "status": "active",
+    "createdAt": "2026-07-27T17:13:04.745Z",
+    "updatedAt": "2026-07-27T17:13:04.745Z"
+  },
+  {
+    "id": "9ad21529-00a9-47e9-9494-c05c947ed7bf",
+    "class": "POLICY",
+    "loadGuidance": "ALWAYS",
+    "title": "PR review sessions must delegate immediately",
+    "path": ".squad/memory/policy-inbox/squad-pr-review-sessions-must-delegate-immediately-9ad21529.md",
+    "status": "active",
+    "createdAt": "2026-07-27T23:21:56.138Z",
+    "updatedAt": "2026-07-27T23:21:56.138Z"
   }
 ]
