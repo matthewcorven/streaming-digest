@@ -38,7 +38,8 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             item.SourceEntityId,
             parentVideoId,
             title,
-            description);
+            description,
+            sourceFieldName: "video_metadata");
     }
 
     private static GeneratedSearchDocument BuildSegmentDocument(Guid parentVideoId, SegmentTitleSummaryDocumentInput item)
@@ -51,7 +52,8 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             item.SourceEntityId,
             parentVideoId,
             title,
-            summary);
+            summary,
+            sourceFieldName: "segment_title_summary");
     }
 
     private static GeneratedSearchDocument BuildTranscriptChunkDocument(Guid parentVideoId, TranscriptChunkDocumentInput item)
@@ -63,7 +65,9 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             item.SourceEntityId,
             parentVideoId,
             string.Empty,
-            text);
+            text,
+            sourceFieldName: "text",
+            chunkIndex: item.ChunkIndex);
     }
 
     private static GeneratedSearchDocument BuildExternalLinkMetadataDocument(Guid parentVideoId, ExternalLinkMetadataDocumentInput item)
@@ -79,7 +83,8 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             item.SourceEntityId,
             parentVideoId,
             title,
-            body);
+            body,
+            sourceFieldName: "external_resource_metadata");
     }
 
     private static GeneratedSearchDocument BuildScrapedPageTextDocument(Guid parentVideoId, ScrapedPageTextDocumentInput item)
@@ -94,7 +99,8 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             item.SourceEntityId,
             parentVideoId,
             title,
-            body);
+            body,
+            sourceFieldName: "visible_text");
     }
 
     private static GeneratedSearchDocument BuildRepositoryReadmeChunkDocument(Guid parentVideoId, RepositoryReadmeChunkDocumentInput item)
@@ -106,7 +112,9 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             item.SourceEntityId,
             parentVideoId,
             string.Empty,
-            content);
+            content,
+            sourceFieldName: "readme_content",
+            chunkIndex: item.ChunkIndex);
     }
 
     private static GeneratedSearchDocument BuildNoteDocument(Guid parentVideoId, NoteDocumentInput item)
@@ -118,7 +126,8 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             item.SourceEntityId,
             parentVideoId,
             string.Empty,
-            markdown);
+            markdown,
+            sourceFieldName: "markdown");
     }
 
     private static GeneratedSearchDocument CreateDocument(
@@ -127,7 +136,9 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
         Guid sourceEntityId,
         Guid parentVideoId,
         string title,
-        string body)
+        string body,
+        string? sourceFieldName = null,
+        int? chunkIndex = null)
     {
         var normalizedTitle = Normalize(title);
         var normalizedBody = Normalize(body);
@@ -138,7 +149,9 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             parentVideoId,
             normalizedTitle,
             normalizedBody,
-            ComputeContentHash(normalizedTitle, normalizedBody));
+            ComputeContentHash(normalizedTitle, normalizedBody),
+            sourceFieldName,
+            chunkIndex);
     }
 
     private static string EffectiveValue(string? original, string? overrideValue)
@@ -187,7 +200,9 @@ public sealed record GeneratedSearchDocument(
     Guid ParentVideoId,
     string TitleEffective,
     string BodyEffective,
-    string ContentHash);
+    string ContentHash,
+    string? SourceFieldName = null,
+    int? ChunkIndex = null);
 
 public sealed record VideoMetadataDocumentInput(
     Guid SourceEntityId,
@@ -206,7 +221,8 @@ public sealed record SegmentTitleSummaryDocumentInput(
 public sealed record TranscriptChunkDocumentInput(
     Guid SourceEntityId,
     string? TextOriginal,
-    string? TextOverride = null);
+    string? TextOverride = null,
+    int? ChunkIndex = null);
 
 public sealed record ExternalLinkMetadataDocumentInput(
     Guid SourceEntityId,
@@ -231,7 +247,8 @@ public sealed record ScrapedPageTextDocumentInput(
 public sealed record RepositoryReadmeChunkDocumentInput(
     Guid SourceEntityId,
     string? ContentOriginal,
-    string? ContentOverride = null);
+    string? ContentOverride = null,
+    int? ChunkIndex = null);
 
 public sealed record NoteDocumentInput(
     Guid SourceEntityId,

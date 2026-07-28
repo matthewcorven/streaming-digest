@@ -119,8 +119,8 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
                 @document_type,
                 @source_entity_type,
                 @source_entity_id,
-                NULL,
-                NULL,
+                @source_field_name,
+                @chunk_index,
                 NULL,
                 NULL,
                 NULL,
@@ -139,7 +139,6 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
             )
             ON CONFLICT ON CONSTRAINT uq_search_documents_identity DO UPDATE SET
                 document_type = EXCLUDED.document_type,
-                parent_video_id = EXCLUDED.parent_video_id,
                 title_effective = EXCLUDED.title_effective,
                 body_effective = EXCLUDED.body_effective,
                 updated_at = CURRENT_TIMESTAMP
@@ -152,6 +151,8 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         command.Parameters.AddWithValue("document_type", document.DocumentType);
         command.Parameters.AddWithValue("source_entity_type", document.SourceEntityType);
         command.Parameters.AddWithValue("source_entity_id", document.SourceEntityId);
+        command.Parameters.AddWithValue("source_field_name", (object?)document.SourceFieldName ?? DBNull.Value);
+        command.Parameters.AddWithValue("chunk_index", (object?)document.ChunkIndex ?? DBNull.Value);
         command.Parameters.AddWithValue("parent_video_id", document.ParentVideoId);
         command.Parameters.AddWithValue("title_effective", (object?)document.TitleEffective ?? DBNull.Value);
         command.Parameters.AddWithValue("body_effective", (object?)document.BodyEffective ?? DBNull.Value);

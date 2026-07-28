@@ -127,6 +127,70 @@ public sealed class SearchDocumentEmbeddingStoreTests : IAsyncLifetime
         Assert.Equal(1L, reader.GetInt64(1));
     }
 
+    [Fact]
+    public async Task StoreAsync_keeps_shared_canonical_documents_separate_per_parent_video()
+    {
+        var generator = new SearchDocumentGenerator();
+        var repositoryId = Guid.NewGuid();
+        var firstVideoId = Guid.NewGuid();
+        var secondVideoId = Guid.NewGuid();
+
+        await InsertVideoAsync(firstVideoId);
+        await InsertVideoAsync(secondVideoId);
+
+        var firstDocument = Assert.Single(generator.Generate(new SearchDocumentGenerationRequest
+        {
+            ParentVideoId = firstVideoId,
+            RepositoryReadmeChunks =
+            [
+                new RepositoryReadmeChunkDocumentInput(
+                    SourceEntityId: repositoryId,
+                    ContentOriginal: "# Repo\nShared canonical readme")
+            ]
+        }));
+
+        var secondDocument = Assert.Single(generator.Generate(new SearchDocumentGenerationRequest
+        {
+            ParentVideoId = secondVideoId,
+            RepositoryReadmeChunks =
+            [
+                new RepositoryReadmeChunkDocumentInput(
+                    SourceEntityId: repositoryId,
+                    ContentOriginal: "# Repo\nShared canonical readme")
+            ]
+        }));
+
+        var store = new PostgresSearchDocumentEmbeddingStore(_connectionString!, new StubEmbeddingService());
+        await store.StoreAsync([firstDocument, secondDocument]);
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+                COUNT(*) AS document_count,
+                COUNT(DISTINCT parent_video_id) AS parent_video_count,
+                COUNT(DISTINCT e.search_document_id) AS embedding_document_count
+            FROM public.search_documents AS sd
+            INNER JOIN public.embeddings AS e
+                ON e.search_document_id = sd.id
+            WHERE sd.source_entity_type = @sourceEntityType
+              AND sd.source_entity_id = @sourceEntityId
+              AND sd.content_hash = @contentHash;
+            """,
+            connection);
+        command.Parameters.AddWithValue("sourceEntityType", SearchDocumentSourceEntityTypes.Repository);
+        command.Parameters.AddWithValue("sourceEntityId", repositoryId);
+        command.Parameters.AddWithValue("contentHash", firstDocument.ContentHash);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(2L, reader.GetInt64(0));
+        Assert.Equal(2L, reader.GetInt64(1));
+        Assert.Equal(2L, reader.GetInt64(2));
+    }
+
     private async Task StartPostgresContainerAsync()
     {
         var containerId = await RunProcessAsync("docker", new[]

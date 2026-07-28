@@ -7,8 +7,10 @@ namespace StreamingDigest.Application.Transcripts;
 public interface IStreamingDigestDbContext
 {
     DbSet<Video> Videos { get; }
+    DbSet<Segment> Segments { get; }
     DbSet<VideoTranscript> VideoTranscripts { get; }
     DbSet<TranscriptCue> TranscriptCues { get; }
+    DbSet<Note> Notes { get; }
     DbSet<DomainEvent> DomainEvents { get; }
     DatabaseFacade Database { get; }
 
