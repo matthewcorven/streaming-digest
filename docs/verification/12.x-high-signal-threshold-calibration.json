@@ -1,0 +1,506 @@
+{
+  "Task": "12.x-high-signal-threshold-calibration",
+  "GeneratedAtUtc": "2026-07-28T01:01:58.721103Z",
+  "Provider": "ollama",
+  "Endpoint": "http://localhost:11434/api/embed",
+  "Model": "bge-m3",
+  "Dimensions": 1024,
+  "CandidateCount": 12,
+  "SearchCount": 14,
+  "CandidateTitles": [
+    {
+      "Id": "blazor-js-interop",
+      "Title": "Blazor JS interop for browser APIs"
+    },
+    {
+      "Id": "blazor-state",
+      "Title": "Blazor component state and form flows"
+    },
+    {
+      "Id": "aspnet-cookie-auth",
+      "Title": "ASP.NET Core cookie authentication"
+    },
+    {
+      "Id": "aspnet-jwt-auth",
+      "Title": "ASP.NET Core JWT bearer authentication"
+    },
+    {
+      "Id": "pgvector-hnsw",
+      "Title": "pgvector HNSW versus IVFFlat"
+    },
+    {
+      "Id": "hybrid-ranking",
+      "Title": "Hybrid search ranking with vectors and keywords"
+    },
+    {
+      "Id": "azure-monitor-kql",
+      "Title": "Azure Monitor KQL and alerts"
+    },
+    {
+      "Id": "opentelemetry-tracing",
+      "Title": "OpenTelemetry tracing and logs"
+    },
+    {
+      "Id": "efcore-query-tuning",
+      "Title": "EF Core query tuning"
+    },
+    {
+      "Id": "postgres-index-tuning",
+      "Title": "PostgreSQL indexing for search workloads"
+    },
+    {
+      "Id": "k8s-autoscaling",
+      "Title": "Kubernetes autoscaling and rollouts"
+    },
+    {
+      "Id": "k8s-observability",
+      "Title": "Kubernetes observability with Prometheus and Grafana"
+    }
+  ],
+  "Cases": [
+    {
+      "Id": "search-01",
+      "Query": "blazor wasm javascript interop for clipboard and local storage",
+      "Rationale": "Targeted browser API search.",
+      "IntendedCandidateId": "blazor-js-interop",
+      "IntendedCandidateTitle": "Blazor JS interop for browser APIs",
+      "IntendedSimilarity": 0.7142569765762998,
+      "BestOther": {
+        "Id": "blazor-state",
+        "Title": "Blazor component state and form flows",
+        "Similarity": 0.46425105581822945
+      }
+    },
+    {
+      "Id": "search-02",
+      "Query": "blazor js interop wrappers for browser apis clipboard and local storage",
+      "Rationale": "Close paraphrase of the intended interop topic.",
+      "IntendedCandidateId": "blazor-js-interop",
+      "IntendedCandidateTitle": "Blazor JS interop for browser APIs",
+      "IntendedSimilarity": 0.7430246751741137,
+      "BestOther": {
+        "Id": "blazor-state",
+        "Title": "Blazor component state and form flows",
+        "Similarity": 0.4537439835940782
+      }
+    },
+    {
+      "Id": "search-03",
+      "Query": "blazor editform validation and component state management",
+      "Rationale": "Blazor near-miss pair with forms/state focus.",
+      "IntendedCandidateId": "blazor-state",
+      "IntendedCandidateTitle": "Blazor component state and form flows",
+      "IntendedSimilarity": 0.7172539164841156,
+      "BestOther": {
+        "Id": "blazor-js-interop",
+        "Title": "Blazor JS interop for browser APIs",
+        "Similarity": 0.5119951081401457
+      }
+    },
+    {
+      "Id": "search-04",
+      "Query": "blazor component state rerenders and editform validation",
+      "Rationale": "State-management phrasing that stays within the high-signal bar.",
+      "IntendedCandidateId": "blazor-state",
+      "IntendedCandidateTitle": "Blazor component state and form flows",
+      "IntendedSimilarity": 0.7277794792627529,
+      "BestOther": {
+        "Id": "blazor-js-interop",
+        "Title": "Blazor JS interop for browser APIs",
+        "Similarity": 0.53232242124508
+      }
+    },
+    {
+      "Id": "search-05",
+      "Query": "aspnet core cookie sign in flow and auth cookie expiration",
+      "Rationale": "Cookie-auth query paired against JWT near miss.",
+      "IntendedCandidateId": "aspnet-cookie-auth",
+      "IntendedCandidateTitle": "ASP.NET Core cookie authentication",
+      "IntendedSimilarity": 0.7254753548160815,
+      "BestOther": {
+        "Id": "aspnet-jwt-auth",
+        "Title": "ASP.NET Core JWT bearer authentication",
+        "Similarity": 0.5473887905477481
+      }
+    },
+    {
+      "Id": "search-06",
+      "Query": "jwt bearer token authentication for an aspnet core api",
+      "Rationale": "Bearer-token API query paired against cookie-auth near miss.",
+      "IntendedCandidateId": "aspnet-jwt-auth",
+      "IntendedCandidateTitle": "ASP.NET Core JWT bearer authentication",
+      "IntendedSimilarity": 0.7491973127712431,
+      "BestOther": {
+        "Id": "aspnet-cookie-auth",
+        "Title": "ASP.NET Core cookie authentication",
+        "Similarity": 0.5612103018325825
+      }
+    },
+    {
+      "Id": "search-07",
+      "Query": "pgvector hnsw versus ivfflat for nearest neighbor recall",
+      "Rationale": "Index-comparison search paired against hybrid-search near miss.",
+      "IntendedCandidateId": "pgvector-hnsw",
+      "IntendedCandidateTitle": "pgvector HNSW versus IVFFlat",
+      "IntendedSimilarity": 0.7487538009164182,
+      "BestOther": {
+        "Id": "hybrid-ranking",
+        "Title": "Hybrid search ranking with vectors and keywords",
+        "Similarity": 0.3846819278756513
+      }
+    },
+    {
+      "Id": "search-08",
+      "Query": "hybrid search ranking with vector similarity and keyword matching",
+      "Rationale": "Hybrid-ranking search paired against vector-index near miss.",
+      "IntendedCandidateId": "hybrid-ranking",
+      "IntendedCandidateTitle": "Hybrid search ranking with vectors and keywords",
+      "IntendedSimilarity": 0.7559707862843315,
+      "BestOther": {
+        "Id": "pgvector-hnsw",
+        "Title": "pgvector HNSW versus IVFFlat",
+        "Similarity": 0.5034391484166624
+      }
+    },
+    {
+      "Id": "search-09",
+      "Query": "kql query for failures traces and alerts in azure monitor",
+      "Rationale": "Azure Monitor query paired against OpenTelemetry observability near miss.",
+      "IntendedCandidateId": "azure-monitor-kql",
+      "IntendedCandidateTitle": "Azure Monitor KQL and alerts",
+      "IntendedSimilarity": 0.7170535929684041,
+      "BestOther": {
+        "Id": "efcore-query-tuning",
+        "Title": "EF Core query tuning",
+        "Similarity": 0.4376890631280288
+      }
+    },
+    {
+      "Id": "search-10",
+      "Query": "distributed tracing spans and structured logs with opentelemetry",
+      "Rationale": "Tracing query paired against Azure Monitor observability near miss.",
+      "IntendedCandidateId": "opentelemetry-tracing",
+      "IntendedCandidateTitle": "OpenTelemetry tracing and logs",
+      "IntendedSimilarity": 0.7198012526084863,
+      "BestOther": {
+        "Id": "k8s-observability",
+        "Title": "Kubernetes observability with Prometheus and Grafana",
+        "Similarity": 0.47164312889380516
+      }
+    },
+    {
+      "Id": "search-11",
+      "Query": "ef core projections asnotracking filtered include and split query performance",
+      "Rationale": "EF Core query-performance search paired against PostgreSQL indexing near miss.",
+      "IntendedCandidateId": "efcore-query-tuning",
+      "IntendedCandidateTitle": "EF Core query tuning",
+      "IntendedSimilarity": 0.7991952426147979,
+      "BestOther": {
+        "Id": "hybrid-ranking",
+        "Title": "Hybrid search ranking with vectors and keywords",
+        "Similarity": 0.46960685160067994
+      }
+    },
+    {
+      "Id": "search-12",
+      "Query": "postgresql gin trigram index and query planner tuning for search workloads",
+      "Rationale": "PostgreSQL indexing search paired against EF Core query-tuning near miss.",
+      "IntendedCandidateId": "postgres-index-tuning",
+      "IntendedCandidateTitle": "PostgreSQL indexing for search workloads",
+      "IntendedSimilarity": 0.731029653583253,
+      "BestOther": {
+        "Id": "hybrid-ranking",
+        "Title": "Hybrid search ranking with vectors and keywords",
+        "Similarity": 0.5064303530117585
+      }
+    },
+    {
+      "Id": "search-13",
+      "Query": "kubernetes horizontal pod autoscaling and deployment rollout strategy",
+      "Rationale": "Autoscaling query paired against Kubernetes observability near miss.",
+      "IntendedCandidateId": "k8s-autoscaling",
+      "IntendedCandidateTitle": "Kubernetes autoscaling and rollouts",
+      "IntendedSimilarity": 0.7193267825852738,
+      "BestOther": {
+        "Id": "k8s-observability",
+        "Title": "Kubernetes observability with Prometheus and Grafana",
+        "Similarity": 0.43647607966519786
+      }
+    },
+    {
+      "Id": "search-14",
+      "Query": "prometheus grafana dashboards and alerts for kubernetes pod health",
+      "Rationale": "Kubernetes observability query paired against autoscaling near miss.",
+      "IntendedCandidateId": "k8s-observability",
+      "IntendedCandidateTitle": "Kubernetes observability with Prometheus and Grafana",
+      "IntendedSimilarity": 0.7439718860282395,
+      "BestOther": {
+        "Id": "k8s-autoscaling",
+        "Title": "Kubernetes autoscaling and rollouts",
+        "Similarity": 0.4506130745249693
+      }
+    }
+  ],
+  "OwnDistribution": {
+    "Min": 0.7142569765762998,
+    "P25": 0.7194454000910769,
+    "Median": 0.7294045664230029,
+    "P75": 0.7475583221943736,
+    "Max": 0.7991952426147979,
+    "Mean": 0.7365779080481294
+  },
+  "BestOtherDistribution": {
+    "Min": 0.3846819278756513,
+    "P25": 0.45139580179224653,
+    "Median": 0.4706249902472426,
+    "P75": 0.5106039193580489,
+    "Max": 0.5612103018325825,
+    "Mean": 0.48082080630675833
+  },
+  "RecommendedThreshold": {
+    "ThresholdPercent": 70,
+    "Threshold": 0.7,
+    "ObservedGapWidth": 0.15304667474371736,
+    "MinOwnSimilarity": 0.7142569765762998,
+    "MaxBestOtherSimilarity": 0.5612103018325825,
+    "OwnPassCount": 14,
+    "OwnPassRate": 1,
+    "BestOtherPassCount": 0,
+    "BestOtherPassRate": 0,
+    "Rationale": "Selected the lowest whole-percent threshold that kept best-other pass at 0/14 while preserving the highest own-pass count (14/14)."
+  },
+  "ThresholdSweep": [
+    {
+      "ThresholdPercent": 70,
+      "Threshold": 0.7,
+      "OwnPassCount": 14,
+      "OwnPassRate": 1,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 71,
+      "Threshold": 0.71,
+      "OwnPassCount": 14,
+      "OwnPassRate": 1,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 72,
+      "Threshold": 0.72,
+      "OwnPassCount": 9,
+      "OwnPassRate": 0.6429,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 73,
+      "Threshold": 0.73,
+      "OwnPassCount": 7,
+      "OwnPassRate": 0.5,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 74,
+      "Threshold": 0.74,
+      "OwnPassCount": 6,
+      "OwnPassRate": 0.4286,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 75,
+      "Threshold": 0.75,
+      "OwnPassCount": 2,
+      "OwnPassRate": 0.1429,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 76,
+      "Threshold": 0.76,
+      "OwnPassCount": 1,
+      "OwnPassRate": 0.0714,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 77,
+      "Threshold": 0.77,
+      "OwnPassCount": 1,
+      "OwnPassRate": 0.0714,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 78,
+      "Threshold": 0.78,
+      "OwnPassCount": 1,
+      "OwnPassRate": 0.0714,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 79,
+      "Threshold": 0.79,
+      "OwnPassCount": 1,
+      "OwnPassRate": 0.0714,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 80,
+      "Threshold": 0.8,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 81,
+      "Threshold": 0.81,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 82,
+      "Threshold": 0.82,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 83,
+      "Threshold": 0.83,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 84,
+      "Threshold": 0.84,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 85,
+      "Threshold": 0.85,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 86,
+      "Threshold": 0.86,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 87,
+      "Threshold": 0.87,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 88,
+      "Threshold": 0.88,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 89,
+      "Threshold": 0.89,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 90,
+      "Threshold": 0.9,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 91,
+      "Threshold": 0.91,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 92,
+      "Threshold": 0.92,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 93,
+      "Threshold": 0.93,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 94,
+      "Threshold": 0.94,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 95,
+      "Threshold": 0.95,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 96,
+      "Threshold": 0.96,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 97,
+      "Threshold": 0.97,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    },
+    {
+      "ThresholdPercent": 98,
+      "Threshold": 0.98,
+      "OwnPassCount": 0,
+      "OwnPassRate": 0,
+      "BestOtherPassCount": 0,
+      "BestOtherPassRate": 0
+    }
+  ]
+}

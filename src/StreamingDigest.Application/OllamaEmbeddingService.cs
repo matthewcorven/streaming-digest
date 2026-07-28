@@ -30,7 +30,7 @@ public sealed class OllamaEmbeddingService : IEmbeddingService
         var payload = await response.Content.ReadFromJsonAsync<OllamaEmbeddingResponse>(cancellationToken: cancellationToken)
             ?? throw new InvalidOperationException("Ollama returned an empty embedding response.");
 
-        var embedding = payload.Embedding;
+        var embedding = payload.Embedding ?? payload.Embeddings?.FirstOrDefault();
         if (embedding is null || embedding.Count == 0)
         {
             throw new InvalidOperationException("Ollama returned no embedding values.");
@@ -100,6 +100,9 @@ public sealed class OllamaEmbeddingService : IEmbeddingService
     {
         [JsonPropertyName("embedding")]
         public List<double>? Embedding { get; set; }
+
+        [JsonPropertyName("embeddings")]
+        public List<List<double>>? Embeddings { get; set; }
 
         [JsonPropertyName("model")]
         public string? Model { get; set; }

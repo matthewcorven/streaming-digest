@@ -12,6 +12,6 @@ We decided High-Signal Match evaluation uses raw cosine similarity between the n
 ## Consequences
 
 - CONTEXT.md's cross-surface comparability sentence is corrected: the two surfaces share fingerprints but deliberately use different scales, and their percentages are not comparable.
-- `search.highSignalThresholdPercent` (default 80) is interpreted against absolute cosine similarity; the digest UI should label it as such to avoid confusion with `Relative similarity` tooltips.
+- `search.highSignalThresholdPercent` (default 70 after Issue #100 calibration) is interpreted against absolute cosine similarity; the digest UI should label it as such to avoid confusion with `Relative similarity` tooltips.
 - Digest high-signal rows show the absolute percentage; API/docs must not describe it as "relative similarity."
 - The daily-digest high-signal gate is now stable across corpus growth, embedding-space changes are still handled by the Embedding Transition skip rules (ADR-0008, ADR-0011).

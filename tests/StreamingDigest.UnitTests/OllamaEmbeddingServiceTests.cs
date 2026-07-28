@@ -85,6 +85,39 @@ public sealed class OllamaEmbeddingServiceTests
     }
 
     [Fact]
+    public async Task GenerateEmbeddingAsync_SupportsApiEmbedResponseShape()
+    {
+        var requests = new List<Uri>();
+        using var httpClient = new HttpClient(new StubHttpMessageHandler((request, cancellationToken) =>
+        {
+            requests.Add(request.RequestUri!);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"model\":\"bge-m3\",\"embeddings\":[[0.1,0.2,0.3,0.4]]}", Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:ollamaEndpoint"] = "http://localhost:11434/api/embed",
+                ["embedding:expectedDimensions"] = "4"
+            })
+            .Build();
+
+        var service = new OllamaEmbeddingService(httpClient, configuration);
+
+        var result = await service.GenerateEmbeddingAsync("sample");
+
+        Assert.Single(requests);
+        Assert.Equal("http://localhost:11434/api/embed", requests[0].ToString());
+        Assert.Equal("bge-m3", result.Model);
+        Assert.Equal(4, result.Dimensions);
+        Assert.Equal([0.1, 0.2, 0.3, 0.4], result.Values);
+    }
+
+    [Fact]
     public async Task GenerateEmbeddingAsync_UsesDefaultValuesWhenConfigurationIsMissing()
     {
         var requests = new List<Uri>();

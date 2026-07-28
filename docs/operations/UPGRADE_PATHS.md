@@ -48,7 +48,7 @@ App/service-only upgrades keep the same container topology, mounted volumes, pub
 | Scraper code change | Improved visible-text extraction | No | Pull scraper image and restart | Existing scraped pages remain as-is unless explicit retry/reprocess occurs |
 | Database schema change | Add `user_interaction_events` table | No | Backup recommended, run EF migration on startup | If migration fails, app enters maintenance mode and worker stays paused |
 | Config schema addition | Add optional config key with default | No | Auto-migrate JSON config on startup | If user config is invalid, show exact JSON path and expected schema |
-| DB app setting addition | Add `search.highSignalThresholdPercent` | No | Seed default setting if missing | Preserve user value if already present |
+| DB app setting addition | Add or recalibrate `search.highSignalThresholdPercent` | No | Seed missing keys; upgrades keep any existing stored value | To adopt a recalibrated default on an existing install, update the setting explicitly |
 | Ranking formula change | New cluster score formula version | No | New searches use new formula; no data migration unless specified | Store formula version in diagnostics for explainability |
 | LLM prompt/schema change | New segmentation JSON schema | No | Future processing uses new schema | Old segments remain unchanged unless user explicitly regenerates |
 | Embedding recommendation change | New recommended Ollama model | No | Show updated recommendation only | Do not silently switch active model |

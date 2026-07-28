@@ -63,6 +63,7 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
         {
             await connection.OpenAsync();
 
+            Assert.Equal("70", await GetSettingValueAsync(connection, "search.highSignalThresholdPercent"));
             Assert.Equal("0.99", await GetSettingValueAsync(connection, "search.textWeight"));
             Assert.Equal("false", await GetSettingValueAsync(connection, "observability.enabled"));
             Assert.Equal("false", await GetSettingValueAsync(connection, "debug.rawHtmlCapture.enabledDefault"));
@@ -90,6 +91,30 @@ public sealed class AppSettingsSeederTests : IAsyncLifetime
                 Assert.Equal(expectedSetting.Value, await GetSettingValueAsync(connection, expectedSetting.Key));
             }
         }
+    }
+
+    [Fact]
+    public async Task Seed_defaults_preserves_existing_high_signal_threshold_override()
+    {
+        var runner = new PostgresMigrationRunner(_connectionString!);
+        await runner.ApplyAsync();
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+
+        await using (var command = new NpgsqlCommand(
+            "INSERT INTO public.app_settings (key, value_json, updated_at) VALUES (@key, CAST(@valueJson AS jsonb), CURRENT_TIMESTAMP)",
+            connection))
+        {
+            command.Parameters.AddWithValue("key", "search.highSignalThresholdPercent");
+            command.Parameters.AddWithValue("valueJson", "80");
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var seeder = new AppSettingsSeeder();
+        await seeder.SeedDefaultsAsync(_connectionString!);
+
+        Assert.Equal("80", await GetSettingValueAsync(connection, "search.highSignalThresholdPercent"));
     }
 
     [Fact]

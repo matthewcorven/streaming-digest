@@ -91,7 +91,7 @@ Important settings:
 - `llm.jobs.globalConcurrency`, default `1`
 - `search.textWeight`
 - `search.vectorWeight`
-- `search.highSignalThresholdPercent`, default `80`
+- `search.highSignalThresholdPercent`, default `70`
 - `search.interactionBoostWindowDays`, default `90`
 - `search.recentSearchRetentionDays` if later added; MVP supports clear-all rather than granular deletion
 - `notifications.matrix.enabled`
@@ -1029,7 +1029,7 @@ Columns:
 - `payload_json jsonb not null` — new videos, new resources (repositories, websites), high-signal matches, failed/skipped items, active deferments
 - `created_at timestamptz not null`
 
-High-signal matching runs once, at digest assembly time, against the recent-search embeddings as of that moment, using raw cosine similarity against the global threshold (default 80%) — an absolute bar, not the rank-relative `relativeSimilarityPercent` scale used for Related Items (ADR-0012). Runs completing during an Embedding Transition skip high-signal evaluation; the catch-up run after a transition backfills evaluation for videos ingested mid-transition (ADR-0011). Rolling windows and "since you last looked" semantics are MVP+.
+High-signal matching runs once, at digest assembly time, against the recent-search embeddings as of that moment, using raw cosine similarity against the global threshold (default 70%) — an absolute bar, not the rank-relative `relativeSimilarityPercent` scale used for Related Items (ADR-0012). Runs completing during an Embedding Transition skip high-signal evaluation; the catch-up run after a transition backfills evaluation for videos ingested mid-transition (ADR-0011). Rolling windows and "since you last looked" semantics are MVP+.
 
 The dashboard's Digest section re-derives the active-deferments subsection from live state at render time (ADR-0006 amendment); the stored payload is never mutated, and Matrix renderings use the stored snapshot.
 
