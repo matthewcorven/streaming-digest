@@ -12,6 +12,7 @@
 
 <ItemGroup>
   <PackageReference Include="JsonSchema.Net" Version="5.0.0" />
+  <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.0" />
   <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
   <PackageReference Include="Microsoft.SemanticKernel" Version="1.55.0" />
   <PackageReference Include="Npgsql" Version="10.0.3" />

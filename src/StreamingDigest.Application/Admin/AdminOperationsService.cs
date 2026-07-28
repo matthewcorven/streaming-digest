@@ -14,12 +14,14 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly ApplicationConfiguration _configuration;
     private readonly string? _contentRootPath;
     private readonly IAdminOperationStore? _operationStore;
+    private readonly IEmbeddingService _embeddingService;
 
-    public AdminOperationsService(ApplicationConfiguration? configuration = null, string? contentRootPath = null, IAdminOperationStore? operationStore = null)
+    public AdminOperationsService(ApplicationConfiguration? configuration = null, string? contentRootPath = null, IAdminOperationStore? operationStore = null, IEmbeddingService? embeddingService = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
         _contentRootPath = contentRootPath;
         _operationStore = operationStore;
+        _embeddingService = embeddingService ?? new NullEmbeddingService();
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
@@ -103,7 +105,19 @@ public sealed class AdminOperationsService : IAdminOperationsService
         => await CreateCompletedResultAsync("test.matrix", null, "Matrix test notification completed successfully.", "healthy", cancellationToken);
 
     public async Task<AdminActionResult> TestEmbeddingServiceAsync(CancellationToken cancellationToken = default)
-        => await CreateCompletedResultAsync("test.embeddings", null, "Embedding service health check completed successfully.", "healthy", cancellationToken);
+    {
+        try
+        {
+            var sampleText = "The quick brown fox jumps over the lazy dog.";
+            var embedding = await _embeddingService.GenerateEmbeddingAsync(sampleText, cancellationToken);
+            var message = $"Embedding service health check completed successfully. Model '{embedding.Model}' returned {embedding.Dimensions} dimensions for the sample text.";
+            return await CreateCompletedResultAsync("test.embeddings", null, message, "healthy", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return await CreateResultAsync("test.embeddings", null, "failed", $"Embedding service health check failed: {ex.Message}", "error", cancellationToken);
+        }
+    }
 
     public async Task<AdminActionResult> TestAudioToTextServiceAsync(CancellationToken cancellationToken = default)
         => await CreateCompletedResultAsync("test.audio", null, "Audio-to-text service health check completed successfully.", "healthy", cancellationToken);
@@ -530,6 +544,12 @@ public sealed class AdminOperationsService : IAdminOperationsService
         }
 
         return new BackupAssetStatus("config", "completed", configDirectory, $"Copied configuration files: {string.Join(", ", copiedFiles)}");
+    }
+
+    private sealed class NullEmbeddingService : IEmbeddingService
+    {
+        public Task<EmbeddingGenerationResult> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new EmbeddingGenerationResult("null", 1, new[] { 0.0 }));
     }
 
     private static void CopyDirectoryContents(string sourcePath, string destinationPath)
