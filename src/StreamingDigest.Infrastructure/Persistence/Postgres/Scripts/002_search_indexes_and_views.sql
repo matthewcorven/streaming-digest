@@ -1,89 +1,80 @@
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
-        EXECUTE $exec1$
-            CREATE MATERIALIZED VIEW IF NOT EXISTS public.video_search_documents AS
-            SELECT
-                v.id,
-                v.title_original,
-                v.description_original,
-                to_tsvector('english', coalesce(v.title_original, '') || ' ' || coalesce(v.description_original, '')) AS search_vector,
-                NULL::vector(384) AS embedding_vector
-            FROM public.videos AS v;
-
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_video_search_documents_id ON public.video_search_documents (id);
-            CREATE INDEX IF NOT EXISTS idx_video_search_documents_tsv ON public.video_search_documents USING gin (search_vector);
-
-            CREATE INDEX IF NOT EXISTS idx_video_search_documents_embedding_vector
-                ON public.video_search_documents
-                USING hnsw (embedding_vector vector_cosine_ops);
-
-            CREATE OR REPLACE FUNCTION public.search_videos(query_text text, query_vector vector(384) DEFAULT NULL::vector(384), limit_count integer DEFAULT 10)
-            RETURNS TABLE (
-                video_id uuid,
-                title text,
-                description text,
-                text_rank real,
-                vector_similarity double precision
-            )
-            LANGUAGE sql
-            AS $func1$
-                SELECT
-                    s.id AS video_id,
-                    s.title_original AS title,
-                    s.description_original AS description,
-                    ts_rank_cd(s.search_vector, websearch_to_tsquery('english', coalesce(query_text, ''))) AS text_rank,
-                    0.0::double precision AS vector_similarity
-                FROM public.video_search_documents AS s
-                WHERE coalesce(query_text, '') = '' OR s.search_vector @@ websearch_to_tsquery('english', query_text)
-                ORDER BY text_rank DESC
-                LIMIT greatest(coalesce(limit_count, 10), 1);
-            $func1$;
-        $exec1$;
-    ELSE
-        EXECUTE $exec2$
-            CREATE MATERIALIZED VIEW IF NOT EXISTS public.video_search_documents AS
-            SELECT
-                v.id,
-                v.title_original,
-                v.description_original,
-                to_tsvector('english', coalesce(v.title_original, '') || ' ' || coalesce(v.description_original, '')) AS search_vector,
-                NULL::text AS embedding_vector
-            FROM public.videos AS v;
-
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_video_search_documents_id ON public.video_search_documents (id);
-            CREATE INDEX IF NOT EXISTS idx_video_search_documents_tsv ON public.video_search_documents USING gin (search_vector);
-
-            CREATE OR REPLACE FUNCTION public.search_videos(query_text text, query_vector text DEFAULT NULL::text, limit_count integer DEFAULT 10)
-            RETURNS TABLE (
-                video_id uuid,
-                title text,
-                description text,
-                text_rank real,
-                vector_similarity double precision
-            )
-            LANGUAGE sql
-            AS $func2$
-                SELECT
-                    s.id AS video_id,
-                    s.title_original AS title,
-                    s.description_original AS description,
-                    ts_rank_cd(s.search_vector, websearch_to_tsquery('english', coalesce(query_text, ''))) AS text_rank,
-                    0.0::double precision AS vector_similarity
-                FROM public.video_search_documents AS s
-                WHERE coalesce(query_text, '') = '' OR s.search_vector @@ websearch_to_tsquery('english', query_text)
-                ORDER BY text_rank DESC
-                LIMIT greatest(coalesce(limit_count, 10), 1);
-            $func2$;
-        $exec2$;
-    END IF;
-END $$;
-
-DO $$
-BEGIN
     IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_trgm') THEN
-        CREATE INDEX IF NOT EXISTS idx_video_search_documents_title_trgm
-            ON public.video_search_documents
-            USING gin (coalesce(title_original, '') gin_trgm_ops);
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
     END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS public.search_documents (
+    id uuid PRIMARY KEY,
+    document_type text NOT NULL,
+    source_entity_type text NOT NULL,
+    source_entity_id uuid NOT NULL,
+    parent_video_id uuid NULL,
+    title_effective text NOT NULL DEFAULT '',
+    body_effective text NOT NULL DEFAULT '',
+    content_hash text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_documents_parent_video_id
+    ON public.search_documents (parent_video_id);
+
+CREATE INDEX IF NOT EXISTS idx_search_documents_document_type
+    ON public.search_documents (document_type);
+
+CREATE INDEX IF NOT EXISTS idx_search_documents_tsv
+    ON public.search_documents
+    USING gin (to_tsvector('english', coalesce(title_effective, '') || ' ' || coalesce(body_effective, '')));
+
+CREATE INDEX IF NOT EXISTS idx_search_documents_title_trgm
+    ON public.search_documents
+    USING gin (coalesce(title_effective, '') gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_search_documents_body_trgm
+    ON public.search_documents
+    USING gin (coalesce(body_effective, '') gin_trgm_ops);
+
+CREATE OR REPLACE FUNCTION public.search_videos(query_text text, limit_count integer DEFAULT 10)
+RETURNS TABLE (
+    video_id uuid,
+    title text,
+    description text,
+    text_rank real,
+    trigram_similarity double precision
+)
+LANGUAGE sql
+AS $$
+    WITH ranked_documents AS (
+        SELECT
+            s.parent_video_id AS video_id,
+            s.title_effective AS title,
+            s.body_effective AS description,
+            ts_rank_cd(
+                setweight(to_tsvector('english', coalesce(s.title_effective, '')), 'A') ||
+                setweight(to_tsvector('english', coalesce(s.body_effective, '')), 'B'),
+                websearch_to_tsquery('english', coalesce(query_text, ''))
+            ) AS text_rank,
+            GREATEST(
+                similarity(s.title_effective, coalesce(query_text, '')),
+                similarity(s.body_effective, coalesce(query_text, ''))
+            ) AS trigram_similarity
+        FROM public.search_documents AS s
+        WHERE coalesce(query_text, '') = ''
+           OR (
+                setweight(to_tsvector('english', coalesce(s.title_effective, '')), 'A') ||
+                setweight(to_tsvector('english', coalesce(s.body_effective, '')), 'B')
+            ) @@ websearch_to_tsquery('english', query_text)
+           OR similarity(s.title_effective, coalesce(query_text, '')) > 0.1
+           OR similarity(s.body_effective, coalesce(query_text, '')) > 0.1
+    )
+    SELECT
+        video_id,
+        title,
+        description,
+        text_rank,
+        trigram_similarity
+    FROM ranked_documents
+    ORDER BY text_rank DESC, trigram_similarity DESC, video_id
+    LIMIT greatest(coalesce(limit_count, 10), 1);
+$$;

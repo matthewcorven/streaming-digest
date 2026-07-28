@@ -119,6 +119,8 @@ else
 builder.Services.AddSingleton(compatibilityEvaluation);
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
+builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
 {

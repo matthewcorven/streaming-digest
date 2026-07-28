@@ -40,12 +40,11 @@ public sealed class PostgresMigrationSupportTests : IAsyncLifetime
 
         await using var command = new NpgsqlCommand(@"
             SELECT
-                EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'video_search_documents' AND c.relkind = 'm') AS has_materialized_view,
+                EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'search_documents' AND c.relkind = 'r') AS has_table,
                 EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'search_videos') AS has_search_function,
-                EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'idx_video_search_documents_tsv' AND c.relkind = 'i') AS has_tsv_index,
-                EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'idx_video_search_documents_title_trgm' AND c.relkind = 'i') AS has_trgm_index,
-                EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS has_pg_trgm_extension,
-                EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'unaccent') AS has_unaccent_extension;
+                EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'idx_search_documents_tsv' AND c.relkind = 'i') AS has_tsv_index,
+                EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'idx_search_documents_title_trgm' AND c.relkind = 'i') AS has_trgm_index,
+                EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS has_pg_trgm_extension;
         ", connection);
 
         await using var reader = await command.ExecuteReaderAsync();
@@ -55,7 +54,38 @@ public sealed class PostgresMigrationSupportTests : IAsyncLifetime
         Assert.True(reader.GetBoolean(2));
         Assert.True(reader.GetBoolean(3));
         Assert.True(reader.GetBoolean(4));
-        Assert.True(reader.GetBoolean(5));
+    }
+
+    [Fact]
+    public async Task Search_videos_function_matches_partial_query_against_fixture_documents()
+    {
+        var runner = new PostgresMigrationRunner(_connectionString!);
+        await runner.ApplyAsync();
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+
+        await using var insertCommand = new NpgsqlCommand(@"
+            INSERT INTO public.search_documents (id, document_type, source_entity_type, source_entity_id, parent_video_id, title_effective, body_effective, content_hash)
+            VALUES (:id, :document_type, :source_entity_type, :source_entity_id, :parent_video_id, :title_effective, :body_effective, :content_hash)
+        ", connection);
+        insertCommand.Parameters.AddWithValue("id", Guid.NewGuid());
+        insertCommand.Parameters.AddWithValue("document_type", "video_metadata");
+        insertCommand.Parameters.AddWithValue("source_entity_type", "video");
+        insertCommand.Parameters.AddWithValue("source_entity_id", Guid.NewGuid());
+        insertCommand.Parameters.AddWithValue("parent_video_id", Guid.NewGuid());
+        insertCommand.Parameters.AddWithValue("title_effective", "Fixture search document");
+        insertCommand.Parameters.AddWithValue("body_effective", "A useful body for the partial query test.");
+        insertCommand.Parameters.AddWithValue("content_hash", "fixture-hash");
+        await insertCommand.ExecuteNonQueryAsync();
+
+        await using var command = new NpgsqlCommand("SELECT title, description FROM public.search_videos(:query_text, 5)", connection);
+        command.Parameters.AddWithValue("query_text", "fixtur");
+        await using var reader = await command.ExecuteReaderAsync();
+
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("Fixture search document", reader.GetString(0));
+        Assert.Equal("A useful body for the partial query test.", reader.GetString(1));
     }
 
     private async Task StartPostgresContainerAsync()
