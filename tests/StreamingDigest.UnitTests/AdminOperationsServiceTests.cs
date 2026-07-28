@@ -3,6 +3,8 @@ using System.Text.Json;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Application.Transcripts;
+using StreamingDigest.Domain;
 
 namespace StreamingDigest.UnitTests;
 
@@ -51,6 +53,7 @@ public sealed class AdminOperationsServiceTests
 
         Assert.Equal("completed", result.Status);
         Assert.Equal("The quick brown fox jumps over the lazy dog.", embeddingService.ReceivedText);
+        Assert.Contains("test-provider", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("3 dimensions", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -103,6 +106,38 @@ public sealed class AdminOperationsServiceTests
         Assert.Equal("failed", result.Status);
         Assert.Equal("retry.video", result.OperationType);
         Assert.Contains("not a valid GUID", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RetryFailedVideoAsync_WithValidVideoId_InvokesTranscriptIngestion()
+    {
+        var transcriptService = new RecordingTranscriptIngestionService();
+        var service = new AdminOperationsService(transcriptIngestionService: transcriptService);
+        var videoId = Guid.NewGuid();
+
+        var result = await service.RetryFailedVideoAsync(videoId.ToString());
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("retry.video", result.OperationType);
+        Assert.Equal(videoId, transcriptService.ReceivedVideoId);
+        Assert.Contains("Transcript", result.Message, StringComparison.Ordinal);
+        Assert.Contains("youtube_caption", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReprocessVideoAsync_WithValidVideoId_InvokesTranscriptIngestion()
+    {
+        var transcriptService = new RecordingTranscriptIngestionService();
+        var service = new AdminOperationsService(transcriptIngestionService: transcriptService);
+        var videoId = Guid.NewGuid();
+
+        var result = await service.ReprocessVideoAsync(videoId.ToString());
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("reprocess.video", result.OperationType);
+        Assert.Equal(videoId, transcriptService.ReceivedVideoId);
+        Assert.Contains("Transcript", result.Message, StringComparison.Ordinal);
+        Assert.Contains("youtube_caption", result.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -380,7 +415,25 @@ public sealed class AdminOperationsServiceTests
         public Task<EmbeddingGenerationResult> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default)
         {
             ReceivedText = text;
-            return Task.FromResult(new EmbeddingGenerationResult("test-model", 3, [0.1, 0.2, 0.3]));
+            return Task.FromResult(new EmbeddingGenerationResult("test-provider", "test-model", 3, [0.1, 0.2, 0.3]));
+        }
+    }
+
+    private sealed class RecordingTranscriptIngestionService : ITranscriptIngestionService
+    {
+        public Guid? ReceivedVideoId { get; private set; }
+
+        public Task<TranscriptIngestionResult> IngestAsync(Guid videoId, CancellationToken ct)
+        {
+            ReceivedVideoId = videoId;
+            return Task.FromResult(new TranscriptIngestionResult(
+                Succeeded: true,
+                TranscriptId: Guid.NewGuid(),
+                SourceType: VideoTranscriptSourceTypes.YouTubeCaption,
+                LanguageCode: "en",
+                CueCount: 4,
+                ErrorMessage: null,
+                Skipped: false));
         }
     }
 }

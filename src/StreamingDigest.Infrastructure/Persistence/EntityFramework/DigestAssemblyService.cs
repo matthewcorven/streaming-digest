@@ -87,5 +87,5 @@ public sealed class DigestAssemblyRequest
     public IReadOnlyCollection<ActiveDeferment> ActiveDeferments { get; init; } = Array.Empty<ActiveDeferment>();
     public bool IsEmbeddingTransitionActive { get; init; }
     public bool IsBackfillRun { get; init; }
-    public double HighSignalThresholdPercent { get; init; } = 80d;
+    public double HighSignalThresholdPercent { get; init; } = 70d;
 }

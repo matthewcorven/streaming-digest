@@ -14,11 +14,15 @@ public sealed class TranscriptIngestionService(
     IYouTubeCaptionClient captionClient,
     IAudioToTextProvider? audioToTextProvider = null,
     ITemporaryMediaManager? temporaryMediaManager = null,
-    Func<Guid, CancellationToken, Task<string?>>? mediaFileResolver = null) : ITranscriptIngestionService
+    IVideoMediaSourceResolver? mediaFileResolver = null,
+    ISearchDocumentGenerator? searchDocumentGenerator = null,
+    ISearchDocumentEmbeddingStore? searchDocumentEmbeddingStore = null) : ITranscriptIngestionService
 {
     private readonly IAudioToTextProvider? _audioToTextProvider = audioToTextProvider;
     private readonly ITemporaryMediaManager? _temporaryMediaManager = temporaryMediaManager;
-    private readonly Func<Guid, CancellationToken, Task<string?>>? _mediaFileResolver = mediaFileResolver;
+    private readonly IVideoMediaSourceResolver? _mediaFileResolver = mediaFileResolver;
+    private readonly ISearchDocumentGenerator? _searchDocumentGenerator = searchDocumentGenerator;
+    private readonly ISearchDocumentEmbeddingStore? _searchDocumentEmbeddingStore = searchDocumentEmbeddingStore;
 
     public async Task<TranscriptIngestionResult> IngestAsync(Guid videoId, CancellationToken ct)
     {
@@ -202,6 +206,8 @@ public sealed class TranscriptIngestionService(
         await context.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
+        await PersistSearchDocumentsAsync(video, transcript, ct);
+
         return new TranscriptIngestionResult(
            Succeeded: true,
            TranscriptId: transcript.Id,
@@ -212,6 +218,73 @@ public sealed class TranscriptIngestionService(
            Skipped: false);
     }
 
+    private async Task PersistSearchDocumentsAsync(Video video, VideoTranscript transcript, CancellationToken cancellationToken)
+    {
+        if (_searchDocumentGenerator is null || _searchDocumentEmbeddingStore is null)
+        {
+           return;
+        }
+
+        var activeSegments = await context.Segments
+           .AsNoTracking()
+           .Where(segment => segment.VideoId == video.Id && segment.IsActive)
+           .OrderBy(segment => segment.Sequence)
+           .ToListAsync(cancellationToken);
+
+        var activeSegmentIds = activeSegments.Select(segment => segment.Id).ToArray();
+        var notes = await context.Notes
+           .AsNoTracking()
+           .Where(note => note.DeletedAt == null
+               && ((note.TargetType == "video" && note.TargetId == video.Id)
+                   || (note.TargetType == "segment" && activeSegmentIds.Contains(note.TargetId))))
+           .ToListAsync(cancellationToken);
+
+        var request = new SearchDocumentGenerationRequest
+        {
+           ParentVideoId = video.Id,
+           VideoMetadata =
+           [
+               new VideoMetadataDocumentInput(
+                   video.Id,
+                   video.Title,
+                   video.TitleOverride,
+                   video.DescriptionOriginal,
+                   video.DescriptionOverride)
+           ],
+           SegmentTitlesAndSummaries = activeSegments
+               .Select(segment => new SegmentTitleSummaryDocumentInput(
+                   segment.Id,
+                   segment.TitleOriginal,
+                   segment.TitleOverride,
+                   segment.SummaryOriginal,
+                   segment.SummaryOverride))
+               .ToArray(),
+           TranscriptChunks = transcript.Cues
+               .OrderBy(cue => cue.Sequence)
+               .Select(cue => new TranscriptChunkDocumentInput(
+                   cue.Id,
+                   cue.TextOriginal,
+                   cue.TextOverride,
+                   cue.Sequence))
+               .ToArray(),
+           Notes = notes
+               .Select(note => new NoteDocumentInput(
+                   note.Id,
+                   note.Markdown))
+               .ToArray()
+        };
+
+        var documents = _searchDocumentGenerator.Generate(request);
+        if (documents.Count == 0)
+        {
+           return;
+        }
+
+        await _searchDocumentEmbeddingStore.StoreAsync(documents, cancellationToken: cancellationToken);
+        video.SearchIndexedAt = DateTimeOffset.UtcNow;
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task<AudioTranscriptionResult?> TryTranscribeWithFallbackAsync(Guid videoId, CancellationToken ct)
     {
         if (_audioToTextProvider is null)
@@ -219,15 +292,16 @@ public sealed class TranscriptIngestionService(
            return null;
         }
 
-        var mediaFilePath = await ResolveMediaFilePathAsync(videoId, ct);
-        if (string.IsNullOrWhiteSpace(mediaFilePath))
+        var resolvedMedia = await ResolveMediaFileAsync(videoId, ct);
+        if (resolvedMedia is null || string.IsNullOrWhiteSpace(resolvedMedia.FilePath))
         {
            return null;
         }
 
+        var mediaFilePath = resolvedMedia.FilePath;
         var tempMediaFilePath = mediaFilePath;
         var createdTemporaryMedia = false;
-        if (_temporaryMediaManager is not null)
+        if (_temporaryMediaManager is not null && !resolvedMedia.DeleteWhenFinished)
         {
            tempMediaFilePath = await _temporaryMediaManager.CreateTemporaryMediaAsync(mediaFilePath, ct);
            createdTemporaryMedia = true;
@@ -262,17 +336,40 @@ public sealed class TranscriptIngestionService(
                    // Best effort cleanup; a failed delete should not override the transcript result.
                }
            }
+
+           if (resolvedMedia.DeleteWhenFinished)
+           {
+               try
+               {
+                   if (_temporaryMediaManager is not null)
+                   {
+                       await _temporaryMediaManager.DeleteTemporaryMediaAsync(mediaFilePath, ct);
+                   }
+                   else if (File.Exists(mediaFilePath))
+                   {
+                       File.Delete(mediaFilePath);
+                   }
+               }
+               catch (OperationCanceledException) when (ct.IsCancellationRequested)
+               {
+                   throw;
+               }
+               catch (Exception)
+               {
+                   // Best effort cleanup; a failed delete should not override the transcript result.
+               }
+           }
         }
     }
 
-    private async Task<string?> ResolveMediaFilePathAsync(Guid videoId, CancellationToken ct)
+    private async Task<ResolvedMediaFile?> ResolveMediaFileAsync(Guid videoId, CancellationToken ct)
     {
         if (_mediaFileResolver is null)
         {
            return null;
         }
 
-        return await _mediaFileResolver(videoId, ct);
+        return await _mediaFileResolver.ResolveAsync(videoId, ct);
     }
 
     internal static CaptionTrackInfo? SelectPreferredTrack(IReadOnlyList<CaptionTrackInfo> tracks)

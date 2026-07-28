@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using StreamingDigest.Application;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
@@ -138,6 +139,77 @@ public sealed class TranscriptIngestionServiceTests : IDisposable
         Assert.Equal(VideoTranscriptSourceTypes.YouTubeAutoCaption, transcript.SourceType);
     }
 
+    [Fact]
+    public async Task IngestAsync_generates_and_stores_search_documents_for_the_video()
+    {
+        var video = await SeedVideoAsync("video-search-index");
+        video.TitleOverride = "Indexed title override";
+        video.DescriptionOriginal = "Video description for indexing";
+
+        var activeGeneration = new SegmentGeneration
+        {
+            VideoId = video.Id,
+            SourceType = SegmentSourceTypes.DeterministicChunk,
+            GenerationVersion = 1,
+            IsActive = true,
+            RequiresUserApproval = false,
+            Status = "active"
+        };
+
+        _context.SegmentGenerations.Add(activeGeneration);
+        _context.Segments.Add(new Segment
+        {
+            VideoId = video.Id,
+            SegmentGenerationId = activeGeneration.Id,
+            SourceType = SegmentSourceTypes.DeterministicChunk,
+            Sequence = 1,
+            StartSeconds = 0m,
+            EndSeconds = 30m,
+            TitleOriginal = "Segment title",
+            SummaryOriginal = "Segment summary",
+            IsActive = true
+        });
+        _context.Notes.Add(new Note
+        {
+            TargetType = "video",
+            TargetId = video.Id,
+            Markdown = "# Note\nIndexed note"
+        });
+        await _context.SaveChangesAsync();
+
+        var store = new RecordingSearchDocumentEmbeddingStore();
+        var service = new TranscriptIngestionService(
+            _context,
+            new StubCaptionClient(
+                [new CaptionTrackInfo("en", false, "en-manual")],
+                new Dictionary<string, CaptionFetchResult>
+                {
+                    ["en-manual"] = CreateFetchResult("en", false, "Indexed transcript")
+                }),
+            searchDocumentGenerator: new SearchDocumentGenerator(),
+            searchDocumentEmbeddingStore: store);
+
+        var result = await service.IngestAsync(video.Id, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        var storedDocuments = Assert.Single(store.StoredDocumentBatches);
+        Assert.Contains(storedDocuments, document => document.DocumentType == SearchDocumentTypeNames.VideoMetadata);
+        Assert.Contains(storedDocuments, document => document.DocumentType == SearchDocumentTypeNames.SegmentTitle);
+        Assert.Contains(storedDocuments, document => document.DocumentType == SearchDocumentTypeNames.Note);
+        Assert.Equal(2, storedDocuments.Count(document => document.DocumentType == SearchDocumentTypeNames.TranscriptChunk));
+        Assert.All(
+            storedDocuments.Where(document => document.DocumentType == SearchDocumentTypeNames.TranscriptChunk),
+            document => Assert.Equal("text", document.SourceFieldName));
+        Assert.Equal([1, 2], storedDocuments
+            .Where(document => document.DocumentType == SearchDocumentTypeNames.TranscriptChunk)
+            .Select(document => document.ChunkIndex)
+            .OrderBy(index => index)
+            .ToArray());
+
+        var updatedVideo = await _context.Videos.SingleAsync(candidate => candidate.Id == video.Id);
+        Assert.NotNull(updatedVideo.SearchIndexedAt);
+    }
+
     public void Dispose()
     {
         _context.Dispose();
@@ -195,6 +267,21 @@ public sealed class TranscriptIngestionServiceTests : IDisposable
         {
             LastFetchedTrackCode = trackCode;
             return Task.FromResult(fetchResults[trackCode]);
+        }
+    }
+
+    private sealed class RecordingSearchDocumentEmbeddingStore : ISearchDocumentEmbeddingStore
+    {
+        public List<IReadOnlyList<GeneratedSearchDocument>> StoredDocumentBatches { get; } = [];
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> StoreAsync(
+            IEnumerable<GeneratedSearchDocument> documents,
+            Guid? generatedByOperationId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var batch = documents.ToArray();
+            StoredDocumentBatches.Add(batch);
+            return Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
         }
     }
 }

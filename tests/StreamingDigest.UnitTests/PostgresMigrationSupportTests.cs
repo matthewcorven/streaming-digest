@@ -13,6 +13,98 @@ public sealed class PostgresMigrationSupportTests : IAsyncLifetime
     private const string DatabaseName = "postgres";
     private const string Username = "postgres";
     private const string Password = "postgres";
+    private const string BaselineMigrationResourceName = "StreamingDigest.Infrastructure.Persistence.Postgres.Scripts.001_initial_baseline.sql";
+    private const string LegacySearchIndexesAndViewsSql = """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
+                EXECUTE $exec1$
+                    CREATE MATERIALIZED VIEW IF NOT EXISTS public.video_search_documents AS
+                    SELECT
+                        v.id,
+                        v.title_original,
+                        v.description_original,
+                        to_tsvector('english', coalesce(v.title_original, '') || ' ' || coalesce(v.description_original, '')) AS search_vector,
+                        NULL::vector(384) AS embedding_vector
+                    FROM public.videos AS v;
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_video_search_documents_id ON public.video_search_documents (id);
+                    CREATE INDEX IF NOT EXISTS idx_video_search_documents_tsv ON public.video_search_documents USING gin (search_vector);
+
+                    CREATE INDEX IF NOT EXISTS idx_video_search_documents_embedding_vector
+                        ON public.video_search_documents
+                        USING hnsw (embedding_vector vector_cosine_ops);
+
+                    CREATE OR REPLACE FUNCTION public.search_videos(query_text text, query_vector vector(384) DEFAULT NULL::vector(384), limit_count integer DEFAULT 10)
+                    RETURNS TABLE (
+                        video_id uuid,
+                        title text,
+                        description text,
+                        text_rank real,
+                        vector_similarity double precision
+                    )
+                    LANGUAGE sql
+                    AS $func1$
+                        SELECT
+                            s.id AS video_id,
+                            s.title_original AS title,
+                            s.description_original AS description,
+                            ts_rank_cd(s.search_vector, websearch_to_tsquery('english', coalesce(query_text, ''))) AS text_rank,
+                            0.0::double precision AS vector_similarity
+                        FROM public.video_search_documents AS s
+                        WHERE coalesce(query_text, '') = '' OR s.search_vector @@ websearch_to_tsquery('english', query_text)
+                        ORDER BY text_rank DESC
+                        LIMIT greatest(coalesce(limit_count, 10), 1);
+                    $func1$;
+                $exec1$;
+            ELSE
+                EXECUTE $exec2$
+                    CREATE MATERIALIZED VIEW IF NOT EXISTS public.video_search_documents AS
+                    SELECT
+                        v.id,
+                        v.title_original,
+                        v.description_original,
+                        to_tsvector('english', coalesce(v.title_original, '') || ' ' || coalesce(v.description_original, '')) AS search_vector,
+                        NULL::text AS embedding_vector
+                    FROM public.videos AS v;
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_video_search_documents_id ON public.video_search_documents (id);
+                    CREATE INDEX IF NOT EXISTS idx_video_search_documents_tsv ON public.video_search_documents USING gin (search_vector);
+
+                    CREATE OR REPLACE FUNCTION public.search_videos(query_text text, query_vector text DEFAULT NULL::text, limit_count integer DEFAULT 10)
+                    RETURNS TABLE (
+                        video_id uuid,
+                        title text,
+                        description text,
+                        text_rank real,
+                        vector_similarity double precision
+                    )
+                    LANGUAGE sql
+                    AS $func2$
+                        SELECT
+                            s.id AS video_id,
+                            s.title_original AS title,
+                            s.description_original AS description,
+                            ts_rank_cd(s.search_vector, websearch_to_tsquery('english', coalesce(query_text, ''))) AS text_rank,
+                            0.0::double precision AS vector_similarity
+                        FROM public.video_search_documents AS s
+                        WHERE coalesce(query_text, '') = '' OR s.search_vector @@ websearch_to_tsquery('english', query_text)
+                        ORDER BY text_rank DESC
+                        LIMIT greatest(coalesce(limit_count, 10), 1);
+                    $func2$;
+                $exec2$;
+            END IF;
+        END $$;
+
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_trgm') THEN
+                CREATE INDEX IF NOT EXISTS idx_video_search_documents_title_trgm
+                    ON public.video_search_documents
+                    USING gin (coalesce(title_original, '') gin_trgm_ops);
+            END IF;
+        END $$;
+        """;
 
     private readonly string _containerName = $"streaming-digest-support-tests-{Guid.NewGuid():N}";
     private readonly int _hostPort = GetAvailablePort();
@@ -378,6 +470,105 @@ public sealed class PostgresMigrationSupportTests : IAsyncLifetime
         command.Parameters.AddWithValue("extensionName", extensionName);
         var result = await command.ExecuteScalarAsync();
         return result is bool available && available;
+    }
+
+    private static async Task ApplyEmbeddedScriptAsync(NpgsqlConnection connection, string resourceName)
+    {
+        var assembly = typeof(PostgresMigrationRunner).Assembly;
+        await using var stream = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Embedded migration script '{resourceName}' could not be loaded.");
+        using var reader = new StreamReader(stream);
+        var script = await reader.ReadToEndAsync();
+        await ApplySqlScriptAsync(connection, script);
+    }
+
+    private static async Task ApplySqlScriptAsync(NpgsqlConnection connection, string script)
+    {
+        await using var command = new NpgsqlCommand(script, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task InsertChannelAsync(NpgsqlConnection connection, Guid channelId, string youtubeChannelId, string channelName)
+    {
+        await using var insertChannel = new NpgsqlCommand(@"
+            INSERT INTO public.channels (
+                id,
+                youtube_channel_id,
+                name_original,
+                profile_url,
+                source_url,
+                description_original,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                @channelId,
+                @youtubeChannelId,
+                @channelName,
+                'https://example.com/channel',
+                'https://example.com/source',
+                'Example channel description',
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            );
+        ", connection);
+        insertChannel.Parameters.AddWithValue("channelId", channelId);
+        insertChannel.Parameters.AddWithValue("youtubeChannelId", youtubeChannelId);
+        insertChannel.Parameters.AddWithValue("channelName", channelName);
+        await insertChannel.ExecuteNonQueryAsync();
+    }
+
+    private static async Task InsertVideoAsync(
+        NpgsqlConnection connection,
+        Guid videoId,
+        Guid channelId,
+        string videoIdentifier,
+        string title,
+        string description)
+    {
+        await using var insertVideo = new NpgsqlCommand(@"
+            INSERT INTO public.videos (
+                id,
+                platform,
+                platform_video_url,
+                platform_video_id,
+                youtube_video_id,
+                channel_id,
+                author_original,
+                title_original,
+                description_original,
+                video_url,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                @videoId,
+                'youtube',
+                @platformVideoUrl,
+                @videoIdentifier,
+                @videoIdentifier,
+                @channelId,
+                'Example Author',
+                @title,
+                @description,
+                @platformVideoUrl,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            );
+        ", connection);
+        insertVideo.Parameters.AddWithValue("videoId", videoId);
+        insertVideo.Parameters.AddWithValue("channelId", channelId);
+        insertVideo.Parameters.AddWithValue("videoIdentifier", videoIdentifier);
+        insertVideo.Parameters.AddWithValue("platformVideoUrl", $"https://youtube.com/watch?v={videoIdentifier}");
+        insertVideo.Parameters.AddWithValue("title", title);
+        insertVideo.Parameters.AddWithValue("description", description);
+        await insertVideo.ExecuteNonQueryAsync();
+    }
+
+    private static async Task RefreshSearchDocumentsViewAsync(NpgsqlConnection connection)
+    {
+        await using var refreshView = new NpgsqlCommand("REFRESH MATERIALIZED VIEW public.video_search_documents;", connection);
+        await refreshView.ExecuteNonQueryAsync();
     }
 
     private async Task StartPostgresContainerAsync()

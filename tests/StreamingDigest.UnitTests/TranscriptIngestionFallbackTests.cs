@@ -38,7 +38,7 @@ public sealed class TranscriptIngestionFallbackTests : IDisposable
             new StubCaptionClient([]),
             provider,
             tempManager,
-            (_, _) => Task.FromResult<string?>("/tmp/source-media.mp4"));
+            new StubVideoMediaSourceResolver("/tmp/source-media.mp4"));
 
         var result = await service.IngestAsync(video.Id, CancellationToken.None);
 
@@ -65,7 +65,7 @@ public sealed class TranscriptIngestionFallbackTests : IDisposable
             new StubCaptionClient([]),
             provider,
             tempManager,
-            (_, _) => Task.FromResult<string?>("/tmp/source-media.mp4"));
+            new StubVideoMediaSourceResolver("/tmp/source-media.mp4"));
 
         var result = await service.IngestAsync(video.Id, CancellationToken.None);
 
@@ -84,7 +84,7 @@ public sealed class TranscriptIngestionFallbackTests : IDisposable
             new StubCaptionClient([]),
             new ThrowingAudioToTextProvider(),
             tempManager,
-            (_, _) => Task.FromResult<string?>("/tmp/source-media.mp4"));
+            new StubVideoMediaSourceResolver("/tmp/source-media.mp4"));
 
         var result = await service.IngestAsync(video.Id, CancellationToken.None);
 
@@ -175,5 +175,11 @@ public sealed class TranscriptIngestionFallbackTests : IDisposable
 
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class StubVideoMediaSourceResolver(string filePath, bool deleteWhenFinished = false) : IVideoMediaSourceResolver
+    {
+        public Task<ResolvedMediaFile?> ResolveAsync(Guid videoId, CancellationToken cancellationToken)
+            => Task.FromResult<ResolvedMediaFile?>(new ResolvedMediaFile(filePath, deleteWhenFinished));
     }
 }
