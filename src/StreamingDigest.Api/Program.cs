@@ -114,6 +114,7 @@ if (!databaseStatus.Connected)
 
 builder.Services.AddHangfire(config => config.UseStorage(hangfireStorage));
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
