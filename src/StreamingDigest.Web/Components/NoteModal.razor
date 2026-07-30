@@ -1,6 +1,7 @@
 @using System.Net.Http.Json
 
 @inject HttpClient Http
+@inject SearchUiSessionService SearchUiSessionService
 
 @if (IsVisible)
 {
@@ -72,7 +73,6 @@
     private Guid? _existingNoteId;
     private string? _noteTitle;
     private string? _noteMarkdown;
-    private string? _csrfToken;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -138,8 +138,7 @@
                     title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
                     markdown = _noteMarkdown
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
             else
             {
@@ -151,8 +150,7 @@
                     title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
                     markdown = _noteMarkdown
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -191,9 +189,8 @@
             await EnsureApiSessionAsync();
 
             var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/notes/{_existingNoteId}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
@@ -228,28 +225,8 @@
         await Close();
     }
 
-    private async Task EnsureApiSessionAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return;
-        }
-
-        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
-        if (!loginResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("Could not authenticate the API session.");
-        }
-
-        using var csrfResponse = await Http.GetAsync("/api/auth/csrf");
-        if (!csrfResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("Could not obtain a CSRF token.");
-        }
-
-        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>();
-        _csrfToken = csrf?.Token;
-    }
+    private Task EnsureApiSessionAsync()
+        => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
 
     private sealed class NoteListResponse
     {

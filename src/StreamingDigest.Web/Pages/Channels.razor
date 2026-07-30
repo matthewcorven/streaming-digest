@@ -2,6 +2,7 @@
 
 @using System.Net.Http.Json
 @inject HttpClient Http
+@inject SearchUiSessionService SearchUiSessionService
 
 <PageTitle>Channels</PageTitle>
 
@@ -167,7 +168,6 @@
     private string _statusMessage = "Loading channels…";
     private string _statusTone = "neutral";
     private IReadOnlyList<ChannelListItemResponse> _channels = Array.Empty<ChannelListItemResponse>();
-    private string? _csrfToken;
     private readonly AddChannelModel _addModel = new();
     private string? _addValidationMessage;
     private ChannelListItemResponse? _editingChannel;
@@ -232,10 +232,9 @@
 
             await EnsureApiSessionAsync();
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/channels");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new { sourceUrl = validation.NormalizedSource });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -267,10 +266,9 @@
         {
             await EnsureApiSessionAsync();
             using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/channels/{channel.Id}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new { isPaused = !channel.IsPaused });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -337,7 +335,6 @@
         {
             await EnsureApiSessionAsync();
             using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/channels/{_editingChannel.Id}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new
             {
                 nameOverride = _editModel.NameOverride,
@@ -347,7 +344,7 @@
                 defaultBackfillMaxVideos = ParseOptionalInt(_editModel.DefaultBackfillMaxVideos)
             });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -404,9 +401,8 @@
             }
 
             using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/channels/{_deleteChannel.Id}?{query}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -428,28 +424,8 @@
         }
     }
 
-    private async Task EnsureApiSessionAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return;
-        }
-
-        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
-        if (!loginResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("The channel API could not authenticate the demo session.");
-        }
-
-        using var csrfResponse = await Http.GetAsync("/api/auth/csrf");
-        if (!csrfResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("The channel API could not obtain a CSRF token.");
-        }
-
-        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>();
-        _csrfToken = csrf?.Token;
-    }
+    private Task EnsureApiSessionAsync()
+        => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
 
     private static CreateChannelValidationResult ValidateAndNormalizeChannelInput(string? source)
     {

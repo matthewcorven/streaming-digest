@@ -50,7 +50,7 @@
     {
         if (AuthenticationService.IsAuthenticated)
         {
-            NavigationManager.NavigateTo("/dashboard");
+            NavigationManager.NavigateTo(AuthenticationService.RequiresPasswordChange ? "/change-password" : "/dashboard");
         }
     }
 
@@ -58,9 +58,10 @@
     {
         _errorMessage = null;
 
-        if (await AuthenticationService.LoginAsync(_model.Username, _model.Password))
+        var loginResult = await AuthenticationService.LoginAsync(_model.Username, _model.Password);
+        if (loginResult is AuthenticationService.LoginResult.Success or AuthenticationService.LoginResult.RequiresPasswordChange)
         {
-            NavigationManager.NavigateTo("/dashboard");
+            NavigationManager.NavigateTo(loginResult == AuthenticationService.LoginResult.RequiresPasswordChange ? "/change-password" : "/dashboard");
             return;
         }
 

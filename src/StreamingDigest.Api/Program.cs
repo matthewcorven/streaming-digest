@@ -119,6 +119,7 @@ builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
+builder.Services.AddSingleton<SearchUiService>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
@@ -1124,13 +1125,15 @@ app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authSe
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Login failed", detail: ex.Message);
     }
 });
-app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
+app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
     var sessionToken = context.Request.Cookies["auth-session"];
     if (!string.IsNullOrWhiteSpace(sessionToken))
     {
         await authService.LogoutAsync(connectionString, sessionToken, cancellationToken);
     }
+
+    searchUiService.RemoveState(GetSearchUiStateKey(context));
 
     context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
     context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = true, SameSite = SameSiteMode.Lax });
@@ -1366,6 +1369,71 @@ app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService mo
             })
         })
         : Results.Unauthorized());
+app.MapGet("/api/search-ui/settings", (HttpContext context, SearchUiService searchUiService) =>
+    IsAuthenticated(context.Request)
+        ? Results.Ok(searchUiService.GetSettings())
+        : Results.Unauthorized());
+app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
+{
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!HasCsrfToken(context.Request))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var request = await JsonSerializer.DeserializeAsync<SearchUiSettings>(context.Request.Body, cancellationToken: cancellationToken);
+    if (request is null)
+    {
+        return Results.BadRequest();
+    }
+
+    searchUiService.UpdateSettings(request);
+    return Results.Ok(searchUiService.GetSettings());
+});
+app.MapGet("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
+    IsAuthenticated(context.Request)
+        ? Results.Ok(searchUiService.GetRecentSearches(GetSearchUiStateKey(context)))
+        : Results.Unauthorized());
+app.MapDelete("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
+{
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!HasCsrfToken(context.Request))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    searchUiService.ClearRecentSearches(GetSearchUiStateKey(context));
+    return Results.Ok();
+});
+app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
+{
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!HasCsrfToken(context.Request))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var request = await JsonSerializer.DeserializeAsync<SearchRequest>(context.Request.Body, cancellationToken: cancellationToken);
+    if (request is null)
+    {
+        return Results.BadRequest();
+    }
+
+    var response = searchUiService.Search(request, GetSearchUiStateKey(context));
+    return Results.Ok(response);
+});
 app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
 {
     if (!IsAuthenticated(context.Request))
@@ -1910,6 +1978,22 @@ static bool IsAuthenticated(HttpRequest request)
 static bool HasCsrfToken(HttpRequest request)
 {
     return request.Headers.ContainsKey("X-CSRF-Token") || request.Cookies.ContainsKey("csrf-token");
+}
+
+static string GetSearchUiStateKey(HttpContext context)
+{
+    if (!string.IsNullOrWhiteSpace(context.Request.Cookies["auth-session"]))
+    {
+        return $"session:{context.Request.Cookies["auth-session"]}";
+    }
+
+    var authenticatedUser = context.Items["AuthenticatedUser"] as AuthenticatedUser;
+    if (!string.IsNullOrWhiteSpace(authenticatedUser?.Username))
+    {
+        return $"user:{authenticatedUser.Username}";
+    }
+
+    return "anonymous";
 }
 
 static bool ShouldAllowPasswordChangeFlow(HttpRequest request)
