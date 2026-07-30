@@ -35,6 +35,37 @@ public sealed class SearchUiServiceTests
     }
 
     [Fact]
+    public async Task Search_groups_multiple_matches_from_the_same_video_into_one_cluster_and_uses_related_video_clusters()
+    {
+        var service = new SearchUiService(new InMemoryRecentSearchStore());
+
+        var response = await service.SearchAsync(new SearchRequest
+        {
+            Query = "project idea search",
+            Filters = new SearchFilters
+            {
+                ResultType = "video"
+            }
+        });
+
+        var cluster = Assert.Single(response.Results, result => result.ClusterId == "cluster-search-ui");
+        Assert.Equal("Designing a search-first knowledge base", cluster.Title);
+        Assert.Equal(4, cluster.MatchesInsideCount);
+        Assert.Equal(2, cluster.Submatches.Count(match => string.Equals(match.Type, "segment", StringComparison.OrdinalIgnoreCase)));
+
+        Assert.All(cluster.RelatedItems, related =>
+        {
+            Assert.Equal("video", related.Type);
+            Assert.DoesNotContain("Repository README", related.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Note:", related.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.InRange(related.RelativeSimilarityPercent, 0.0, 100.0);
+        });
+
+        Assert.Contains(cluster.RelatedItems, related => related.Title == "Balancing text and vector ranking weights");
+        Assert.Contains(cluster.RelatedItems, related => related.Title == "Using notes and transcripts to recover hidden context");
+    }
+
+    [Fact]
     public async Task Search_moves_existing_recent_queries_to_the_end_without_dropping_other_entries()
     {
         var service = new SearchUiService(new InMemoryRecentSearchStore());

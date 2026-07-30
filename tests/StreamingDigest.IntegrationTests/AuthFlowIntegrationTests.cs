@@ -148,6 +148,56 @@ public sealed class AuthFlowIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_endpoint_returns_one_cluster_per_video_and_uses_the_effective_title()
+    {
+        using var client = CreateClient();
+
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = BootstrapPassword });
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var csrfResponse = await client.GetAsync("/api/auth/csrf");
+        Assert.Equal(HttpStatusCode.OK, csrfResponse.StatusCode);
+        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfTokenResponse>();
+        Assert.NotNull(csrf);
+
+        using var changePasswordRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/change-password");
+        changePasswordRequest.Headers.Add("X-CSRF-Token", csrf!.Token);
+        changePasswordRequest.Content = JsonContent.Create(new { currentPassword = BootstrapPassword, newPassword = "search-passw0rd-123!" });
+        var changePasswordResponse = await client.SendAsync(changePasswordRequest);
+        Assert.Equal(HttpStatusCode.OK, changePasswordResponse.StatusCode);
+
+        var reloginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = BootstrapUsername, password = "search-passw0rd-123!" });
+        Assert.Equal(HttpStatusCode.OK, reloginResponse.StatusCode);
+
+        var searchCsrfResponse = await client.GetAsync("/api/auth/csrf");
+        Assert.Equal(HttpStatusCode.OK, searchCsrfResponse.StatusCode);
+        var searchCsrf = await searchCsrfResponse.Content.ReadFromJsonAsync<CsrfTokenResponse>();
+        Assert.NotNull(searchCsrf);
+
+        using var searchRequest = new HttpRequestMessage(HttpMethod.Post, "/api/search-ui/search");
+        searchRequest.Headers.Add("X-CSRF-Token", searchCsrf!.Token);
+        searchRequest.Content = JsonContent.Create(new
+        {
+            query = "project idea search",
+            filters = new
+            {
+                resultType = "video"
+            }
+        });
+
+        var searchResponse = await client.SendAsync(searchRequest);
+        Assert.Equal(HttpStatusCode.OK, searchResponse.StatusCode);
+
+        var payload = await searchResponse.Content.ReadFromJsonAsync<SearchUiApiResponse>();
+        Assert.NotNull(payload);
+
+        var cluster = Assert.Single(payload!.Results, result => result.ClusterId == "cluster-search-ui");
+        Assert.Equal("Designing a search-first knowledge base", cluster.Title);
+        Assert.Equal(4, cluster.MatchesInsideCount);
+        Assert.Equal(2, cluster.Submatches.Count(match => string.Equals(match.Type, "segment", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
     public async Task Authenticated_mutating_requests_without_csrf_tokens_are_rejected()
     {
         using var client = CreateClient();
@@ -392,4 +442,25 @@ public sealed class AuthFlowIntegrationTests : IAsyncLifetime
     private sealed record AuthMeResponse(string Username, bool MustChangePassword);
 
     private sealed record CsrfTokenResponse(string Token);
+
+    private sealed class SearchUiApiResponse
+    {
+        public List<SearchUiClusterResponse> Results { get; set; } = new();
+    }
+
+    private sealed class SearchUiClusterResponse
+    {
+        public string ClusterId { get; set; } = string.Empty;
+
+        public string Title { get; set; } = string.Empty;
+
+        public int MatchesInsideCount { get; set; }
+
+        public List<SearchUiSubmatchResponse> Submatches { get; set; } = new();
+    }
+
+    private sealed class SearchUiSubmatchResponse
+    {
+        public string Type { get; set; } = string.Empty;
+    }
 }
