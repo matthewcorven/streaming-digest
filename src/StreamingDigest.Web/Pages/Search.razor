@@ -407,12 +407,7 @@
            using var request = await CreateMutatingRequestAsync(HttpMethod.Post, "/api/search-ui/search", new SearchRequest
            {
                Query = _query,
-               Filters = BuildFilters(),
-               Settings = new SearchUiSettings
-               {
-                   TextWeight = _settings.TextWeight,
-                   VectorWeight = _settings.VectorWeight
-               }
+               Filters = BuildFilters()
            });
 
            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);

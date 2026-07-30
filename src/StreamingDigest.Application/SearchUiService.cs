@@ -2,17 +2,27 @@ namespace StreamingDigest.Application;
 
 public sealed class SearchUiService
 {
+    private const string DefaultStateKey = "__default__";
     private readonly object _syncRoot = new();
-    private readonly Queue<string> _recentSearches = new();
-    private SearchUiSettings _settings = SearchUiSettings.Default;
+    private readonly Dictionary<string, SearchUiState> _states = new(StringComparer.OrdinalIgnoreCase);
 
     public SearchUiService(HybridRankingService? rankingService = null)
     {
     }
 
-    public SearchUiSettings GetSettings() => _settings;
+    public SearchUiSettings GetSettings() => GetSettings(stateKey: null);
 
-    public void UpdateSettings(SearchUiSettings settings)
+    public SearchUiSettings GetSettings(string? stateKey)
+    {
+        lock (_syncRoot)
+        {
+            return CloneSettings(GetOrCreateState(stateKey).Settings);
+        }
+    }
+
+    public void UpdateSettings(SearchUiSettings settings) => UpdateSettings(settings, stateKey: null);
+
+    public void UpdateSettings(SearchUiSettings settings, string? stateKey)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -31,67 +41,77 @@ public sealed class SearchUiService
             throw new ArgumentOutOfRangeException(nameof(settings), "Text and vector weights must sum to a positive value.");
         }
 
-        _settings = new SearchUiSettings
+        lock (_syncRoot)
         {
-            TextWeight = settings.TextWeight,
-            VectorWeight = settings.VectorWeight
-        };
+            var state = GetOrCreateState(stateKey);
+            state.Settings = new SearchUiSettings
+            {
+                TextWeight = settings.TextWeight,
+                VectorWeight = settings.VectorWeight
+            };
+        }
     }
 
-    public SearchResponse Search(SearchRequest request)
+    public SearchResponse Search(SearchRequest request) => Search(request, stateKey: null);
+
+    public SearchResponse Search(SearchRequest request, string? stateKey)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.Settings is not null)
+        lock (_syncRoot)
         {
-            UpdateSettings(request.Settings);
+            var normalizedQuery = string.IsNullOrWhiteSpace(request.Query) ? "project idea search" : request.Query.Trim();
+            var terms = ExtractTerms(normalizedQuery);
+            var activeFilters = request.Filters ?? SearchFilters.Empty;
+            var state = GetOrCreateState(stateKey);
+            var effectiveSettings = request.Settings is not null
+                ? CloneSettings(request.Settings)
+                : CloneSettings(state.Settings);
+
+            var candidateSeeds = CreateCandidateSeeds()
+                .Where(seed => MatchesFilters(seed, activeFilters))
+                .ToList();
+
+            if (candidateSeeds.Count == 0)
+            {
+                return CreateEmptyResponse(normalizedQuery, state);
+            }
+
+            var rankedClusters = candidateSeeds
+                .Select(seed => CreateClusterCandidate(seed, normalizedQuery, terms))
+                .ToList();
+
+            var rankingService = CreateRankingService(effectiveSettings);
+            var rankingResults = rankingService.Rank(
+                rankedClusters,
+                relativeSimilarityPoolScores: rankedClusters.Select(cluster => cluster.Documents.Max(document => document.VectorScore)).ToList());
+
+            var results = rankingResults
+                .Select(result => MapResult(result, candidateSeeds.First(seed => string.Equals(seed.Id, result.ClusterId, StringComparison.OrdinalIgnoreCase))))
+                .ToList();
+
+            RegisterRecentSearch(state, normalizedQuery);
+
+            return new SearchResponse
+            {
+                Query = normalizedQuery,
+                Results = results,
+                RecentSearches = GetRecentSearches(stateKey).ToList(),
+                Settings = CloneSettings(state.Settings),
+                Summary = results.Count == 0
+                    ? "No clusters matched the current filters."
+                    : $"Showing {results.Count} clustered video result{(results.Count == 1 ? string.Empty : "s")} for '{normalizedQuery}'."
+            };
         }
-
-        var normalizedQuery = string.IsNullOrWhiteSpace(request.Query) ? "project idea search" : request.Query.Trim();
-        var terms = ExtractTerms(normalizedQuery);
-        var activeFilters = request.Filters ?? SearchFilters.Empty;
-
-        var candidateSeeds = CreateCandidateSeeds()
-            .Where(seed => MatchesFilters(seed, activeFilters))
-            .ToList();
-
-        if (candidateSeeds.Count == 0)
-        {
-            return CreateEmptyResponse(normalizedQuery, activeFilters);
-        }
-
-        var rankedClusters = candidateSeeds
-            .Select(seed => CreateClusterCandidate(seed, normalizedQuery, terms))
-            .ToList();
-
-        var rankingService = CreateRankingService();
-        var rankingResults = rankingService.Rank(
-            rankedClusters,
-            relativeSimilarityPoolScores: rankedClusters.Select(cluster => cluster.Documents.Max(document => document.VectorScore)).ToList());
-
-        var results = rankingResults
-            .Select(result => MapResult(result, candidateSeeds.First(seed => string.Equals(seed.Id, result.ClusterId, StringComparison.OrdinalIgnoreCase))))
-            .ToList();
-
-        RegisterRecentSearch(normalizedQuery);
-
-        return new SearchResponse
-        {
-            Query = normalizedQuery,
-            Results = results,
-            RecentSearches = GetRecentSearches().ToList(),
-            Settings = _settings,
-            Summary = results.Count == 0
-                ? "No clusters matched the current filters."
-                : $"Showing {results.Count} clustered video result{(results.Count == 1 ? string.Empty : "s")} for '{normalizedQuery}'."
-        };
     }
 
-    public IReadOnlyList<string> GetRecentSearches()
+    public IReadOnlyList<string> GetRecentSearches() => GetRecentSearches(stateKey: null);
+
+    public IReadOnlyList<string> GetRecentSearches(string? stateKey)
     {
         lock (_syncRoot)
         {
-            return _recentSearches
+            return GetOrCreateState(stateKey).RecentSearches
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Select(item => item.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -100,15 +120,17 @@ public sealed class SearchUiService
         }
     }
 
-    public void ClearRecentSearches()
+    public void ClearRecentSearches() => ClearRecentSearches(stateKey: null);
+
+    public void ClearRecentSearches(string? stateKey)
     {
         lock (_syncRoot)
         {
-            _recentSearches.Clear();
+            GetOrCreateState(stateKey).RecentSearches.Clear();
         }
     }
 
-    private void RegisterRecentSearch(string query)
+    private void RegisterRecentSearch(SearchUiState state, string query)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -119,9 +141,9 @@ public sealed class SearchUiService
         lock (_syncRoot)
         {
             var retainedValues = new List<string>();
-            while (_recentSearches.Count > 0)
+            while (state.RecentSearches.Count > 0)
             {
-                var current = _recentSearches.Dequeue();
+                var current = state.RecentSearches.Dequeue();
                 if (string.IsNullOrWhiteSpace(current))
                 {
                     continue;
@@ -138,40 +160,73 @@ public sealed class SearchUiService
 
             foreach (var retainedValue in retainedValues)
             {
-                _recentSearches.Enqueue(retainedValue);
+                state.RecentSearches.Enqueue(retainedValue);
             }
 
-            _recentSearches.Enqueue(normalizedQuery);
+            state.RecentSearches.Enqueue(normalizedQuery);
 
-            while (_recentSearches.Count > 8)
+            while (state.RecentSearches.Count > 8)
             {
-                _recentSearches.Dequeue();
+                state.RecentSearches.Dequeue();
             }
         }
     }
 
-    private SearchResponse CreateEmptyResponse(string query, SearchFilters filters)
+    private SearchUiState GetOrCreateState(string? stateKey)
+    {
+        var effectiveStateKey = string.IsNullOrWhiteSpace(stateKey) ? DefaultStateKey : stateKey;
+        if (_states.TryGetValue(effectiveStateKey, out var state))
+        {
+            return state;
+        }
+
+        var createdState = new SearchUiState();
+        _states[effectiveStateKey] = createdState;
+        return createdState;
+    }
+
+    private SearchResponse CreateEmptyResponse(string query, SearchUiState state)
     {
         return new SearchResponse
         {
             Query = query,
             Results = Array.Empty<SearchResultClusterResponse>(),
-            RecentSearches = GetRecentSearches().ToList(),
-            Settings = _settings,
+            RecentSearches = state.RecentSearches
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList(),
+            Settings = CloneSettings(state.Settings),
             Summary = "No clusters matched the current filters."
         };
     }
 
-    private HybridRankingService CreateRankingService()
+    private HybridRankingService CreateRankingService(SearchUiSettings settings)
     {
         return new HybridRankingService(new HybridRankingOptions(
-            TextWeight: _settings.TextWeight,
-            VectorWeight: _settings.VectorWeight,
+            TextWeight: settings.TextWeight,
+            VectorWeight: settings.VectorWeight,
             AggregateMaxWeight: HybridRankingOptions.Default.AggregateMaxWeight,
             AggregateTopThreeWeight: HybridRankingOptions.Default.AggregateTopThreeWeight,
             AggregateCoverageWeight: HybridRankingOptions.Default.AggregateCoverageWeight,
             NoteBoost: HybridRankingOptions.Default.NoteBoost,
             InteractionBoostCap: HybridRankingOptions.Default.InteractionBoostCap));
+    }
+
+    private static SearchUiSettings CloneSettings(SearchUiSettings? settings)
+    {
+        return new SearchUiSettings
+        {
+            TextWeight = settings?.TextWeight ?? SearchUiSettings.Default.TextWeight,
+            VectorWeight = settings?.VectorWeight ?? SearchUiSettings.Default.VectorWeight
+        };
+    }
+
+    private sealed class SearchUiState
+    {
+        public SearchUiSettings Settings { get; set; } = SearchUiSettings.Default;
+        public Queue<string> RecentSearches { get; } = new();
     }
 
     private static bool MatchesFilters(SearchClusterSeed seed, SearchFilters filters)

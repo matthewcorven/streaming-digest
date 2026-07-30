@@ -1362,7 +1362,7 @@ app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService mo
         : Results.Unauthorized());
 app.MapGet("/api/search-ui/settings", (HttpContext context, SearchUiService searchUiService) =>
     IsAuthenticated(context.Request)
-        ? Results.Ok(searchUiService.GetSettings())
+        ? Results.Ok(searchUiService.GetSettings(GetSearchUiStateKey(context)))
         : Results.Unauthorized());
 app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
@@ -1382,12 +1382,13 @@ app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiServi
         return Results.BadRequest();
     }
 
-    searchUiService.UpdateSettings(request);
-    return Results.Ok(searchUiService.GetSettings());
+    var stateKey = GetSearchUiStateKey(context);
+    searchUiService.UpdateSettings(request, stateKey);
+    return Results.Ok(searchUiService.GetSettings(stateKey));
 });
 app.MapGet("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
     IsAuthenticated(context.Request)
-        ? Results.Ok(searchUiService.GetRecentSearches())
+        ? Results.Ok(searchUiService.GetRecentSearches(GetSearchUiStateKey(context)))
         : Results.Unauthorized());
 app.MapDelete("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
 {
@@ -1401,7 +1402,7 @@ app.MapDelete("/api/search-ui/recent", (HttpContext context, SearchUiService sea
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
-    searchUiService.ClearRecentSearches();
+    searchUiService.ClearRecentSearches(GetSearchUiStateKey(context));
     return Results.Ok();
 });
 app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
@@ -1422,7 +1423,7 @@ app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService
         return Results.BadRequest();
     }
 
-    var response = searchUiService.Search(request);
+    var response = searchUiService.Search(request, GetSearchUiStateKey(context));
     return Results.Ok(response);
 });
 app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
@@ -1967,6 +1968,22 @@ static bool IsAuthenticated(HttpRequest request)
 static bool HasCsrfToken(HttpRequest request)
 {
     return request.Headers.ContainsKey("X-CSRF-Token") || request.Cookies.ContainsKey("csrf-token");
+}
+
+static string GetSearchUiStateKey(HttpContext context)
+{
+    if (!string.IsNullOrWhiteSpace(context.Request.Cookies["auth-session"]))
+    {
+        return $"session:{context.Request.Cookies["auth-session"]}";
+    }
+
+    var authenticatedUser = context.Items["AuthenticatedUser"] as AuthenticatedUser;
+    if (!string.IsNullOrWhiteSpace(authenticatedUser?.Username))
+    {
+        return $"user:{authenticatedUser.Username}";
+    }
+
+    return "anonymous";
 }
 
 static bool ShouldAllowPasswordChangeFlow(HttpRequest request)
