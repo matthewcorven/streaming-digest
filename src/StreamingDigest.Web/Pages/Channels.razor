@@ -1,7 +1,6 @@
 @page "/channels"
 
 @using System.Net.Http.Json
-@inject HttpClient Http
 @inject SearchUiSessionService SearchUiSessionService
 
 <PageTitle>Channels</PageTitle>
@@ -190,13 +189,7 @@
         try
         {
             await EnsureApiSessionAsync();
-            using var response = await Http.GetAsync("/api/channels?includePaused=true&page=1&pageSize=100");
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new InvalidOperationException(await ReadErrorMessageAsync(response));
-            }
-
-            var payload = await response.Content.ReadFromJsonAsync<ChannelListPayload>();
+            var payload = await SearchUiSessionService.GetAuthenticatedJsonAsync<ChannelListPayload>("/api/channels?includePaused=true&page=1&pageSize=100");
             _channels = payload?.Items ?? Array.Empty<ChannelListItemResponse>();
             _statusMessage = _channels.Count == 0 ? "No channels are configured yet." : "Channels loaded from the live API.";
             _statusTone = "success";
@@ -297,7 +290,7 @@
         try
         {
             await EnsureApiSessionAsync();
-            var detail = await Http.GetFromJsonAsync<ChannelDetailResponse>($"/api/channels/{channel.Id}");
+            var detail = await SearchUiSessionService.GetAuthenticatedJsonAsync<ChannelDetailResponse>($"/api/channels/{channel.Id}");
             _editModel = new ChannelEditModel
             {
                 NameOverride = detail?.Name?.Override ?? string.Empty,

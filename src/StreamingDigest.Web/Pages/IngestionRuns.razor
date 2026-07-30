@@ -1,6 +1,6 @@
 @page "/ingestion"
 @using System.Net.Http.Json
-@inject HttpClient Http
+@inject SearchUiSessionService SearchUiSessionService
 
 <PageTitle>Ingestion runs</PageTitle>
 
@@ -81,7 +81,8 @@
 
         try
         {
-            using var response = await Http.PostAsync(endpoint, null);
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             var payload = await response.Content.ReadFromJsonAsync<AdminActionResponse>();
 
             if (response.IsSuccessStatusCode && payload is not null)
@@ -113,7 +114,7 @@
     {
         try
         {
-            var runs = await Http.GetFromJsonAsync<List<IngestionRunFixtureSummary>>("/api/internal/ingestion-runs");
+            var runs = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<IngestionRunFixtureSummary>>("/api/internal/ingestion-runs");
             _runs.Clear();
             if (runs is not null)
             {
