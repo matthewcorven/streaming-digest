@@ -29,7 +29,8 @@ public sealed class SearchUiSessionServiceTests
             BaseAddress = new Uri("http://localhost")
         };
 
-        var service = new SearchUiSessionService(client);
+        var authenticationService = new AuthenticationService(client);
+        var service = new SearchUiSessionService(authenticationService);
         var token = await service.EnsureAuthenticatedSessionAsync();
 
         Assert.Equal("csrf-token", token);
@@ -53,7 +54,8 @@ public sealed class SearchUiSessionServiceTests
             BaseAddress = new Uri("http://localhost")
         };
 
-        var service = new SearchUiSessionService(client);
+        var authenticationService = new AuthenticationService(client);
+        var service = new SearchUiSessionService(authenticationService);
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.EnsureAuthenticatedSessionAsync());
     }

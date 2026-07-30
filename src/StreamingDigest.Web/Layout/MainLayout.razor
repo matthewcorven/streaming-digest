@@ -92,9 +92,9 @@ else
 
     private void CloseNav() => IsNavOpen = false;
 
-    private void HandleLogout()
+    private async Task HandleLogout()
     {
-        AuthenticationService.Logout();
+        await AuthenticationService.LogoutAsync();
         NavigationManager.NavigateTo("/login", true);
     }
 

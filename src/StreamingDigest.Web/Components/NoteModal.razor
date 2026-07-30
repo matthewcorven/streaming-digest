@@ -1,6 +1,7 @@
 @using System.Net.Http.Json
 
 @inject HttpClient Http
+@inject SearchUiSessionService SearchUiSessionService
 
 @if (IsVisible)
 {
@@ -235,20 +236,7 @@
             return;
         }
 
-        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
-        if (!loginResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("Could not authenticate the API session.");
-        }
-
-        using var csrfResponse = await Http.GetAsync("/api/auth/csrf");
-        if (!csrfResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("Could not obtain a CSRF token.");
-        }
-
-        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>();
-        _csrfToken = csrf?.Token;
+        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
     }
 
     private sealed class NoteListResponse

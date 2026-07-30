@@ -1,9 +1,18 @@
+using System.Net.Http.Json;
+
 namespace StreamingDigest.Web.Services;
 
 public sealed class AuthenticationService
 {
+    private readonly HttpClient _httpClient;
     private bool _isAuthenticated;
-    private string _currentUser = "admin";
+    private string _currentUser = "guest";
+    private string? _csrfToken;
+
+    public AuthenticationService(HttpClient httpClient)
+    {
+        _httpClient = httpClient;
+    }
 
     public bool IsAuthenticated => _isAuthenticated;
 
@@ -11,28 +20,84 @@ public sealed class AuthenticationService
 
     public event Action? Changed;
 
-    public Task<bool> LoginAsync(string username, string password)
+    public async Task<bool> LoginAsync(string username, string password)
     {
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
         {
-            _isAuthenticated = false;
-            Changed?.Invoke();
-            return Task.FromResult(false);
+            ResetAuthenticationState();
+            return false;
         }
 
-        var isValidLogin = (username.Equals("admin", StringComparison.OrdinalIgnoreCase) || username.Equals("demo", StringComparison.OrdinalIgnoreCase))
-            && (password.Equals("admin", StringComparison.OrdinalIgnoreCase) || password.Equals("demo", StringComparison.OrdinalIgnoreCase));
+        using var response = await _httpClient.PostAsJsonAsync("/api/auth/login", new { username, password });
+        if (!response.IsSuccessStatusCode)
+        {
+            ResetAuthenticationState();
+            return false;
+        }
 
-        _currentUser = isValidLogin ? username : "guest";
-        _isAuthenticated = isValidLogin;
+        _isAuthenticated = true;
+        _currentUser = username;
+        _csrfToken = null;
         Changed?.Invoke();
-        return Task.FromResult(isValidLogin);
+        return true;
     }
 
-    public void Logout()
+    public async Task<string> EnsureApiSessionAsync(CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(_csrfToken))
+        {
+            return _csrfToken;
+        }
+
+        using var meResponse = await _httpClient.GetAsync("/api/auth/me", cancellationToken);
+        if (!meResponse.IsSuccessStatusCode)
+        {
+            ResetAuthenticationState();
+            throw new UnauthorizedAccessException("The API requires an authenticated session.");
+        }
+
+        _isAuthenticated = true;
+        using var csrfResponse = await _httpClient.GetAsync("/api/auth/csrf", cancellationToken);
+        if (!csrfResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("The API could not obtain a CSRF token.");
+        }
+
+        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>(cancellationToken: cancellationToken);
+        _csrfToken = csrf?.Token;
+        if (string.IsNullOrWhiteSpace(_csrfToken))
+        {
+            throw new InvalidOperationException("The API could not obtain a CSRF token.");
+        }
+
+        return _csrfToken;
+    }
+
+    public async Task LogoutAsync()
+    {
+        try
+        {
+            await _httpClient.PostAsync("/api/auth/logout", null);
+        }
+        catch
+        {
+        }
+
+        ResetAuthenticationState();
+    }
+
+    public void Logout() => _ = LogoutAsync();
+
+    private void ResetAuthenticationState()
     {
         _isAuthenticated = false;
         _currentUser = "guest";
+        _csrfToken = null;
         Changed?.Invoke();
+    }
+
+    private sealed class CsrfResponse
+    {
+        public string? Token { get; set; }
     }
 }

@@ -6,6 +6,7 @@
 @using StreamingDigest.Web.Pages
 
 @inject HttpClient Http
+@inject SearchUiSessionService SearchUiSessionService
 
 <PageTitle>Admin</PageTitle>
 
@@ -257,14 +258,7 @@
             return;
         }
 
-        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
-        if (!loginResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("The admin API could not authenticate the demo session.");
-        }
-
-        var csrf = await Http.GetFromJsonAsync<CsrfResponse>("/api/auth/csrf");
-        _csrfToken = csrf?.Token;
+        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
     }
 
     private static bool ReadBool(IReadOnlyDictionary<string, JsonElement> values, string key, bool fallback)
