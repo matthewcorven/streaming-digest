@@ -119,6 +119,7 @@ builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
+builder.Services.AddSingleton<SearchUiService>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
@@ -1359,6 +1360,35 @@ app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService mo
             })
         })
         : Results.Unauthorized());
+app.MapGet("/api/search-ui/settings", (SearchUiService searchUiService) => Results.Ok(searchUiService.GetSettings()));
+app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
+{
+    var request = await JsonSerializer.DeserializeAsync<SearchUiSettings>(context.Request.Body, cancellationToken: cancellationToken);
+    if (request is null)
+    {
+        return Results.BadRequest();
+    }
+
+    searchUiService.UpdateSettings(request);
+    return Results.Ok(searchUiService.GetSettings());
+});
+app.MapGet("/api/search-ui/recent", (SearchUiService searchUiService) => Results.Ok(searchUiService.GetRecentSearches()));
+app.MapDelete("/api/search-ui/recent", (SearchUiService searchUiService) =>
+{
+    searchUiService.ClearRecentSearches();
+    return Results.Ok();
+});
+app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
+{
+    var request = await JsonSerializer.DeserializeAsync<SearchRequest>(context.Request.Body, cancellationToken: cancellationToken);
+    if (request is null)
+    {
+        return Results.BadRequest();
+    }
+
+    var response = searchUiService.Search(request);
+    return Results.Ok(response);
+});
 app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
 {
     if (!IsAuthenticated(context.Request))

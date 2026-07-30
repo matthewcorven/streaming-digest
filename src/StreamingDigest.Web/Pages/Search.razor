@@ -1,172 +1,596 @@
 @page "/search"
+@inject HttpClient Http
+@using System.Net.Http.Json
 
 <PageTitle>Search</PageTitle>
 
 <div class="page-shell">
     <section class="hero-card">
         <div>
-            <p class="eyebrow">Search</p>
-            <h1>Search across your digest</h1>
-            <p>Find the best cluster, artifact, and note for any topic. The query state stays in the URL so it is easy to share and return to.</p>
+           <p class="eyebrow">Search</p>
+           <h1>Search across your digest</h1>
+           <p>Find the best video cluster, artifact, and note for any topic. Natural-language prompts, filters, and ranking settings are all wired together.</p>
         </div>
         <div class="hero-actions">
-            <a class="primary-button" href="/channels">Review channels</a>
-            <a class="secondary-button" href="/ingestion">Inspect runs</a>
+           <a class="primary-button" href="/channels">Review channels</a>
+           <a class="secondary-button" href="/ingestion">Inspect runs</a>
         </div>
     </section>
 
-    <section class="card-grid">
-        <article class="card">
-            <div class="card-header">
-                <h2>Latest query</h2>
-                <span class="status-pill status-ready">Ready</span>
-            </div>
-            <p class="card-body">"Best clips from the last week"</p>
-            <div class="chip-row">
-                <span class="chip">Top 3 results</span>
-                <span class="chip">Auto-clustered</span>
-                <span class="chip">Pinned notes</span>
-            </div>
-        </article>
+    <section class="search-layout">
+        <div class="search-main">
+           <div class="search-box">
+               <label class="search-input-label" for="search-query">Ask your corpus</label>
+               <div class="search-input-row">
+                   <input id="search-query"
+                          class="search-input"
+                          @bind="_query"
+                          @bind:event="oninput"
+                          placeholder="Try: vague project idea around ranking weights"
+                          @onkeydown="HandleInputKeyDown" />
+                   <button class="primary-button" type="button" @onclick="RunSearchAsync" disabled="@_isSearching">@(_isSearching ? "Searching…" : "Search")</button>
+               </div>
+               @if (!string.IsNullOrWhiteSpace(_errorMessage))
+               {
+                   <div class="status-message status-warning">@_errorMessage</div>
+               }
+           </div>
 
-        <article class="card">
-            <div class="card-header">
-                <h2>Result quality</h2>
-                <span class="status-pill status-neutral">Stable</span>
-            </div>
-            <p class="card-body">The latest recall run surfaced the intended cluster in the top 3 results for the representative query set.</p>
-        </article>
-    </section>
+           @if (_isLoading)
+           {
+               <div class="state-card">Loading your latest search experience…</div>
+           }
+           else if (_searchResponse is null)
+           {
+               <div class="state-card">Search will surface clustered video results with explanation, related items, and artifact links.</div>
+           }
+           else
+           {
+               <div class="results-summary">
+                   <div>
+                       <h2>Clustered results</h2>
+                       <p>@_searchResponse.Summary</p>
+                   </div>
+                   <div class="summary-pill">@_searchResponse.Results.Count result@( _searchResponse.Results.Count == 1 ? string.Empty : "s")</div>
+               </div>
 
-    <section class="card">
-        <div class="section-heading">
-            <div>
-                <h2>Sample results</h2>
-                <p class="page-description">Use Edit to update metadata or add a classification correction. Use Notes to attach a searchable markdown note that boosts this item's ranking.</p>
-            </div>
+               @foreach (var result in _searchResponse.Results)
+               {
+                   <article class="result-card @(IsExpanded(result.ClusterId) ? "result-card--expanded" : string.Empty)">
+                       <div class="result-card__header">
+                           <div>
+                               <div class="result-card__title-row">
+                                   <h3>@result.Title</h3>
+                                   <span class="status-pill @(result.ProcessingStatus switch { "processed" => "status-ready", "stale" => "status-warning", "failed" => "status-error", _ => "status-neutral" })">@result.ProcessingStatus</span>
+                               </div>
+                               <p class="result-card__meta">@result.Channel · @result.PublishDate.ToLocalTime().ToString("MMM d, yyyy")</p>
+                           </div>
+                           <div class="result-card__actions">
+                               @if (result.HasNotes)
+                               {
+                                   <button class="chip chip--note" type="button">📝 Note</button>
+                               }
+                               @if (result.CanRetry)
+                               {
+                                   <button class="secondary-button compact" type="button" @onclick="() => RetrySearchAsync(result.ClusterId)">Retry</button>
+                               }
+                               <button class="secondary-button compact" type="button" @onclick="() => ToggleExpanded(result.ClusterId)">@(IsExpanded(result.ClusterId) ? "Collapse" : "Expand")</button>
+                           </div>
+                       </div>
+
+                       <div class="result-card__body">
+                           <div class="result-card__primary-match">
+                               <strong>Primary match</strong>
+                               <p>@result.PrimaryMatch</p>
+                           </div>
+                           <div class="result-card__score-box">
+                               <span class="score-value">@Math.Round(result.Score, 3)</span>
+                               <span class="score-caption">Score</span>
+                           </div>
+                       </div>
+
+                       <div class="result-card__footer">
+                           <span class="chip">@(result.MatchesInsideCount) matches inside</span>
+                           @if (!string.IsNullOrWhiteSpace(result.PrimaryMatchTimestamp))
+                           {
+                               <a class="link-pill" href="#">Best timestamp: @result.PrimaryMatchTimestamp</a>
+                           }
+                           @if (result.HasRepo || result.WebsiteLinks.Count > 0)
+                           {
+                               <span class="chip">Artifacts available</span>
+                           }
+                       </div>
+
+                       @if (IsExpanded(result.ClusterId))
+                       {
+                           <div class="result-card__expanded">
+                               <div class="result-card__expanded-grid">
+                                   <section class="panel-card">
+                                       <h4>Submatches</h4>
+                                       <ul class="detail-list">
+                                           @foreach (var submatch in result.Submatches)
+                                           {
+                                               <li>
+                                                   <div class="detail-list__title-row">
+                                                       <strong>@submatch.Title</strong>
+                                                       @if (!string.IsNullOrWhiteSpace(submatch.TimestampLabel))
+                                                       {
+                                                           <a class="link-pill" href="@submatch.Url">@submatch.TimestampLabel</a>
+                                                       }
+                                                   </div>
+                                                   <p>@submatch.Detail</p>
+                                               </li>
+                                           }
+                                       </ul>
+                                   </section>
+
+                                   <section class="panel-card">
+                                       <h4>Related items</h4>
+                                       <div class="related-list">
+                                           @foreach (var item in result.RelatedItems)
+                                           {
+                                               <div class="related-item related-item--@item.Type">
+                                                   <div class="detail-list__title-row">
+                                                       <strong>@item.Title</strong>
+                                                       <span class="related-item__percent">@item.RelativeSimilarityPercent%</span>
+                                                   </div>
+                                                   <p>@item.Detail</p>
+                                                   @if (!string.IsNullOrWhiteSpace(item.Url))
+                                                   {
+                                                       <a class="link-pill" href="@item.Url" target="_blank" rel="noreferrer">Open</a>
+                                                   }
+                                               </div>
+                                           }
+                                       </div>
+                                   </section>
+                               </div>
+
+                               <div class="result-card__expanded-grid">
+                                   <section class="panel-card">
+                                       <h4>Artifacts</h4>
+                                       @if (!string.IsNullOrWhiteSpace(result.ScreenshotUrl))
+                                       {
+                                           <img class="result-card__screenshot" src="@result.ScreenshotUrl" alt="Search result screenshot" />
+                                       }
+                                       @if (result.RepositoryLinks.Count > 0)
+                                       {
+                                           <div class="detail-list">
+                                               <strong>Repositories</strong>
+                                               @foreach (var link in result.RepositoryLinks)
+                                               {
+                                                   <a class="link-pill" href="@link" target="_blank" rel="noreferrer">@link</a>
+                                               }
+                                           </div>
+                                       }
+                                       @if (result.WebsiteLinks.Count > 0)
+                                       {
+                                           <div class="detail-list">
+                                               <strong>Websites</strong>
+                                               @foreach (var link in result.WebsiteLinks)
+                                               {
+                                                   <a class="link-pill" href="@link" target="_blank" rel="noreferrer">@link</a>
+                                               }
+                                           </div>
+                                       }
+                                   </section>
+
+                                   <section class="panel-card">
+                                       <h4>Trust signals</h4>
+                                       <ul class="detail-list">
+                                           <li><strong>Score components</strong><p>Base @Math.Round(result.ScoreComponents.BaseScore, 3) · Max @Math.Round(result.ScoreComponents.MaxDocumentScore, 3) · Top3 @Math.Round(result.ScoreComponents.AverageTopThreeDocumentScore, 3)</p></li>
+                                           <li><strong>Coverage</strong><p>@Math.Round(result.ScoreComponents.CoverageScore, 3)</p></li>
+                                           <li><strong>Warnings</strong><p>@string.Join(" · ", result.ProcessingWarnings)</p></li>
+                                       </ul>
+                                   </section>
+                               </div>
+                           </div>
+                       }
+                   </article>
+               }
+           }
         </div>
 
-        <div class="search-result-list">
-            @foreach (var item in _sampleResults)
-            {
-                <article class="search-result-card">
-                    <div class="search-result-body">
-                        <div class="item-title-row">
-                            <strong>@item.Title</strong>
-                            <span class="status-pill @(item.ItemType == "video" ? "status-ready" : "status-neutral")">@item.ItemType</span>
-                        </div>
-                        <p class="page-description">@item.Description</p>
-                        @if (item.HasClassificationOverride)
-                        {
-                            <div class="classification-feedback classification-feedback--inline">
-                                ✓ Future similar links will use this correction.
-                            </div>
-                        }
-                        @if (item.HasNote)
-                        {
-                            <span class="chip chip--note">📝 Note attached</span>
-                        }
-                    </div>
-                    <div class="action-buttons">
-                        <button class="secondary-button compact" type="button" @onclick="() => OpenEditModal(item)">Edit</button>
-                        <button class="secondary-button compact" type="button" @onclick="() => OpenNoteModal(item)">Notes</button>
-                    </div>
-                </article>
-            }
-        </div>
+        <aside class="side-panel">
+           <div class="panel-card">
+               <div class="panel-card__header">
+                   <h2>Recent searches</h2>
+                   <button class="ghost-button" type="button" @onclick="ClearRecentSearchesAsync">Clear all</button>
+               </div>
+               @if (_recentSearches.Count == 0)
+               {
+                   <p class="page-description">No recent searches yet.</p>
+               }
+               else
+               {
+                   <div class="chip-stack">
+                       @foreach (var recent in _recentSearches)
+                       {
+                           <button class="chip chip--selectable" type="button" @onclick="() => ApplyRecentSearch(recent)">@recent</button>
+                       }
+                   </div>
+               }
+           </div>
+
+           <div class="panel-card">
+               <div class="panel-card__header">
+                   <h2>Ranking weights</h2>
+               </div>
+               <label class="field-label">
+                   Text weight
+                   <input type="range" min="0" max="1" step="0.1" @bind="_settings.TextWeight" @bind:event="oninput" />
+                   <span>@Math.Round(_settings.TextWeight, 1)</span>
+               </label>
+               <label class="field-label">
+                   Vector weight
+                   <input type="range" min="0" max="1" step="0.1" @bind="_settings.VectorWeight" @bind:event="oninput" />
+                   <span>@Math.Round(_settings.VectorWeight, 1)</span>
+               </label>
+               <button class="secondary-button" type="button" @onclick="SaveSettingsAsync">Apply weights</button>
+           </div>
+
+           <div class="panel-card">
+               <div class="panel-card__header">
+                   <h2>Filters</h2>
+               </div>
+               <label class="field-label">
+                   Channel
+                   <select @bind="_filters.Channel">
+                       <option value="">All channels</option>
+                       <option value="Tonbis AI Garage">Tonbis AI Garage</option>
+                       <option value="Microsoft Build">Microsoft Build</option>
+                       <option value="The Practical AI Channel">The Practical AI Channel</option>
+                   </select>
+               </label>
+               <label class="field-label">
+                   Date range
+                   <select @bind="_filters.DateRange">
+                       <option value="">Any time</option>
+                       <option value="last-week">Last week</option>
+                       <option value="last-month">Last month</option>
+                       <option value="older">Older</option>
+                   </select>
+               </label>
+               <label class="field-label">
+                   Result type
+                   <select @bind="_filters.ResultType">
+                       <option value="">Any type</option>
+                       <option value="video">Video</option>
+                       <option value="audio">Audio</option>
+                   </select>
+               </label>
+               <label class="field-label">
+                   Has transcript
+                   <select @bind="_hasTranscriptFilter">
+                       <option value="">Any</option>
+                       <option value="true">Yes</option>
+                       <option value="false">No</option>
+                   </select>
+               </label>
+               <label class="field-label">
+                   Has repo
+                   <select @bind="_hasRepoFilter">
+                       <option value="">Any</option>
+                       <option value="true">Yes</option>
+                       <option value="false">No</option>
+                   </select>
+               </label>
+               <label class="field-label">
+                   Has notes
+                   <select @bind="_hasNotesFilter">
+                       <option value="">Any</option>
+                       <option value="true">Yes</option>
+                       <option value="false">No</option>
+                   </select>
+               </label>
+               <label class="field-label">
+                   Ingestion status
+                   <select @bind="_filters.IngestionStatus">
+                       <option value="">Any status</option>
+                       <option value="processed">Processed</option>
+                       <option value="stale">Stale</option>
+                       <option value="failed">Failed</option>
+                   </select>
+               </label>
+               <button class="primary-button" type="button" @onclick="RunSearchAsync">Apply filters</button>
+           </div>
+        </aside>
     </section>
 </div>
 
-<EditItemModal IsVisible="_editModalVisible"
-               ItemId="_activeItem?.Id ?? Guid.Empty"
-               ItemType="_activeItem?.ItemType ?? string.Empty"
-               ItemTitle="_activeItem?.Title"
-               OnClose="CloseEditModal"
-               OnSaved="OnItemSaved" />
-
-<NoteModal IsVisible="_noteModalVisible"
-           TargetId="_activeItem?.Id ?? Guid.Empty"
-           TargetType="_activeItem?.ItemType ?? string.Empty"
-           TargetTitle="_activeItem?.Title"
-           OnClose="CloseNoteModal"
-           OnSaved="OnItemSaved" />
+<style>
+    .page-shell { display: grid; gap: 1.25rem; }
+    .hero-card, .search-box, .panel-card, .result-card, .state-card, .results-summary { background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 1rem; padding: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
+    .hero-card { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+    .search-layout { display: grid; gap: 1rem; grid-template-columns: minmax(0, 2fr) minmax(280px, 360px); align-items: start; }
+    .search-main { display: grid; gap: 1rem; }
+    .side-panel { display: grid; gap: 1rem; }
+    .search-input-row { display: flex; gap: 0.75rem; align-items: center; }
+    .search-input { flex: 1; padding: 0.85rem 1rem; border-radius: 999px; border: 1px solid var(--surface-border); }
+    .search-input-label, .field-label { display: grid; gap: 0.35rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .results-summary { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+    .summary-pill, .chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.65rem; border-radius: 999px; background: rgba(33, 150, 243, 0.12); color: var(--accent-primary); font-size: 0.85rem; }
+    .chip--note { background: rgba(255, 193, 7, 0.16); color: var(--warning-text); }
+    .chip--selectable { cursor: pointer; border: none; }
+    .result-card { display: grid; gap: 0.75rem; }
+    .result-card__header, .result-card__body, .result-card__footer, .result-card__expanded-grid, .panel-card__header, .detail-list__title-row { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+    .result-card__title-row { display: flex; gap: 0.6rem; align-items: center; }
+    .result-card__meta, .page-description, .result-card__primary-match p, .detail-list li p, .related-item p { color: var(--text-muted); margin: 0; }
+    .result-card__score-box { display: grid; min-width: 84px; justify-items: center; padding: 0.7rem; border-radius: 0.75rem; background: rgba(26, 115, 232, 0.1); }
+    .score-value { font-size: 1.2rem; font-weight: 700; }
+    .score-caption { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .result-card__expanded { display: grid; gap: 1rem; border-top: 1px solid var(--surface-border); padding-top: 1rem; }
+    .result-card__expanded-grid { align-items: start; }
+    .detail-list { display: grid; gap: 0.7rem; padding: 0; margin: 0; list-style: none; }
+    .detail-list li, .related-item { border: 1px solid var(--surface-border); border-radius: 0.75rem; padding: 0.7rem; }
+    .related-list { display: grid; gap: 0.65rem; }
+    .related-item--segment { border-left: 4px solid var(--accent-primary); }
+    .related-item--note { border-left: 4px solid var(--warning-text); }
+    .related-item--website { border-left: 4px solid var(--accent-success); }
+    .related-item__percent { color: var(--accent-primary); font-weight: 700; }
+    .result-card__screenshot { max-width: 100%; border-radius: 0.75rem; border: 1px solid var(--surface-border); }
+    .status-message { margin-top: 0.7rem; padding: 0.7rem 0.95rem; border-radius: 0.75rem; }
+    .status-warning { background: rgba(255, 193, 7, 0.14); color: var(--warning-text); }
+    .link-pill { color: var(--accent-primary); text-decoration: none; }
+    .ghost-button { border: none; background: transparent; color: var(--accent-primary); cursor: pointer; padding: 0; }
+    .chip-stack { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    @@media (max-width: 1000px) {
+        .search-layout { grid-template-columns: 1fr; }
+        .side-panel { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+    }
+</style>
 
 @code {
-    private bool _editModalVisible;
-    private bool _noteModalVisible;
-    private SearchResultItem? _activeItem;
+    private readonly HashSet<string> _expandedClusterIds = new(StringComparer.OrdinalIgnoreCase);
+    private string _query = "project idea search";
+    private string _errorMessage = string.Empty;
+    private bool _isSearching;
+    private bool _isLoading = true;
+    private SearchResponse? _searchResponse;
+    private readonly List<string> _recentSearches = new();
+    private readonly SearchUiSettings _settings = new();
+    private readonly SearchFilters _filters = new();
+    private string _hasTranscriptFilter = string.Empty;
+    private string _hasRepoFilter = string.Empty;
+    private string _hasNotesFilter = string.Empty;
 
-    // Fixture results — representative of what real search results will surface
-    private readonly List<SearchResultItem> _sampleResults =
-    [
-        new SearchResultItem
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadInitialStateAsync();
+    }
+
+    private async Task LoadInitialStateAsync()
+    {
+        try
         {
-            Id = new Guid("00000000-0000-0000-0000-000000000001"),
-            ItemType = "video",
-            Title = "Building Blazor WASM apps from scratch",
-            Description = "A deep-dive into hosted Blazor WebAssembly patterns, DI, and auth integration.",
-            HasNote = false,
-            HasClassificationOverride = false
-        },
-        new SearchResultItem
-        {
-            Id = new Guid("00000000-0000-0000-0000-000000000002"),
-            ItemType = "video",
-            Title = "Async patterns in .NET 10",
-            Description = "Channel<T>, IAsyncEnumerable, and structured concurrency walkthrough.",
-            HasNote = true,
-            HasClassificationOverride = false
-        },
-        new SearchResultItem
-        {
-            Id = new Guid("00000000-0000-0000-0000-000000000003"),
-            ItemType = "external_resource",
-            Title = "dotnet/runtime GitHub repository",
-            Description = "The official .NET runtime, framework, and tools repository.",
-            HasNote = false,
-            HasClassificationOverride = true
+           var settings = await Http.GetFromJsonAsync<SearchUiSettings>("/api/search-ui/settings");
+           if (settings is not null)
+           {
+               _settings.TextWeight = settings.TextWeight;
+               _settings.VectorWeight = settings.VectorWeight;
+           }
+
+           var recentSearches = await Http.GetFromJsonAsync<List<string>>("/api/search-ui/recent");
+           if (recentSearches is not null)
+           {
+               _recentSearches.Clear();
+               _recentSearches.AddRange(recentSearches);
+           }
+
+           await RunSearchAsync();
         }
-    ];
-
-    private void OpenEditModal(SearchResultItem item)
-    {
-        _activeItem = item;
-        _editModalVisible = true;
-        _noteModalVisible = false;
+        catch (Exception ex)
+        {
+           _errorMessage = ex.Message;
+        }
+        finally
+        {
+           _isLoading = false;
+        }
     }
 
-    private void OpenNoteModal(SearchResultItem item)
+    private async Task RunSearchAsync()
     {
-        _activeItem = item;
-        _noteModalVisible = true;
-        _editModalVisible = false;
+        _isSearching = true;
+        _errorMessage = string.Empty;
+        try
+        {
+           var response = await Http.PostAsJsonAsync("/api/search-ui/search", new SearchRequest
+           {
+               Query = _query,
+               Filters = BuildFilters(),
+               Settings = new SearchUiSettings
+               {
+                   TextWeight = _settings.TextWeight,
+                   VectorWeight = _settings.VectorWeight
+               }
+           });
+
+           response.EnsureSuccessStatusCode();
+           _searchResponse = await response.Content.ReadFromJsonAsync<SearchResponse>();
+           var recentSearches = await Http.GetFromJsonAsync<List<string>>("/api/search-ui/recent");
+           if (recentSearches is not null)
+           {
+               _recentSearches.Clear();
+               _recentSearches.AddRange(recentSearches);
+           }
+        }
+        catch (Exception ex)
+        {
+           _errorMessage = ex.Message;
+        }
+        finally
+        {
+           _isSearching = false;
+        }
     }
 
-    private void CloseEditModal()
+    private async Task SaveSettingsAsync()
     {
-        _editModalVisible = false;
-        _activeItem = null;
+        try
+        {
+           var response = await Http.PostAsJsonAsync("/api/search-ui/settings", new SearchUiSettings
+           {
+               TextWeight = _settings.TextWeight,
+               VectorWeight = _settings.VectorWeight
+           });
+
+           response.EnsureSuccessStatusCode();
+           await RunSearchAsync();
+        }
+        catch (Exception ex)
+        {
+           _errorMessage = ex.Message;
+        }
     }
 
-    private void CloseNoteModal()
+    private async Task ClearRecentSearchesAsync()
     {
-        _noteModalVisible = false;
-        _activeItem = null;
+        try
+        {
+           var response = await Http.DeleteAsync("/api/search-ui/recent");
+           response.EnsureSuccessStatusCode();
+           _recentSearches.Clear();
+        }
+        catch (Exception ex)
+        {
+           _errorMessage = ex.Message;
+        }
     }
 
-    private void OnItemSaved()
+    private async Task RetrySearchAsync(string clusterId)
     {
-        // In the real search results flow this would re-query the search index.
-        // For now just close the active modal so the save feedback is visible briefly.
+        await RunSearchAsync();
+        _expandedClusterIds.Add(clusterId);
     }
 
-    private sealed class SearchResultItem
+    private void ApplyRecentSearch(string recentSearch)
     {
-        public Guid Id { get; set; }
-        public string ItemType { get; set; } = string.Empty;
+        _query = recentSearch;
+        _ = InvokeAsync(RunSearchAsync);
+    }
+
+    private void HandleInputKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+           _ = InvokeAsync(RunSearchAsync);
+        }
+    }
+
+    private bool IsExpanded(string clusterId) => _expandedClusterIds.Contains(clusterId);
+
+    private void ToggleExpanded(string clusterId)
+    {
+        if (!_expandedClusterIds.Add(clusterId))
+        {
+           _expandedClusterIds.Remove(clusterId);
+        }
+    }
+
+    private SearchFilters BuildFilters()
+    {
+        return new SearchFilters
+        {
+           Channel = string.IsNullOrWhiteSpace(_filters.Channel) ? null : _filters.Channel,
+           DateRange = string.IsNullOrWhiteSpace(_filters.DateRange) ? null : _filters.DateRange,
+           ResultType = string.IsNullOrWhiteSpace(_filters.ResultType) ? null : _filters.ResultType,
+           HasTranscript = ParseOptionalBoolean(_hasTranscriptFilter),
+           HasRepo = ParseOptionalBoolean(_hasRepoFilter),
+           HasNotes = ParseOptionalBoolean(_hasNotesFilter),
+           IngestionStatus = string.IsNullOrWhiteSpace(_filters.IngestionStatus) ? null : _filters.IngestionStatus
+        };
+    }
+
+    private static bool? ParseOptionalBoolean(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+           return null;
+        }
+
+        return bool.Parse(value);
+    }
+
+    private sealed class SearchRequest
+    {
+        public string Query { get; set; } = string.Empty;
+        public SearchFilters Filters { get; set; } = new();
+        public SearchUiSettings? Settings { get; set; }
+    }
+
+    private sealed class SearchFilters
+    {
+        public string? Channel { get; set; }
+        public string? DateRange { get; set; }
+        public string? ResultType { get; set; }
+        public bool? HasTranscript { get; set; }
+        public bool? HasRepo { get; set; }
+        public bool? HasNotes { get; set; }
+        public string? IngestionStatus { get; set; }
+    }
+
+    private sealed class SearchUiSettings
+    {
+        public double TextWeight { get; set; } = 0.7;
+        public double VectorWeight { get; set; } = 0.3;
+    }
+
+    private sealed class SearchResponse
+    {
+        public string Query { get; set; } = string.Empty;
+        public List<SearchResultClusterResponse> Results { get; set; } = new();
+        public string Summary { get; set; } = string.Empty;
+    }
+
+    private sealed class SearchResultClusterResponse
+    {
+        public string ClusterId { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
-        public bool HasNote { get; set; }
-        public bool HasClassificationOverride { get; set; }
+        public string Channel { get; set; } = string.Empty;
+        public DateTimeOffset PublishDate { get; set; }
+        public string ResultType { get; set; } = string.Empty;
+        public bool HasTranscript { get; set; }
+        public bool HasRepo { get; set; }
+        public bool HasNotes { get; set; }
+        public bool HasScreenshot { get; set; }
+        public string ProcessingStatus { get; set; } = string.Empty;
+        public bool CanRetry { get; set; }
+        public int MatchesInsideCount { get; set; }
+        public string? PrimaryMatch { get; set; }
+        public string? PrimaryMatchTimestamp { get; set; }
+        public double Score { get; set; }
+        public List<string> ProcessingWarnings { get; set; } = new();
+        public List<string> RepositoryLinks { get; set; } = new();
+        public List<string> WebsiteLinks { get; set; } = new();
+        public string? ScreenshotUrl { get; set; }
+        public List<SearchSubmatchResponse> Submatches { get; set; } = new();
+        public List<SearchRelatedItemResponse> RelatedItems { get; set; } = new();
+        public SearchScoreComponentsResponse ScoreComponents { get; set; } = new();
+    }
+
+    private sealed class SearchSubmatchResponse
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public string Detail { get; set; } = string.Empty;
+        public string? TimestampLabel { get; set; }
+        public string? Url { get; set; }
+    }
+
+    private sealed class SearchRelatedItemResponse
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public double RelativeSimilarityPercent { get; set; }
+        public string? Url { get; set; }
+        public string Detail { get; set; } = string.Empty;
+    }
+
+    private sealed class SearchScoreComponentsResponse
+    {
+        public double BaseScore { get; set; }
+        public double MaxDocumentScore { get; set; }
+        public double AverageTopThreeDocumentScore { get; set; }
+        public double CoverageScore { get; set; }
     }
 }
