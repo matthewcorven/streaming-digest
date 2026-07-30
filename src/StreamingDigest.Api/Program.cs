@@ -1118,13 +1118,15 @@ app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authSe
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Login failed", detail: ex.Message);
     }
 });
-app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
+app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
     var sessionToken = context.Request.Cookies["auth-session"];
     if (!string.IsNullOrWhiteSpace(sessionToken))
     {
         await authService.LogoutAsync(connectionString, sessionToken, cancellationToken);
     }
+
+    searchUiService.RemoveState(GetSearchUiStateKey(context));
 
     context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
     context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = true, SameSite = SameSiteMode.Lax });
@@ -1362,7 +1364,7 @@ app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService mo
         : Results.Unauthorized());
 app.MapGet("/api/search-ui/settings", (HttpContext context, SearchUiService searchUiService) =>
     IsAuthenticated(context.Request)
-        ? Results.Ok(searchUiService.GetSettings(GetSearchUiStateKey(context)))
+        ? Results.Ok(searchUiService.GetSettings())
         : Results.Unauthorized());
 app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
@@ -1382,9 +1384,8 @@ app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiServi
         return Results.BadRequest();
     }
 
-    var stateKey = GetSearchUiStateKey(context);
-    searchUiService.UpdateSettings(request, stateKey);
-    return Results.Ok(searchUiService.GetSettings(stateKey));
+    searchUiService.UpdateSettings(request);
+    return Results.Ok(searchUiService.GetSettings());
 });
 app.MapGet("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
     IsAuthenticated(context.Request)

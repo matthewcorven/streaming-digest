@@ -2,27 +2,24 @@ namespace StreamingDigest.Application;
 
 public sealed class SearchUiService
 {
-    private const string DefaultStateKey = "__default__";
+    private static readonly TimeSpan RecentSearchStateLifetime = TimeSpan.FromHours(2);
     private readonly object _syncRoot = new();
-    private readonly Dictionary<string, SearchUiState> _states = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RecentSearchState> _recentSearchStates = new(StringComparer.OrdinalIgnoreCase);
+    private SearchUiSettings _settings = SearchUiSettings.Default;
 
     public SearchUiService(HybridRankingService? rankingService = null)
     {
     }
 
-    public SearchUiSettings GetSettings() => GetSettings(stateKey: null);
-
-    public SearchUiSettings GetSettings(string? stateKey)
+    public SearchUiSettings GetSettings()
     {
         lock (_syncRoot)
         {
-            return CloneSettings(GetOrCreateState(stateKey).Settings);
+            return CloneSettings(_settings);
         }
     }
 
-    public void UpdateSettings(SearchUiSettings settings) => UpdateSettings(settings, stateKey: null);
-
-    public void UpdateSettings(SearchUiSettings settings, string? stateKey)
+    public void UpdateSettings(SearchUiSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -43,8 +40,7 @@ public sealed class SearchUiService
 
         lock (_syncRoot)
         {
-            var state = GetOrCreateState(stateKey);
-            state.Settings = new SearchUiSettings
+            _settings = new SearchUiSettings
             {
                 TextWeight = settings.TextWeight,
                 VectorWeight = settings.VectorWeight
@@ -63,10 +59,8 @@ public sealed class SearchUiService
             var normalizedQuery = string.IsNullOrWhiteSpace(request.Query) ? "project idea search" : request.Query.Trim();
             var terms = ExtractTerms(normalizedQuery);
             var activeFilters = request.Filters ?? SearchFilters.Empty;
-            var state = GetOrCreateState(stateKey);
-            var effectiveSettings = request.Settings is not null
-                ? CloneSettings(request.Settings)
-                : CloneSettings(state.Settings);
+            var state = GetOrCreateRecentSearchState(stateKey);
+            var effectiveSettings = CloneSettings(_settings);
 
             var candidateSeeds = CreateCandidateSeeds()
                 .Where(seed => MatchesFilters(seed, activeFilters))
@@ -97,7 +91,7 @@ public sealed class SearchUiService
                 Query = normalizedQuery,
                 Results = results,
                 RecentSearches = GetRecentSearches(stateKey).ToList(),
-                Settings = CloneSettings(state.Settings),
+                Settings = CloneSettings(_settings),
                 Summary = results.Count == 0
                     ? "No clusters matched the current filters."
                     : $"Showing {results.Count} clustered video result{(results.Count == 1 ? string.Empty : "s")} for '{normalizedQuery}'."
@@ -111,7 +105,8 @@ public sealed class SearchUiService
     {
         lock (_syncRoot)
         {
-            return GetOrCreateState(stateKey).RecentSearches
+            PruneExpiredRecentSearchStates();
+            return GetOrCreateRecentSearchState(stateKey).RecentSearches
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Select(item => item.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -126,11 +121,19 @@ public sealed class SearchUiService
     {
         lock (_syncRoot)
         {
-            GetOrCreateState(stateKey).RecentSearches.Clear();
+            RemoveRecentSearchState(stateKey);
         }
     }
 
-    private void RegisterRecentSearch(SearchUiState state, string query)
+    public void RemoveState(string? stateKey)
+    {
+        lock (_syncRoot)
+        {
+            RemoveRecentSearchState(stateKey);
+        }
+    }
+
+    private void RegisterRecentSearch(RecentSearchState state, string query)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -172,20 +175,36 @@ public sealed class SearchUiService
         }
     }
 
-    private SearchUiState GetOrCreateState(string? stateKey)
+    private RecentSearchState GetOrCreateRecentSearchState(string? stateKey)
     {
-        var effectiveStateKey = string.IsNullOrWhiteSpace(stateKey) ? DefaultStateKey : stateKey;
-        if (_states.TryGetValue(effectiveStateKey, out var state))
+        PruneExpiredRecentSearchStates();
+        var effectiveStateKey = NormalizeStateKey(stateKey);
+        if (_recentSearchStates.TryGetValue(effectiveStateKey, out var state))
         {
+            state.LastAccessedAt = DateTimeOffset.UtcNow;
             return state;
         }
 
-        var createdState = new SearchUiState();
-        _states[effectiveStateKey] = createdState;
+        var createdState = new RecentSearchState();
+        _recentSearchStates[effectiveStateKey] = createdState;
         return createdState;
     }
 
-    private SearchResponse CreateEmptyResponse(string query, SearchUiState state)
+    private void RemoveRecentSearchState(string? stateKey)
+    {
+        _recentSearchStates.Remove(NormalizeStateKey(stateKey));
+    }
+
+    private void PruneExpiredRecentSearchStates()
+    {
+        var cutoff = DateTimeOffset.UtcNow.Subtract(RecentSearchStateLifetime);
+        foreach (var expiredState in _recentSearchStates.Where(state => state.Value.LastAccessedAt < cutoff).Select(state => state.Key).ToList())
+        {
+            _recentSearchStates.Remove(expiredState);
+        }
+    }
+
+    private SearchResponse CreateEmptyResponse(string query, RecentSearchState state)
     {
         return new SearchResponse
         {
@@ -197,7 +216,7 @@ public sealed class SearchUiService
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Take(8)
                 .ToList(),
-            Settings = CloneSettings(state.Settings),
+            Settings = CloneSettings(_settings),
             Summary = "No clusters matched the current filters."
         };
     }
@@ -223,9 +242,14 @@ public sealed class SearchUiService
         };
     }
 
-    private sealed class SearchUiState
+    private static string NormalizeStateKey(string? stateKey)
     {
-        public SearchUiSettings Settings { get; set; } = SearchUiSettings.Default;
+        return string.IsNullOrWhiteSpace(stateKey) ? "__default__" : stateKey;
+    }
+
+    private sealed class RecentSearchState
+    {
+        public DateTimeOffset LastAccessedAt { get; set; } = DateTimeOffset.UtcNow;
         public Queue<string> RecentSearches { get; } = new();
     }
 

@@ -69,7 +69,7 @@ public sealed class SearchUiServiceTests
     }
 
     [Fact]
-    public void Recent_searches_and_settings_are_isolated_by_state_key()
+    public void Recent_searches_are_isolated_by_state_key_while_settings_remain_global()
     {
         var service = new SearchUiService();
 
@@ -79,13 +79,24 @@ public sealed class SearchUiServiceTests
         Assert.Equal(new[] { "alpha" }, service.GetRecentSearches("user-a"));
         Assert.Equal(new[] { "beta" }, service.GetRecentSearches("user-b"));
 
-        service.UpdateSettings(new SearchUiSettings { TextWeight = 0.2, VectorWeight = 0.8 }, stateKey: "user-a");
-        service.UpdateSettings(new SearchUiSettings { TextWeight = 0.9, VectorWeight = 0.1 }, stateKey: "user-b");
+        service.UpdateSettings(new SearchUiSettings { TextWeight = 0.2, VectorWeight = 0.8 });
 
-        Assert.Equal(0.2, service.GetSettings("user-a").TextWeight);
-        Assert.Equal(0.8, service.GetSettings("user-a").VectorWeight);
-        Assert.Equal(0.9, service.GetSettings("user-b").TextWeight);
-        Assert.Equal(0.1, service.GetSettings("user-b").VectorWeight);
+        Assert.Equal(0.2, service.GetSettings().TextWeight);
+        Assert.Equal(0.8, service.GetSettings().VectorWeight);
+    }
+
+    [Fact]
+    public void RemoveState_clears_the_recent_search_history_for_that_state_key()
+    {
+        var service = new SearchUiService();
+
+        service.Search(new SearchRequest { Query = "alpha" }, stateKey: "user-a");
+        service.Search(new SearchRequest { Query = "beta" }, stateKey: "user-b");
+
+        service.RemoveState("user-a");
+
+        Assert.Empty(service.GetRecentSearches("user-a"));
+        Assert.Equal(new[] { "beta" }, service.GetRecentSearches("user-b"));
     }
 
     [Fact]
