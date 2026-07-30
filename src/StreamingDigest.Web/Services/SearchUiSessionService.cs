@@ -14,4 +14,7 @@ public sealed class SearchUiSessionService
 
     public Task<HttpResponseMessage> SendAuthenticatedRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
         => _authenticationService.SendAuthenticatedRequestAsync(request, cancellationToken);
+
+    public Task<T?> GetAuthenticatedJsonAsync<T>(string requestUri, CancellationToken cancellationToken = default)
+        => _authenticationService.GetAuthenticatedJsonAsync<T>(requestUri, cancellationToken);
 }

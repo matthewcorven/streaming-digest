@@ -1,5 +1,4 @@
 @page "/search"
-@inject HttpClient Http
 @inject NavigationManager NavigationManager
 @inject SearchUiSessionService SearchUiSessionService
 @using System.Net.Http.Json
@@ -366,14 +365,14 @@
         {
            await EnsureApiSessionAsync();
 
-           var settings = await Http.GetFromJsonAsync<SearchUiSettings>("/api/search-ui/settings");
+           var settings = await SearchUiSessionService.GetAuthenticatedJsonAsync<SearchUiSettings>("/api/search-ui/settings");
            if (settings is not null)
            {
                _settings.TextWeight = settings.TextWeight;
                _settings.VectorWeight = settings.VectorWeight;
            }
 
-           var recentSearches = await Http.GetFromJsonAsync<List<string>>("/api/search-ui/recent");
+           var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
            if (recentSearches is not null)
            {
                _recentSearches.Clear();
@@ -413,7 +412,7 @@
            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
            response.EnsureSuccessStatusCode();
            _searchResponse = await response.Content.ReadFromJsonAsync<SearchResponse>();
-           var recentSearches = await Http.GetFromJsonAsync<List<string>>("/api/search-ui/recent");
+           var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
            if (recentSearches is not null)
            {
                _recentSearches.Clear();

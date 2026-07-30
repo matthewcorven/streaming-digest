@@ -99,6 +99,14 @@ public sealed class AuthenticationService
         return response;
     }
 
+    public async Task<T?> GetAuthenticatedJsonAsync<T>(string requestUri, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        using var response = await SendAuthenticatedRequestAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken);
+    }
+
     public async Task LogoutAsync()
     {
         try
