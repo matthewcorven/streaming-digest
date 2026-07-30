@@ -1,5 +1,7 @@
 @page "/search"
 @inject HttpClient Http
+@inject NavigationManager NavigationManager
+@inject SearchUiSessionService SearchUiSessionService
 @using System.Net.Http.Json
 
 <PageTitle>Search</PageTitle>
@@ -381,6 +383,10 @@
 
            await RunSearchAsync();
         }
+        catch (UnauthorizedAccessException)
+        {
+           NavigationManager.NavigateTo("/login", true);
+        }
         catch (Exception ex)
         {
            _errorMessage = ex.Message;
@@ -420,6 +426,10 @@
                _recentSearches.AddRange(recentSearches);
            }
         }
+        catch (UnauthorizedAccessException)
+        {
+           NavigationManager.NavigateTo("/login", true);
+        }
         catch (Exception ex)
         {
            _errorMessage = ex.Message;
@@ -444,6 +454,10 @@
            response.EnsureSuccessStatusCode();
            await RunSearchAsync();
         }
+        catch (UnauthorizedAccessException)
+        {
+           NavigationManager.NavigateTo("/login", true);
+        }
         catch (Exception ex)
         {
            _errorMessage = ex.Message;
@@ -458,6 +472,10 @@
            using var response = await Http.SendAsync(request);
            response.EnsureSuccessStatusCode();
            _recentSearches.Clear();
+        }
+        catch (UnauthorizedAccessException)
+        {
+           NavigationManager.NavigateTo("/login", true);
         }
         catch (Exception ex)
         {
@@ -492,14 +510,7 @@
             return;
         }
 
-        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
-        if (!loginResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException("The search UI could not authenticate the demo session.");
-        }
-
-        var csrf = await Http.GetFromJsonAsync<CsrfResponse>("/api/auth/csrf");
-        _csrfToken = csrf?.Token;
+        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
     }
 
     private async Task<HttpRequestMessage> CreateMutatingRequestAsync(HttpMethod method, string requestUri, object? payload = null)
@@ -548,11 +559,6 @@
         }
 
         return bool.Parse(value);
-    }
-
-    private sealed class CsrfResponse
-    {
-        public string? Token { get; set; }
     }
 
     private sealed class SearchRequest

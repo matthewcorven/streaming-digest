@@ -11,5 +11,6 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 builder.Services.AddSingleton<IIngestionRunDetailFixtureService, IngestionRunDetailFixtureService>();
 builder.Services.AddScoped<UpgradeMaintenanceSnapshotService>();
 builder.Services.AddScoped<AuthenticationService>();
+builder.Services.AddScoped<SearchUiSessionService>();
 
 await builder.Build().RunAsync();
