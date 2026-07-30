@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace StreamingDigest.Web.Services;
 
@@ -7,6 +8,7 @@ public sealed class AuthenticationService
 {
     private readonly HttpClient _httpClient;
     private bool _isAuthenticated;
+    private bool _requiresPasswordChange;
     private string _currentUser = "guest";
     private string? _csrfToken;
 
@@ -16,6 +18,8 @@ public sealed class AuthenticationService
     }
 
     public bool IsAuthenticated => _isAuthenticated;
+
+    public bool RequiresPasswordChange => _requiresPasswordChange;
 
     public string CurrentUser => _currentUser;
 
@@ -33,26 +37,29 @@ public sealed class AuthenticationService
         }
     }
 
-    public async Task<bool> LoginAsync(string username, string password)
+    public async Task<LoginResult> LoginAsync(string username, string password)
     {
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
         {
             ResetAuthenticationState();
-            return false;
+            return LoginResult.Failed;
         }
 
         using var response = await _httpClient.PostAsJsonAsync("/api/auth/login", new { username, password });
         if (!response.IsSuccessStatusCode)
         {
             ResetAuthenticationState();
-            return false;
+            return LoginResult.Failed;
         }
 
+        var loginResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
         _isAuthenticated = true;
-        _currentUser = username;
+        _requiresPasswordChange = loginResponse?.MustChangePassword ?? false;
+        _currentUser = loginResponse?.Username ?? username;
         _csrfToken = null;
         Changed?.Invoke();
-        return true;
+
+        return _requiresPasswordChange ? LoginResult.RequiresPasswordChange : LoginResult.Success;
     }
 
     public async Task<string> EnsureApiSessionAsync(CancellationToken cancellationToken = default)
@@ -64,7 +71,11 @@ public sealed class AuthenticationService
             throw new UnauthorizedAccessException("The API requires an authenticated session.");
         }
 
+        var authResponse = await TryReadJsonAsync<AuthResponse>(meResponse, cancellationToken);
         _isAuthenticated = true;
+        _requiresPasswordChange = authResponse?.MustChangePassword ?? false;
+        _currentUser = authResponse?.Username ?? _currentUser;
+
         using var csrfResponse = await _httpClient.GetAsync("/api/auth/csrf", cancellationToken);
         if (!csrfResponse.IsSuccessStatusCode)
         {
@@ -104,7 +115,30 @@ public sealed class AuthenticationService
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         using var response = await SendAuthenticatedRequestAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken);
+        return await TryReadJsonAsync<T>(response, cancellationToken);
+    }
+
+    public async Task<bool> ChangePasswordAsync(string currentPassword, string newPassword, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(currentPassword) || string.IsNullOrWhiteSpace(newPassword))
+        {
+            return false;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/change-password")
+        {
+            Content = JsonContent.Create(new { currentPassword, newPassword })
+        };
+
+        using var response = await SendAuthenticatedRequestAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return false;
+        }
+
+        _requiresPasswordChange = false;
+        Changed?.Invoke();
+        return true;
     }
 
     public async Task LogoutAsync()
@@ -125,13 +159,46 @@ public sealed class AuthenticationService
     private void ResetAuthenticationState()
     {
         _isAuthenticated = false;
+        _requiresPasswordChange = false;
         _currentUser = "guest";
         _csrfToken = null;
         Changed?.Invoke();
     }
 
+    private async Task<T?> TryReadJsonAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.Content is null)
+        {
+            return default;
+        }
+
+        try
+        {
+            var contentLength = response.Content.Headers.ContentLength;
+            if (contentLength is not null && contentLength <= 0)
+            {
+                return default;
+            }
+
+            return await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+    }
+
     private sealed class CsrfResponse
     {
         public string? Token { get; set; }
+    }
+
+    private sealed record AuthResponse(string? Username, bool MustChangePassword);
+
+    public enum LoginResult
+    {
+        Failed,
+        Success,
+        RequiresPasswordChange
     }
 }

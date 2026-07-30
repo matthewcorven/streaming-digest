@@ -3,7 +3,11 @@
 @inject AuthenticationService AuthenticationService
 @inject NavigationManager NavigationManager
 
-@if (!AuthenticationService.IsAuthenticated)
+@if (AuthenticationService.RequiresPasswordChange && !IsPasswordChangeRoute())
+{
+    <div class="loading-state">Redirecting to password change…</div>
+}
+else if (!AuthenticationService.IsAuthenticated)
 {
     <div class="loading-state">Redirecting to login…</div>
 }
@@ -78,7 +82,11 @@ else
         AuthenticationService.Changed += StateHasChanged;
         await AuthenticationService.InitializeAsync();
 
-        if (!AuthenticationService.IsAuthenticated && !IsPublicRoute())
+        if (AuthenticationService.RequiresPasswordChange && !IsPasswordChangeRoute())
+        {
+            NavigationManager.NavigateTo("/change-password", true);
+        }
+        else if (!AuthenticationService.IsAuthenticated && !IsPublicRoute())
         {
             NavigationManager.NavigateTo("/login", true);
         }
@@ -111,6 +119,7 @@ else
                 "channels" => "Channels",
                 "ingestion" => "Ingestion runs",
                 "settings" => "Settings",
+                "change-password" => "Change password",
                 _ when route.StartsWith("ingestion/runs/", StringComparison.OrdinalIgnoreCase) => "Ingestion run",
                 _ => "Streaming Digest"
             };
@@ -122,6 +131,9 @@ else
     private bool IsPublicRoute()
     {
         var route = GetRelativePath();
-        return string.Equals(route, "login", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(route, "login", StringComparison.OrdinalIgnoreCase)
+            || IsPasswordChangeRoute();
     }
+
+    private bool IsPasswordChangeRoute() => string.Equals(GetRelativePath(), "change-password", StringComparison.OrdinalIgnoreCase);
 }

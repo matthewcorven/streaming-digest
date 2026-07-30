@@ -43,6 +43,31 @@ public sealed class AuthenticationServiceTests
     }
 
     [Fact]
+    public async Task LoginAsync_tracks_password_change_required_state()
+    {
+        var handler = new StubHandler(request =>
+        {
+            return request.RequestUri?.AbsolutePath switch
+            {
+                "/api/auth/login" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { username = "admin", mustChangePassword = true })
+                },
+                _ => throw new InvalidOperationException($"Unexpected path: {request.RequestUri?.AbsolutePath}")
+            };
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://example.test") };
+        var service = new AuthenticationService(httpClient);
+
+        var result = await service.LoginAsync("admin", "admin");
+
+        Assert.Equal(AuthenticationService.LoginResult.RequiresPasswordChange, result);
+        Assert.True(service.IsAuthenticated);
+        Assert.True(service.RequiresPasswordChange);
+    }
+
+    [Fact]
     public async Task GetAuthenticatedJsonAsync_resets_auth_state_when_the_api_rejects_the_session()
     {
         var handler = new StubHandler(request =>
