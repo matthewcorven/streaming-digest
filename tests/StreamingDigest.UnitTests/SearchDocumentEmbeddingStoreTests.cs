@@ -88,6 +88,135 @@ public sealed class SearchDocumentEmbeddingStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StoreAsync_persists_null_parent_video_for_non_video_documents()
+    {
+        var generator = new SearchDocumentGenerator();
+        var document = Assert.Single(generator.Generate(new SearchDocumentGenerationRequest
+        {
+            ParentVideoId = null,
+            RepositoryReadmeChunks =
+            [
+                new RepositoryReadmeChunkDocumentInput(
+                    SourceEntityId: Guid.NewGuid(),
+                    ContentOriginal: "# Repo\nRepository content without a parent video.")
+            ]
+        }));
+
+        var store = new PostgresSearchDocumentEmbeddingStore(_connectionString!, new StubEmbeddingService());
+        var stored = Assert.Single(await store.StoreAsync([document]));
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT parent_video_id IS NULL
+            FROM public.search_documents
+            WHERE id = @searchDocumentId;
+            """,
+            connection);
+        command.Parameters.AddWithValue("searchDocumentId", stored.SearchDocumentId);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.True(reader.GetBoolean(0));
+    }
+
+    [Fact]
+    public async Task StoreAsync_clears_stale_flag_when_reprocessing_existing_document()
+    {
+        var generator = new SearchDocumentGenerator();
+        var document = Assert.Single(generator.Generate(new SearchDocumentGenerationRequest
+        {
+            ParentVideoId = null,
+            Notes =
+            [
+                new NoteDocumentInput(
+                    SourceEntityId: Guid.NewGuid(),
+                    MarkdownOriginal: "# Note\nReprocess me")
+            ]
+        }));
+
+        var store = new PostgresSearchDocumentEmbeddingStore(_connectionString!, new StubEmbeddingService());
+        var firstStored = Assert.Single(await store.StoreAsync([document]));
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+        await using var updateCommand = new NpgsqlCommand(
+            """
+            UPDATE public.search_documents
+            SET is_stale = TRUE
+            WHERE id = @searchDocumentId;
+            """,
+            connection);
+        updateCommand.Parameters.AddWithValue("searchDocumentId", firstStored.SearchDocumentId);
+        await updateCommand.ExecuteNonQueryAsync();
+
+        await store.StoreAsync([document]);
+
+        await using var verifyCommand = new NpgsqlCommand(
+            """
+            SELECT is_stale
+            FROM public.search_documents
+            WHERE id = @searchDocumentId;
+            """,
+            connection);
+        verifyCommand.Parameters.AddWithValue("searchDocumentId", firstStored.SearchDocumentId);
+
+        await using var reader = await verifyCommand.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.False(reader.GetBoolean(0));
+    }
+
+    [Fact]
+    public async Task StoreAsync_removes_existing_document_when_content_becomes_empty()
+    {
+        var store = new PostgresSearchDocumentEmbeddingStore(_connectionString!, new StubEmbeddingService());
+        var sourceEntityId = Guid.NewGuid();
+        var initialDocument = new GeneratedSearchDocument(
+            DocumentType: SearchDocumentTypeNames.Note,
+            SourceEntityType: SearchDocumentSourceEntityTypes.Note,
+            SourceEntityId: sourceEntityId,
+            ParentVideoId: null,
+            TitleEffective: "Initial title",
+            BodyEffective: "Initial body",
+            ContentHash: "initial-document-content",
+            SourceFieldName: null,
+            ChunkIndex: null);
+        var emptyDocument = new GeneratedSearchDocument(
+            DocumentType: SearchDocumentTypeNames.Note,
+            SourceEntityType: SearchDocumentSourceEntityTypes.Note,
+            SourceEntityId: sourceEntityId,
+            ParentVideoId: null,
+            TitleEffective: string.Empty,
+            BodyEffective: string.Empty,
+            ContentHash: "empty-document-content",
+            SourceFieldName: null,
+            ChunkIndex: null);
+
+        await store.StoreAsync([initialDocument]);
+        var stored = await store.StoreAsync([emptyDocument]);
+
+        Assert.Empty(stored);
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT COUNT(*)
+            FROM public.search_documents
+            WHERE source_entity_type = @sourceEntityType
+              AND source_entity_id = @sourceEntityId;
+            """,
+            connection);
+        command.Parameters.AddWithValue("sourceEntityType", SearchDocumentSourceEntityTypes.Note);
+        command.Parameters.AddWithValue("sourceEntityId", sourceEntityId);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(0L, reader.GetInt64(0));
+    }
+
+    [Fact]
     public async Task StoreAsync_does_not_duplicate_unchanged_embeddings_when_rerun()
     {
         var generator = new SearchDocumentGenerator();
@@ -125,6 +254,69 @@ public sealed class SearchDocumentEmbeddingStoreTests : IAsyncLifetime
         Assert.True(await reader.ReadAsync());
         Assert.Equal(1L, reader.GetInt64(0));
         Assert.Equal(1L, reader.GetInt64(1));
+    }
+
+    [Fact]
+    public async Task StoreAsync_replaces_existing_document_and_embedding_for_same_source_identity_when_content_changes()
+    {
+        var generator = new SearchDocumentGenerator();
+        var parentVideoId = Guid.NewGuid();
+        var sourceEntityId = Guid.NewGuid();
+        var initialDocument = Assert.Single(generator.Generate(new SearchDocumentGenerationRequest
+        {
+            ParentVideoId = parentVideoId,
+            Notes =
+            [
+                new NoteDocumentInput(
+                    SourceEntityId: sourceEntityId,
+                    MarkdownOriginal: "# Note\nInitial content")
+            ]
+        }));
+
+        var updatedDocument = Assert.Single(generator.Generate(new SearchDocumentGenerationRequest
+        {
+            ParentVideoId = parentVideoId,
+            Notes =
+            [
+                new NoteDocumentInput(
+                    SourceEntityId: sourceEntityId,
+                    MarkdownOriginal: "# Note\nUpdated content for regeneration")
+            ]
+        }));
+
+        var store = new PostgresSearchDocumentEmbeddingStore(_connectionString!, new StubEmbeddingService());
+        await InsertVideoAsync(parentVideoId);
+
+        var firstStored = Assert.Single(await store.StoreAsync([initialDocument]));
+        var secondStored = Assert.Single(await store.StoreAsync([updatedDocument]));
+
+        Assert.Equal(firstStored.SearchDocumentId, secondStored.SearchDocumentId);
+        Assert.Equal(firstStored.EmbeddingId, secondStored.EmbeddingId);
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+                COUNT(*) AS document_count,
+                COUNT(DISTINCT e.id) AS embedding_count,
+                MAX(sd.content_hash) AS content_hash
+            FROM public.search_documents AS sd
+            INNER JOIN public.embeddings AS e
+                ON e.search_document_id = sd.id
+            WHERE sd.source_entity_type = @sourceEntityType
+              AND sd.source_entity_id = @sourceEntityId;
+            """,
+            connection);
+        command.Parameters.AddWithValue("sourceEntityType", SearchDocumentSourceEntityTypes.Note);
+        command.Parameters.AddWithValue("sourceEntityId", sourceEntityId);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(1L, reader.GetInt64(0));
+        Assert.Equal(1L, reader.GetInt64(1));
+        Assert.Equal(updatedDocument.ContentHash, reader.GetString(2));
     }
 
     [Fact]

@@ -141,6 +141,19 @@ public sealed class AdminOperationsServiceTests
     }
 
     [Fact]
+    public async Task ReprocessEmbeddingsAsync_InvokesSearchDocumentRegenerationService()
+    {
+        var regenerationService = new RecordingSearchDocumentRegenerationService();
+        var service = new AdminOperationsService(searchDocumentRegenerationService: regenerationService);
+
+        var result = await service.ReprocessEmbeddingsAsync();
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("reprocess.embeddings", result.OperationType);
+        Assert.True(regenerationService.Invoked);
+    }
+
+    [Fact]
     public async Task RetryFailedLinkAsync_WithInvalidLinkId_ReturnsFailedResult()
     {
         var service = new AdminOperationsService();
@@ -434,6 +447,38 @@ public sealed class AdminOperationsServiceTests
                 CueCount: 4,
                 ErrorMessage: null,
                 Skipped: false));
+        }
+    }
+
+    private sealed class RecordingSearchDocumentRegenerationService : ISearchDocumentRegenerationService
+    {
+        public bool Invoked { get; private set; }
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateForEntityAsync(string entityType, Guid entityId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateForVideoAsync(Guid videoId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateForNoteAsync(Guid noteId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateForSegmentAsync(Guid segmentId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateForTranscriptCueAsync(Guid cueId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateForExternalResourceAsync(Guid resourceId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateForRepositoryAsync(Guid repositoryId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
+
+        public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> RegenerateAllAsync(CancellationToken cancellationToken = default)
+        {
+            Invoked = true;
+            return Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
         }
     }
 }

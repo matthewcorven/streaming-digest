@@ -17,19 +17,22 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly IAdminOperationStore? _operationStore;
     private readonly IEmbeddingService _embeddingService;
     private readonly ITranscriptIngestionService? _transcriptIngestionService;
+    private readonly ISearchDocumentRegenerationService? _searchDocumentRegenerationService;
 
     public AdminOperationsService(
         ApplicationConfiguration? configuration = null,
         string? contentRootPath = null,
         IAdminOperationStore? operationStore = null,
         IEmbeddingService? embeddingService = null,
-        ITranscriptIngestionService? transcriptIngestionService = null)
+        ITranscriptIngestionService? transcriptIngestionService = null,
+        ISearchDocumentRegenerationService? searchDocumentRegenerationService = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
         _contentRootPath = contentRootPath;
         _operationStore = operationStore;
         _embeddingService = embeddingService ?? new NullEmbeddingService();
         _transcriptIngestionService = transcriptIngestionService;
+        _searchDocumentRegenerationService = searchDocumentRegenerationService;
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
@@ -113,13 +116,47 @@ public sealed class AdminOperationsService : IAdminOperationsService
     }
 
     public async Task<AdminActionResult> ReprocessRepositoryAsync(string repositoryId, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("reprocess.repository", repositoryId, $"Reprocess queued for repository '{repositoryId}'.", cancellationToken);
+    {
+        if (!Guid.TryParse(repositoryId, out var parsedRepositoryId))
+        {
+            return await CreateResultAsync("reprocess.repository", repositoryId, "failed", $"Repository id '{repositoryId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        if (_searchDocumentRegenerationService is null)
+        {
+            return await CreateAcceptedResultAsync("reprocess.repository", repositoryId, $"Reprocess queued for repository '{repositoryId}'.", cancellationToken);
+        }
+
+        await _searchDocumentRegenerationService.RegenerateForRepositoryAsync(parsedRepositoryId, cancellationToken);
+        return await CreateCompletedResultAsync("reprocess.repository", repositoryId, $"Reprocess completed for repository '{repositoryId}'.", "healthy", cancellationToken);
+    }
 
     public async Task<AdminActionResult> ReprocessResourceAsync(string resourceId, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("reprocess.resource", resourceId, $"Reprocess queued for resource '{resourceId}'.", cancellationToken);
+    {
+        if (!Guid.TryParse(resourceId, out var parsedResourceId))
+        {
+            return await CreateResultAsync("reprocess.resource", resourceId, "failed", $"Resource id '{resourceId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        if (_searchDocumentRegenerationService is null)
+        {
+            return await CreateAcceptedResultAsync("reprocess.resource", resourceId, $"Reprocess queued for resource '{resourceId}'.", cancellationToken);
+        }
+
+        await _searchDocumentRegenerationService.RegenerateForExternalResourceAsync(parsedResourceId, cancellationToken);
+        return await CreateCompletedResultAsync("reprocess.resource", resourceId, $"Reprocess completed for resource '{resourceId}'.", "healthy", cancellationToken);
+    }
 
     public async Task<AdminActionResult> ReprocessEmbeddingsAsync(string? target = null, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("reprocess.embeddings", target, "Embedding reprocessing has been queued for the requested scope.", cancellationToken);
+    {
+        if (_searchDocumentRegenerationService is null)
+        {
+            return await CreateAcceptedResultAsync("reprocess.embeddings", target, "Embedding reprocessing has been queued for the requested scope.", cancellationToken);
+        }
+
+        await _searchDocumentRegenerationService.RegenerateAllAsync(cancellationToken);
+        return await CreateCompletedResultAsync("reprocess.embeddings", target, "Embedding reprocessing completed successfully.", "healthy", cancellationToken);
+    }
 
     public async Task<AdminActionResult> PurgeScreenshotsAsync(string? target = null, CancellationToken cancellationToken = default)
         => await CreateAcceptedResultAsync("screenshots.purge", target, "Screenshot purge has been queued.", cancellationToken);

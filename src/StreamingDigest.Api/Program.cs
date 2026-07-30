@@ -124,8 +124,10 @@ builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
+builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
-builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>()));
+builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>(), sp.GetService<ITranscriptIngestionService>(), sp.GetService<ISearchDocumentRegenerationService>()));
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
 builder.Services.AddScoped<IChannelRepository, ChannelRepository>();
@@ -916,7 +918,7 @@ app.MapGet("/api/external-resources/{resourceId:guid}/overrides", async (Guid re
     });
 });
 
-app.MapPut("/api/videos/{videoId:guid}/overrides", async (Guid videoId, UpdateVideoOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+app.MapPut("/api/videos/{videoId:guid}/overrides", async (Guid videoId, UpdateVideoOverrideRequest request, StreamingDigestDbContext context, ISearchDocumentRegenerationService regenerationService, CancellationToken cancellationToken) =>
 {
     var video = await context.Videos.SingleOrDefaultAsync(v => v.Id == videoId, cancellationToken);
     if (video is null)
@@ -946,10 +948,11 @@ app.MapPut("/api/videos/{videoId:guid}/overrides", async (Guid videoId, UpdateVi
 
     context.FieldOverrideHistories.AddRange(historyEntries);
     await context.SaveChangesAsync(cancellationToken);
+    await regenerationService.RegenerateForEntityAsync("video", videoId, cancellationToken);
     return Results.NoContent();
 });
 
-app.MapPut("/api/segments/{segmentId:guid}/overrides", async (Guid segmentId, UpdateSegmentOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+app.MapPut("/api/segments/{segmentId:guid}/overrides", async (Guid segmentId, UpdateSegmentOverrideRequest request, StreamingDigestDbContext context, ISearchDocumentRegenerationService regenerationService, CancellationToken cancellationToken) =>
 {
     var segment = await context.Segments.SingleOrDefaultAsync(s => s.Id == segmentId, cancellationToken);
     if (segment is null)
@@ -973,10 +976,11 @@ app.MapPut("/api/segments/{segmentId:guid}/overrides", async (Guid segmentId, Up
 
     context.FieldOverrideHistories.AddRange(historyEntries);
     await context.SaveChangesAsync(cancellationToken);
+    await regenerationService.RegenerateForEntityAsync("segment", segmentId, cancellationToken);
     return Results.NoContent();
 });
 
-app.MapPut("/api/transcript-cues/{cueId:guid}/overrides", async (Guid cueId, UpdateTranscriptCueOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+app.MapPut("/api/transcript-cues/{cueId:guid}/overrides", async (Guid cueId, UpdateTranscriptCueOverrideRequest request, StreamingDigestDbContext context, ISearchDocumentRegenerationService regenerationService, CancellationToken cancellationToken) =>
 {
     var cue = await context.TranscriptCues.SingleOrDefaultAsync(candidate => candidate.Id == cueId, cancellationToken);
     if (cue is null)
@@ -988,10 +992,11 @@ app.MapPut("/api/transcript-cues/{cueId:guid}/overrides", async (Guid cueId, Upd
     context.FieldOverrideHistories.Add(new FieldOverrideHistory { EntityType = "transcript_cue", EntityId = cueId, FieldName = "text", PreviousValue = cue.TextOverride, NewValue = newValue });
     cue.TextOverride = newValue;
     await context.SaveChangesAsync(cancellationToken);
+    await regenerationService.RegenerateForEntityAsync("transcript_cue", cueId, cancellationToken);
     return Results.NoContent();
 });
 
-app.MapPut("/api/external-resources/{resourceId:guid}/overrides", async (Guid resourceId, UpdateExternalResourceOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+app.MapPut("/api/external-resources/{resourceId:guid}/overrides", async (Guid resourceId, UpdateExternalResourceOverrideRequest request, StreamingDigestDbContext context, ISearchDocumentRegenerationService regenerationService, CancellationToken cancellationToken) =>
 {
     var resource = await context.ExternalResources.SingleOrDefaultAsync(r => r.Id == resourceId, cancellationToken);
     if (resource is null)
@@ -1021,10 +1026,11 @@ app.MapPut("/api/external-resources/{resourceId:guid}/overrides", async (Guid re
 
     context.FieldOverrideHistories.AddRange(historyEntries);
     await context.SaveChangesAsync(cancellationToken);
+    await regenerationService.RegenerateForEntityAsync("external_resource", resourceId, cancellationToken);
     return Results.NoContent();
 });
 
-app.MapPut("/api/repositories/{repositoryId:guid}/overrides", async (Guid repositoryId, UpdateRepositoryOverrideRequest request, StreamingDigestDbContext context, CancellationToken cancellationToken) =>
+app.MapPut("/api/repositories/{repositoryId:guid}/overrides", async (Guid repositoryId, UpdateRepositoryOverrideRequest request, StreamingDigestDbContext context, ISearchDocumentRegenerationService regenerationService, CancellationToken cancellationToken) =>
 {
     var repo = await context.Repositories.SingleOrDefaultAsync(r => r.Id == repositoryId, cancellationToken);
     if (repo is null)
@@ -1056,6 +1062,7 @@ app.MapPut("/api/repositories/{repositoryId:guid}/overrides", async (Guid reposi
 
     context.FieldOverrideHistories.AddRange(historyEntries);
     await context.SaveChangesAsync(cancellationToken);
+    await regenerationService.RegenerateForEntityAsync("repository", repositoryId, cancellationToken);
     return Results.NoContent();
 });
 
@@ -1448,7 +1455,7 @@ app.MapGet("/api/notes", async (string? targetType, Guid? targetId, StreamingDig
     return Results.Ok(new { items = notes });
 });
 
-app.MapPost("/api/notes", async (CreateNoteRequest request, StreamingDigestDbContext dbContext, CancellationToken cancellationToken) =>
+app.MapPost("/api/notes", async (CreateNoteRequest request, StreamingDigestDbContext dbContext, ISearchDocumentRegenerationService regenerationService, CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.TargetType))
     {
@@ -1484,6 +1491,7 @@ app.MapPost("/api/notes", async (CreateNoteRequest request, StreamingDigestDbCon
 
     dbContext.Notes.Add(note);
     await dbContext.SaveChangesAsync(cancellationToken);
+    await regenerationService.RegenerateForEntityAsync("note", note.Id, cancellationToken);
 
     var response = new NoteResponse(note.Id, note.TargetType, note.TargetId, note.Title, note.Markdown, note.EmbeddingStatus, note.CreatedAt, note.UpdatedAt);
     return Results.Created($"/api/notes/{note.Id}", response);
@@ -1500,7 +1508,7 @@ app.MapGet("/api/notes/{noteId:guid}", async (Guid noteId, StreamingDigestDbCont
     return note is null ? Results.NotFound() : Results.Ok(note);
 });
 
-app.MapPut("/api/notes/{noteId:guid}", async (Guid noteId, UpdateNoteRequest request, StreamingDigestDbContext dbContext, CancellationToken cancellationToken) =>
+app.MapPut("/api/notes/{noteId:guid}", async (Guid noteId, UpdateNoteRequest request, StreamingDigestDbContext dbContext, ISearchDocumentRegenerationService regenerationService, CancellationToken cancellationToken) =>
 {
     var note = await dbContext.Notes.SingleOrDefaultAsync(n => n.Id == noteId && n.DeletedAt == null, cancellationToken);
     if (note is null)
@@ -1525,6 +1533,7 @@ app.MapPut("/api/notes/{noteId:guid}", async (Guid noteId, UpdateNoteRequest req
 
     note.EmbeddingStatus = "stale";
     await dbContext.SaveChangesAsync(cancellationToken);
+    await regenerationService.RegenerateForEntityAsync("note", note.Id, cancellationToken);
 
     var response = new NoteResponse(note.Id, note.TargetType, note.TargetId, note.Title, note.Markdown, note.EmbeddingStatus, note.CreatedAt, note.UpdatedAt);
     return Results.Ok(new { status = "updated", entityType = "note", entityId = note.Id, resource = response });

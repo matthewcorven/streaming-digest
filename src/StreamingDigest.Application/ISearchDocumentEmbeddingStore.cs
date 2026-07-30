@@ -6,6 +6,10 @@ public interface ISearchDocumentEmbeddingStore
         IEnumerable<GeneratedSearchDocument> documents,
         Guid? generatedByOperationId = null,
         CancellationToken cancellationToken = default);
+
+    Task DeleteForVideoScopeAsync(Guid videoId, CancellationToken cancellationToken = default);
+
+    Task DeleteForSourceAsync(string sourceEntityType, Guid sourceEntityId, CancellationToken cancellationToken = default);
 }
 
 public sealed record StoredSearchDocumentEmbedding(
