@@ -73,9 +73,10 @@ else
 @code {
     private bool IsNavOpen = true;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         AuthenticationService.Changed += StateHasChanged;
+        await AuthenticationService.InitializeAsync();
 
         if (!AuthenticationService.IsAuthenticated && !IsPublicRoute())
         {

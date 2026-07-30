@@ -128,7 +128,6 @@
     private string _deployMode = "—";
     private IReadOnlyList<string> _features = Array.Empty<string>();
     private IReadOnlyList<ModelOption> _models = Array.Empty<ModelOption>();
-    private string? _csrfToken;
 
     protected override async Task OnInitializedAsync()
     {
@@ -188,13 +187,12 @@
             await EnsureApiSessionAsync();
 
             using var request = new HttpRequestMessage(HttpMethod.Put, "/api/settings");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new Dictionary<string, object?>
             {
                 ["observability.enabled"] = enabled
             });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"The admin API rejected the update with {(int)response.StatusCode}.");
@@ -225,10 +223,9 @@
             await EnsureApiSessionAsync();
 
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new { modelKind = model.Family, modelId });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"The admin API rejected the request with {(int)response.StatusCode}.");
@@ -251,15 +248,8 @@
         }
     }
 
-    private async Task EnsureApiSessionAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return;
-        }
-
-        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
-    }
+    private Task EnsureApiSessionAsync()
+        => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
 
     private static bool ReadBool(IReadOnlyDictionary<string, JsonElement> values, string key, bool fallback)
     {

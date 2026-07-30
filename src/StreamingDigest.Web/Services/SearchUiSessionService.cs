@@ -11,4 +11,7 @@ public sealed class SearchUiSessionService
 
     public Task<string> EnsureAuthenticatedSessionAsync(CancellationToken cancellationToken = default)
         => _authenticationService.EnsureApiSessionAsync(cancellationToken);
+
+    public Task<HttpResponseMessage> SendAuthenticatedRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+        => _authenticationService.SendAuthenticatedRequestAsync(request, cancellationToken);
 }

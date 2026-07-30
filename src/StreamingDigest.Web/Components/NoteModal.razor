@@ -73,7 +73,6 @@
     private Guid? _existingNoteId;
     private string? _noteTitle;
     private string? _noteMarkdown;
-    private string? _csrfToken;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -139,8 +138,7 @@
                     title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
                     markdown = _noteMarkdown
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
             else
             {
@@ -152,8 +150,7 @@
                     title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
                     markdown = _noteMarkdown
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -192,9 +189,8 @@
             await EnsureApiSessionAsync();
 
             var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/notes/{_existingNoteId}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
@@ -229,15 +225,8 @@
         await Close();
     }
 
-    private async Task EnsureApiSessionAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return;
-        }
-
-        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
-    }
+    private Task EnsureApiSessionAsync()
+        => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
 
     private sealed class NoteListResponse
     {

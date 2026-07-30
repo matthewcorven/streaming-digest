@@ -168,7 +168,6 @@
     private string _statusMessage = "Loading channels…";
     private string _statusTone = "neutral";
     private IReadOnlyList<ChannelListItemResponse> _channels = Array.Empty<ChannelListItemResponse>();
-    private string? _csrfToken;
     private readonly AddChannelModel _addModel = new();
     private string? _addValidationMessage;
     private ChannelListItemResponse? _editingChannel;
@@ -233,10 +232,9 @@
 
             await EnsureApiSessionAsync();
             using var request = new HttpRequestMessage(HttpMethod.Post, "/api/channels");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new { sourceUrl = validation.NormalizedSource });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -268,10 +266,9 @@
         {
             await EnsureApiSessionAsync();
             using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/channels/{channel.Id}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new { isPaused = !channel.IsPaused });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -338,7 +335,6 @@
         {
             await EnsureApiSessionAsync();
             using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/channels/{_editingChannel.Id}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
             request.Content = JsonContent.Create(new
             {
                 nameOverride = _editModel.NameOverride,
@@ -348,7 +344,7 @@
                 defaultBackfillMaxVideos = ParseOptionalInt(_editModel.DefaultBackfillMaxVideos)
             });
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -405,9 +401,8 @@
             }
 
             using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/channels/{_deleteChannel.Id}?{query}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await ReadErrorMessageAsync(response));
@@ -429,15 +424,8 @@
         }
     }
 
-    private async Task EnsureApiSessionAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return;
-        }
-
-        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
-    }
+    private Task EnsureApiSessionAsync()
+        => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
 
     private static CreateChannelValidationResult ValidateAndNormalizeChannelInput(string? source)
     {

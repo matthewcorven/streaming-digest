@@ -164,9 +164,6 @@
     private string? _noteTitle;
     private string? _noteMarkdown;
 
-    // Auth
-    private string? _csrfToken;
-
     protected override async Task OnParametersSetAsync()
     {
         if (IsVisible && ItemId != Guid.Empty)
@@ -273,8 +270,7 @@
                     author = string.IsNullOrWhiteSpace(_editAuthor) ? null : _editAuthor,
                     description = string.IsNullOrWhiteSpace(_editDescription) ? null : _editDescription
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
             else
             {
@@ -284,8 +280,7 @@
                     title = string.IsNullOrWhiteSpace(_editTitle) ? null : _editTitle,
                     description = string.IsNullOrWhiteSpace(_editDescription) ? null : _editDescription
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -322,9 +317,8 @@
             {
                 classification = string.IsNullOrWhiteSpace(_editClassification) ? null : _editClassification
             });
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
@@ -365,8 +359,7 @@
                     title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
                     markdown = _noteMarkdown
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
             else
             {
@@ -378,8 +371,7 @@
                     title = string.IsNullOrWhiteSpace(_noteTitle) ? null : _noteTitle,
                     markdown = _noteMarkdown
                 });
-                request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
-                response = await Http.SendAsync(request);
+                response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -420,9 +412,8 @@
             await EnsureApiSessionAsync();
 
             var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/notes/{_existingNoteId}");
-            request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
 
-            using var response = await Http.SendAsync(request);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
@@ -464,15 +455,8 @@
         await Close();
     }
 
-    private async Task EnsureApiSessionAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return;
-        }
-
-        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
-    }
+    private Task EnsureApiSessionAsync()
+        => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
 
     // Response models (API contracts mirrored from Program.cs)
 

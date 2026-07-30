@@ -345,7 +345,6 @@
     private readonly HashSet<string> _expandedClusterIds = new(StringComparer.OrdinalIgnoreCase);
     private string _query = "project idea search";
     private string _errorMessage = string.Empty;
-    private string? _csrfToken;
     private bool _isSearching;
     private bool _isLoading = true;
     private SearchResponse? _searchResponse;
@@ -416,7 +415,7 @@
                }
            });
 
-           using var response = await Http.SendAsync(request);
+           using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
            response.EnsureSuccessStatusCode();
            _searchResponse = await response.Content.ReadFromJsonAsync<SearchResponse>();
            var recentSearches = await Http.GetFromJsonAsync<List<string>>("/api/search-ui/recent");
@@ -449,7 +448,7 @@
                TextWeight = _settings.TextWeight,
                VectorWeight = _settings.VectorWeight
            });
-           using var response = await Http.SendAsync(request);
+           using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
 
            response.EnsureSuccessStatusCode();
            await RunSearchAsync();
@@ -469,7 +468,7 @@
         try
         {
            using var request = await CreateMutatingRequestAsync(HttpMethod.Delete, "/api/search-ui/recent");
-           using var response = await Http.SendAsync(request);
+           using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
            response.EnsureSuccessStatusCode();
            _recentSearches.Clear();
         }
@@ -503,22 +502,14 @@
         }
     }
 
-    private async Task EnsureApiSessionAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return;
-        }
-
-        _csrfToken = await SearchUiSessionService.EnsureAuthenticatedSessionAsync();
-    }
+    private Task EnsureApiSessionAsync()
+        => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
 
     private async Task<HttpRequestMessage> CreateMutatingRequestAsync(HttpMethod method, string requestUri, object? payload = null)
     {
         await EnsureApiSessionAsync();
 
         var request = new HttpRequestMessage(method, requestUri);
-        request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
         if (payload is not null)
         {
             request.Content = JsonContent.Create(payload);

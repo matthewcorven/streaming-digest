@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 
 namespace StreamingDigest.Web.Services;
@@ -19,6 +20,18 @@ public sealed class AuthenticationService
     public string CurrentUser => _currentUser;
 
     public event Action? Changed;
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await EnsureApiSessionAsync(cancellationToken);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ResetAuthenticationState();
+        }
+    }
 
     public async Task<bool> LoginAsync(string username, string password)
     {
@@ -44,11 +57,6 @@ public sealed class AuthenticationService
 
     public async Task<string> EnsureApiSessionAsync(CancellationToken cancellationToken = default)
     {
-        if (!string.IsNullOrWhiteSpace(_csrfToken))
-        {
-            return _csrfToken;
-        }
-
         using var meResponse = await _httpClient.GetAsync("/api/auth/me", cancellationToken);
         if (!meResponse.IsSuccessStatusCode)
         {
@@ -71,6 +79,24 @@ public sealed class AuthenticationService
         }
 
         return _csrfToken;
+    }
+
+    public async Task<HttpResponseMessage> SendAuthenticatedRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+    {
+        if (!request.Headers.TryGetValues("X-CSRF-Token", out var existingValues) || string.IsNullOrWhiteSpace(existingValues.FirstOrDefault()))
+        {
+            var csrfToken = await EnsureApiSessionAsync(cancellationToken);
+            request.Headers.Add("X-CSRF-Token", csrfToken);
+        }
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            ResetAuthenticationState();
+            throw new UnauthorizedAccessException("The API requires an authenticated session.");
+        }
+
+        return response;
     }
 
     public async Task LogoutAsync()
