@@ -32,6 +32,19 @@ public sealed class SearchUiServiceTests
     }
 
     [Fact]
+    public void Search_moves_existing_recent_queries_to_the_end_without_dropping_other_entries()
+    {
+        var service = new SearchUiService();
+
+        service.Search(new SearchRequest { Query = "alpha" });
+        service.Search(new SearchRequest { Query = "beta" });
+        service.Search(new SearchRequest { Query = "gamma" });
+        service.Search(new SearchRequest { Query = "beta" });
+
+        Assert.Equal(new[] { "alpha", "gamma", "beta" }, service.GetRecentSearches());
+    }
+
+    [Fact]
     public void UpdateSettings_rejects_non_positive_weight_sums()
     {
         var service = new SearchUiService();

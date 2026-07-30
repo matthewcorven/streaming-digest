@@ -1,11 +1,9 @@
-using System.Collections.Concurrent;
-
 namespace StreamingDigest.Application;
 
 public sealed class SearchUiService
 {
     private readonly object _syncRoot = new();
-    private readonly ConcurrentQueue<string> _recentSearches = new();
+    private readonly Queue<string> _recentSearches = new();
     private SearchUiSettings _settings = SearchUiSettings.Default;
 
     public SearchUiService(HybridRankingService? rankingService = null)
@@ -91,23 +89,22 @@ public sealed class SearchUiService
 
     public IReadOnlyList<string> GetRecentSearches()
     {
-        var uniqueValues = _recentSearches
-            .Where(item => !string.IsNullOrWhiteSpace(item))
-            .Select(item => item.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(8)
-            .ToList();
-
-        return uniqueValues;
+        lock (_syncRoot)
+        {
+            return _recentSearches
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+        }
     }
 
     public void ClearRecentSearches()
     {
         lock (_syncRoot)
         {
-            while (_recentSearches.TryDequeue(out _))
-            {
-            }
+            _recentSearches.Clear();
         }
     }
 
@@ -118,18 +115,38 @@ public sealed class SearchUiService
             return;
         }
 
+        var normalizedQuery = query.Trim();
         lock (_syncRoot)
         {
-            var normalizedQuery = query.Trim();
-            var existingValues = _recentSearches.Where(item => string.Equals(item, normalizedQuery, StringComparison.OrdinalIgnoreCase)).ToList();
-            foreach (var existing in existingValues)
+            var retainedValues = new List<string>();
+            while (_recentSearches.Count > 0)
             {
-                while (_recentSearches.TryDequeue(out var current) && current == existing)
+                var current = _recentSearches.Dequeue();
+                if (string.IsNullOrWhiteSpace(current))
                 {
+                    continue;
                 }
+
+                var trimmedCurrent = current.Trim();
+                if (string.Equals(trimmedCurrent, normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                retainedValues.Add(trimmedCurrent);
+            }
+
+            foreach (var retainedValue in retainedValues)
+            {
+                _recentSearches.Enqueue(retainedValue);
             }
 
             _recentSearches.Enqueue(normalizedQuery);
+
+            while (_recentSearches.Count > 8)
+            {
+                _recentSearches.Dequeue();
+            }
         }
     }
 

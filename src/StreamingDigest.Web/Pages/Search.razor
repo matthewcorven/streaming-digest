@@ -343,6 +343,7 @@
     private readonly HashSet<string> _expandedClusterIds = new(StringComparer.OrdinalIgnoreCase);
     private string _query = "project idea search";
     private string _errorMessage = string.Empty;
+    private string? _csrfToken;
     private bool _isSearching;
     private bool _isLoading = true;
     private SearchResponse? _searchResponse;
@@ -362,6 +363,8 @@
     {
         try
         {
+           await EnsureApiSessionAsync();
+
            var settings = await Http.GetFromJsonAsync<SearchUiSettings>("/api/search-ui/settings");
            if (settings is not null)
            {
@@ -394,7 +397,9 @@
         _errorMessage = string.Empty;
         try
         {
-           var response = await Http.PostAsJsonAsync("/api/search-ui/search", new SearchRequest
+           await EnsureApiSessionAsync();
+
+           using var request = await CreateMutatingRequestAsync(HttpMethod.Post, "/api/search-ui/search", new SearchRequest
            {
                Query = _query,
                Filters = BuildFilters(),
@@ -405,6 +410,7 @@
                }
            });
 
+           using var response = await Http.SendAsync(request);
            response.EnsureSuccessStatusCode();
            _searchResponse = await response.Content.ReadFromJsonAsync<SearchResponse>();
            var recentSearches = await Http.GetFromJsonAsync<List<string>>("/api/search-ui/recent");
@@ -428,11 +434,12 @@
     {
         try
         {
-           var response = await Http.PostAsJsonAsync("/api/search-ui/settings", new SearchUiSettings
+           using var request = await CreateMutatingRequestAsync(HttpMethod.Post, "/api/search-ui/settings", new SearchUiSettings
            {
                TextWeight = _settings.TextWeight,
                VectorWeight = _settings.VectorWeight
            });
+           using var response = await Http.SendAsync(request);
 
            response.EnsureSuccessStatusCode();
            await RunSearchAsync();
@@ -447,7 +454,8 @@
     {
         try
         {
-           var response = await Http.DeleteAsync("/api/search-ui/recent");
+           using var request = await CreateMutatingRequestAsync(HttpMethod.Delete, "/api/search-ui/recent");
+           using var response = await Http.SendAsync(request);
            response.EnsureSuccessStatusCode();
            _recentSearches.Clear();
         }
@@ -475,6 +483,37 @@
         {
            _ = InvokeAsync(RunSearchAsync);
         }
+    }
+
+    private async Task EnsureApiSessionAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_csrfToken))
+        {
+            return;
+        }
+
+        using var loginResponse = await Http.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        if (!loginResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("The search UI could not authenticate the demo session.");
+        }
+
+        var csrf = await Http.GetFromJsonAsync<CsrfResponse>("/api/auth/csrf");
+        _csrfToken = csrf?.Token;
+    }
+
+    private async Task<HttpRequestMessage> CreateMutatingRequestAsync(HttpMethod method, string requestUri, object? payload = null)
+    {
+        await EnsureApiSessionAsync();
+
+        var request = new HttpRequestMessage(method, requestUri);
+        request.Headers.Add("X-CSRF-Token", _csrfToken ?? string.Empty);
+        if (payload is not null)
+        {
+            request.Content = JsonContent.Create(payload);
+        }
+
+        return request;
     }
 
     private bool IsExpanded(string clusterId) => _expandedClusterIds.Contains(clusterId);
@@ -509,6 +548,11 @@
         }
 
         return bool.Parse(value);
+    }
+
+    private sealed class CsrfResponse
+    {
+        public string? Token { get; set; }
     }
 
     private sealed class SearchRequest

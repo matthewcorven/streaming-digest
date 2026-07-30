@@ -1360,9 +1360,22 @@ app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService mo
             })
         })
         : Results.Unauthorized());
-app.MapGet("/api/search-ui/settings", (SearchUiService searchUiService) => Results.Ok(searchUiService.GetSettings()));
+app.MapGet("/api/search-ui/settings", (HttpContext context, SearchUiService searchUiService) =>
+    IsAuthenticated(context.Request)
+        ? Results.Ok(searchUiService.GetSettings())
+        : Results.Unauthorized());
 app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!HasCsrfToken(context.Request))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
     var request = await JsonSerializer.DeserializeAsync<SearchUiSettings>(context.Request.Body, cancellationToken: cancellationToken);
     if (request is null)
     {
@@ -1372,14 +1385,37 @@ app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiServi
     searchUiService.UpdateSettings(request);
     return Results.Ok(searchUiService.GetSettings());
 });
-app.MapGet("/api/search-ui/recent", (SearchUiService searchUiService) => Results.Ok(searchUiService.GetRecentSearches()));
-app.MapDelete("/api/search-ui/recent", (SearchUiService searchUiService) =>
+app.MapGet("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
+    IsAuthenticated(context.Request)
+        ? Results.Ok(searchUiService.GetRecentSearches())
+        : Results.Unauthorized());
+app.MapDelete("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
 {
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!HasCsrfToken(context.Request))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
     searchUiService.ClearRecentSearches();
     return Results.Ok();
 });
 app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!HasCsrfToken(context.Request))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
     var request = await JsonSerializer.DeserializeAsync<SearchRequest>(context.Request.Body, cancellationToken: cancellationToken);
     if (request is null)
     {
