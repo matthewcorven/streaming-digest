@@ -274,6 +274,12 @@ public sealed class TranscriptIngestionServiceTests : IDisposable
     {
         public List<IReadOnlyList<GeneratedSearchDocument>> StoredDocumentBatches { get; } = [];
 
+        public Task DeleteForVideoScopeAsync(Guid videoId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task DeleteForSourceAsync(string sourceEntityType, Guid sourceEntityId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task<IReadOnlyList<StoredSearchDocumentEmbedding>> StoreAsync(
             IEnumerable<GeneratedSearchDocument> documents,
             Guid? generatedByOperationId = null,

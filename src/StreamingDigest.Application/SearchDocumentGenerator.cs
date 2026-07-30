@@ -28,7 +28,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
         return documents;
     }
 
-    private static GeneratedSearchDocument BuildVideoMetadataDocument(Guid parentVideoId, VideoMetadataDocumentInput item)
+    private static GeneratedSearchDocument BuildVideoMetadataDocument(Guid? parentVideoId, VideoMetadataDocumentInput item)
     {
         var title = EffectiveValue(item.TitleOriginal, item.TitleOverride);
         var description = EffectiveValue(item.DescriptionOriginal, item.DescriptionOverride);
@@ -42,7 +42,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             sourceFieldName: "video_metadata");
     }
 
-    private static GeneratedSearchDocument BuildSegmentDocument(Guid parentVideoId, SegmentTitleSummaryDocumentInput item)
+    private static GeneratedSearchDocument BuildSegmentDocument(Guid? parentVideoId, SegmentTitleSummaryDocumentInput item)
     {
         var title = EffectiveValue(item.TitleOriginal, item.TitleOverride);
         var summary = EffectiveValue(item.SummaryOriginal, item.SummaryOverride);
@@ -56,7 +56,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             sourceFieldName: "segment_title_summary");
     }
 
-    private static GeneratedSearchDocument BuildTranscriptChunkDocument(Guid parentVideoId, TranscriptChunkDocumentInput item)
+    private static GeneratedSearchDocument BuildTranscriptChunkDocument(Guid? parentVideoId, TranscriptChunkDocumentInput item)
     {
         var text = EffectiveValue(item.TextOriginal, item.TextOverride);
         return CreateDocument(
@@ -70,7 +70,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             chunkIndex: item.ChunkIndex);
     }
 
-    private static GeneratedSearchDocument BuildExternalLinkMetadataDocument(Guid parentVideoId, ExternalLinkMetadataDocumentInput item)
+    private static GeneratedSearchDocument BuildExternalLinkMetadataDocument(Guid? parentVideoId, ExternalLinkMetadataDocumentInput item)
     {
         var title = EffectiveValue(item.TitleOriginal, item.TitleOverride);
         var description = EffectiveValue(item.DescriptionOriginal, item.DescriptionOverride);
@@ -87,7 +87,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             sourceFieldName: "external_resource_metadata");
     }
 
-    private static GeneratedSearchDocument BuildScrapedPageTextDocument(Guid parentVideoId, ScrapedPageTextDocumentInput item)
+    private static GeneratedSearchDocument BuildScrapedPageTextDocument(Guid? parentVideoId, ScrapedPageTextDocumentInput item)
     {
         var title = EffectiveValue(item.TitleOriginal, item.TitleOverride);
         var description = EffectiveValue(item.DescriptionOriginal, item.DescriptionOverride);
@@ -103,7 +103,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             sourceFieldName: "visible_text");
     }
 
-    private static GeneratedSearchDocument BuildRepositoryReadmeChunkDocument(Guid parentVideoId, RepositoryReadmeChunkDocumentInput item)
+    private static GeneratedSearchDocument BuildRepositoryReadmeChunkDocument(Guid? parentVideoId, RepositoryReadmeChunkDocumentInput item)
     {
         var content = EffectiveValue(item.ContentOriginal, item.ContentOverride);
         return CreateDocument(
@@ -117,7 +117,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
             chunkIndex: item.ChunkIndex);
     }
 
-    private static GeneratedSearchDocument BuildNoteDocument(Guid parentVideoId, NoteDocumentInput item)
+    private static GeneratedSearchDocument BuildNoteDocument(Guid? parentVideoId, NoteDocumentInput item)
     {
         var markdown = EffectiveValue(item.MarkdownOriginal, item.MarkdownOverride);
         return CreateDocument(
@@ -134,7 +134,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
         string documentType,
         string sourceEntityType,
         Guid sourceEntityId,
-        Guid parentVideoId,
+        Guid? parentVideoId,
         string title,
         string body,
         string? sourceFieldName = null,
@@ -183,7 +183,7 @@ public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
 
 public sealed class SearchDocumentGenerationRequest
 {
-    public Guid ParentVideoId { get; init; }
+    public Guid? ParentVideoId { get; init; }
     public IReadOnlyCollection<VideoMetadataDocumentInput> VideoMetadata { get; init; } = Array.Empty<VideoMetadataDocumentInput>();
     public IReadOnlyCollection<SegmentTitleSummaryDocumentInput> SegmentTitlesAndSummaries { get; init; } = Array.Empty<SegmentTitleSummaryDocumentInput>();
     public IReadOnlyCollection<TranscriptChunkDocumentInput> TranscriptChunks { get; init; } = Array.Empty<TranscriptChunkDocumentInput>();
@@ -197,7 +197,7 @@ public sealed record GeneratedSearchDocument(
     string DocumentType,
     string SourceEntityType,
     Guid SourceEntityId,
-    Guid ParentVideoId,
+    Guid? ParentVideoId,
     string TitleEffective,
     string BodyEffective,
     string ContentHash,

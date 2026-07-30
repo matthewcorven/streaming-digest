@@ -10,6 +10,8 @@ public interface IStreamingDigestDbContext
     DbSet<Segment> Segments { get; }
     DbSet<VideoTranscript> VideoTranscripts { get; }
     DbSet<TranscriptCue> TranscriptCues { get; }
+    DbSet<ExternalResource> ExternalResources { get; }
+    DbSet<RepositoryRecord> Repositories { get; }
     DbSet<Note> Notes { get; }
     DbSet<DomainEvent> DomainEvents { get; }
     DatabaseFacade Database { get; }

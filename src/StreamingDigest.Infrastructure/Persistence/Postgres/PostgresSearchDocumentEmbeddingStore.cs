@@ -26,6 +26,37 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         _dataSource = dataSourceBuilder.Build();
     }
 
+    public async Task DeleteForVideoScopeAsync(Guid videoId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            "DELETE FROM public.search_documents WHERE parent_video_id = @parent_video_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("parent_video_id", videoId);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task DeleteForSourceAsync(string sourceEntityType, Guid sourceEntityId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            "DELETE FROM public.search_documents WHERE source_entity_type = @source_entity_type AND source_entity_id = @source_entity_id;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("source_entity_type", sourceEntityType);
+        command.Parameters.AddWithValue("source_entity_id", sourceEntityId);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<StoredSearchDocumentEmbedding>> StoreAsync(
         IEnumerable<GeneratedSearchDocument> documents,
         Guid? generatedByOperationId = null,
@@ -47,15 +78,20 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
 
         foreach (var document in candidates)
         {
+            if (!TryBuildEmbeddingInput(document, out var sourceText))
+            {
+                await DeleteSearchDocumentByIdentityAsync(connection, transaction, document, cancellationToken);
+                continue;
+            }
+
             var searchDocumentId = await UpsertSearchDocumentAsync(connection, transaction, document, cancellationToken);
 
             if (!embeddingCache.TryGetValue(document.ContentHash, out var cachedEmbedding))
             {
-                var sourceText = BuildEmbeddingInput(document);
-                var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(sourceText, cancellationToken);
+                var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(sourceText!, cancellationToken);
                 cachedEmbedding = new CachedEmbedding(
                     embeddingResult,
-                    ComputeSha256(sourceText),
+                    ComputeSha256(sourceText!),
                     new Vector(embeddingResult.Values.Select(static value => (float)value).ToArray()));
                 embeddingCache[document.ContentHash] = cachedEmbedding;
             }
@@ -81,6 +117,33 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
 
         await transaction.CommitAsync(cancellationToken);
         return storedEmbeddings;
+    }
+
+    private static async Task DeleteSearchDocumentByIdentityAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        GeneratedSearchDocument document,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            DELETE FROM public.search_documents
+            WHERE parent_video_id IS NOT DISTINCT FROM @parent_video_id
+              AND source_entity_type = @source_entity_type
+              AND source_entity_id = @source_entity_id
+              AND source_field_name IS NOT DISTINCT FROM @source_field_name
+              AND chunk_index IS NOT DISTINCT FROM @chunk_index;
+            """,
+            connection,
+            transaction);
+
+        command.Parameters.AddWithValue("parent_video_id", (object?)document.ParentVideoId ?? DBNull.Value);
+        command.Parameters.AddWithValue("source_entity_type", document.SourceEntityType);
+        command.Parameters.AddWithValue("source_entity_id", document.SourceEntityId);
+        command.Parameters.AddWithValue("source_field_name", (object?)document.SourceFieldName ?? DBNull.Value);
+        command.Parameters.AddWithValue("chunk_index", (object?)document.ChunkIndex ?? DBNull.Value);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<Guid> UpsertSearchDocumentAsync(
@@ -139,8 +202,14 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
             )
             ON CONFLICT ON CONSTRAINT uq_search_documents_identity DO UPDATE SET
                 document_type = EXCLUDED.document_type,
+                source_entity_type = EXCLUDED.source_entity_type,
+                source_field_name = EXCLUDED.source_field_name,
+                chunk_index = EXCLUDED.chunk_index,
+                parent_video_id = EXCLUDED.parent_video_id,
                 title_effective = EXCLUDED.title_effective,
                 body_effective = EXCLUDED.body_effective,
+                content_hash = EXCLUDED.content_hash,
+                is_stale = FALSE,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id;
             """,
@@ -153,7 +222,7 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         command.Parameters.AddWithValue("source_entity_id", document.SourceEntityId);
         command.Parameters.AddWithValue("source_field_name", (object?)document.SourceFieldName ?? DBNull.Value);
         command.Parameters.AddWithValue("chunk_index", (object?)document.ChunkIndex ?? DBNull.Value);
-        command.Parameters.AddWithValue("parent_video_id", document.ParentVideoId);
+        command.Parameters.AddWithValue("parent_video_id", (object?)document.ParentVideoId ?? DBNull.Value);
         command.Parameters.AddWithValue("title_effective", (object?)document.TitleEffective ?? DBNull.Value);
         command.Parameters.AddWithValue("body_effective", (object?)document.BodyEffective ?? DBNull.Value);
         command.Parameters.AddWithValue("content_hash", document.ContentHash);
@@ -204,9 +273,10 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
                 CURRENT_TIMESTAMP
             )
             ON CONFLICT ON CONSTRAINT uq_embeddings_identity DO UPDATE SET
+                content_hash = EXCLUDED.content_hash,
                 source_text_hash = EXCLUDED.source_text_hash,
                 embedding = EXCLUDED.embedding,
-                embedding_status = EXCLUDED.embedding_status,
+                embedding_status = 'succeeded',
                 error_summary = NULL,
                 generated_by_operation_id = EXCLUDED.generated_by_operation_id
             RETURNING id;
@@ -230,7 +300,7 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
             : throw new InvalidOperationException("PostgreSQL did not return an embedding id.");
     }
 
-    private static string BuildEmbeddingInput(GeneratedSearchDocument document)
+    private static bool TryBuildEmbeddingInput(GeneratedSearchDocument document, out string? sourceText)
     {
         var parts = new[] { document.TitleEffective, document.BodyEffective }
             .Where(static value => !string.IsNullOrWhiteSpace(value))
@@ -239,10 +309,22 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
 
         if (parts.Length == 0)
         {
+            sourceText = null;
+            return false;
+        }
+
+        sourceText = string.Join("\n\n", parts);
+        return true;
+    }
+
+    private static string BuildEmbeddingInput(GeneratedSearchDocument document)
+    {
+        if (!TryBuildEmbeddingInput(document, out var sourceText))
+        {
             throw new InvalidOperationException($"Search document '{document.SourceEntityId}' has no content to embed.");
         }
 
-        return string.Join("\n\n", parts);
+        return sourceText!;
     }
 
     private static string ComputeSha256(string value)
