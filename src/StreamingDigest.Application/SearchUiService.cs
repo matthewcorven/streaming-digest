@@ -2,13 +2,13 @@ namespace StreamingDigest.Application;
 
 public sealed class SearchUiService
 {
-    private static readonly TimeSpan RecentSearchStateLifetime = TimeSpan.FromHours(2);
     private readonly object _syncRoot = new();
-    private readonly Dictionary<string, RecentSearchState> _recentSearchStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly IRecentSearchStore _recentSearchStore;
     private SearchUiSettings _settings = SearchUiSettings.Default;
 
-    public SearchUiService(HybridRankingService? rankingService = null)
+    public SearchUiService(IRecentSearchStore recentSearchStore)
     {
+        _recentSearchStore = recentSearchStore ?? throw new ArgumentNullException(nameof(recentSearchStore));
     }
 
     public SearchUiSettings GetSettings()
@@ -48,175 +48,129 @@ public sealed class SearchUiService
         }
     }
 
-    public SearchResponse Search(SearchRequest request) => Search(request, stateKey: null);
+    public Task<SearchResponse> SearchAsync(SearchRequest request, CancellationToken cancellationToken = default)
+        => SearchAsync(request, stateKey: null, cancellationToken);
 
-    public SearchResponse Search(SearchRequest request, string? stateKey)
+    public async Task<SearchResponse> SearchAsync(SearchRequest request, string? stateKey, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        lock (_syncRoot)
+        var normalizedQuery = string.IsNullOrWhiteSpace(request.Query) ? "project idea search" : request.Query.Trim();
+        var terms = ExtractTerms(normalizedQuery);
+        var activeFilters = request.Filters ?? SearchFilters.Empty;
+        var effectiveSettings = GetSettings();
+
+        var candidateSeeds = CreateCandidateSeeds()
+            .Where(seed => MatchesFilters(seed, activeFilters))
+            .ToList();
+
+        var storedSearch = await _recentSearchStore.StoreSearchAsync(
+            normalizedQuery,
+            activeFilters,
+            effectiveSettings,
+            cancellationToken);
+
+        var recentSearches = await _recentSearchStore.ListRecentQueriesAsync(cancellationToken: cancellationToken);
+
+        if (candidateSeeds.Count == 0)
         {
-            var normalizedQuery = string.IsNullOrWhiteSpace(request.Query) ? "project idea search" : request.Query.Trim();
-            var terms = ExtractTerms(normalizedQuery);
-            var activeFilters = request.Filters ?? SearchFilters.Empty;
-            var state = GetOrCreateRecentSearchState(stateKey);
-            var effectiveSettings = CloneSettings(_settings);
-
-            var candidateSeeds = CreateCandidateSeeds()
-                .Where(seed => MatchesFilters(seed, activeFilters))
-                .ToList();
-
-            if (candidateSeeds.Count == 0)
-            {
-                return CreateEmptyResponse(normalizedQuery, state);
-            }
-
-            var rankedClusters = candidateSeeds
-                .Select(seed => CreateClusterCandidate(seed, normalizedQuery, terms))
-                .ToList();
-
-            var rankingService = CreateRankingService(effectiveSettings);
-            var rankingResults = rankingService.Rank(
-                rankedClusters,
-                relativeSimilarityPoolScores: rankedClusters.Select(cluster => cluster.Documents.Max(document => document.VectorScore)).ToList());
-
-            var results = rankingResults
-                .Select(result => MapResult(result, candidateSeeds.First(seed => string.Equals(seed.Id, result.ClusterId, StringComparison.OrdinalIgnoreCase))))
-                .ToList();
-
-            RegisterRecentSearch(state, normalizedQuery);
-
-            return new SearchResponse
-            {
-                Query = normalizedQuery,
-                Results = results,
-                RecentSearches = GetRecentSearches(stateKey).ToList(),
-                Settings = CloneSettings(_settings),
-                Summary = results.Count == 0
-                    ? "No clusters matched the current filters."
-                    : $"Showing {results.Count} clustered video result{(results.Count == 1 ? string.Empty : "s")} for '{normalizedQuery}'."
-            };
+            return CreateEmptyResponse(normalizedQuery, storedSearch.Id, recentSearches, effectiveSettings);
         }
+
+        var recentOpenCounts = await _recentSearchStore.GetRecentOpenCountsAsync(
+            candidateSeeds.Select(seed => seed.VideoId),
+            cancellationToken);
+
+        var rankedClusters = candidateSeeds
+            .Select(seed => CreateClusterCandidate(
+                seed,
+                normalizedQuery,
+                terms,
+                recentOpenCounts.TryGetValue(seed.VideoId, out var recentOpenCount) ? recentOpenCount : 0))
+            .ToList();
+
+        var rankingService = CreateRankingService(effectiveSettings);
+        var rankingResults = rankingService.Rank(
+            rankedClusters,
+            relativeSimilarityPoolScores: rankedClusters.Select(cluster => cluster.Documents.Max(document => document.VectorScore)).ToList());
+
+        var results = rankingResults
+            .Select(result => MapResult(result, candidateSeeds.First(seed => string.Equals(seed.Id, result.ClusterId, StringComparison.OrdinalIgnoreCase))))
+            .ToList();
+
+        return new SearchResponse
+        {
+            Query = normalizedQuery,
+            RecentSearchId = storedSearch.Id,
+            Results = results,
+            RecentSearches = recentSearches,
+            Settings = effectiveSettings,
+            Summary = results.Count == 0
+                ? "No clusters matched the current filters."
+                : $"Showing {results.Count} clustered video result{(results.Count == 1 ? string.Empty : "s")} for '{normalizedQuery}'."
+        };
     }
 
-    public IReadOnlyList<string> GetRecentSearches() => GetRecentSearches(stateKey: null);
+    public Task<IReadOnlyList<string>> GetRecentSearchesAsync(CancellationToken cancellationToken = default)
+        => GetRecentSearchesAsync(stateKey: null, cancellationToken);
 
-    public IReadOnlyList<string> GetRecentSearches(string? stateKey)
-    {
-        lock (_syncRoot)
-        {
-            PruneExpiredRecentSearchStates();
-            return GetOrCreateRecentSearchState(stateKey).RecentSearches
-                .Where(item => !string.IsNullOrWhiteSpace(item))
-                .Select(item => item.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(8)
-                .ToList();
-        }
-    }
+    public Task<IReadOnlyList<string>> GetRecentSearchesAsync(string? stateKey, CancellationToken cancellationToken = default)
+        => _recentSearchStore.ListRecentQueriesAsync(cancellationToken: cancellationToken);
 
-    public void ClearRecentSearches() => ClearRecentSearches(stateKey: null);
+    public Task ClearRecentSearchesAsync(CancellationToken cancellationToken = default)
+        => ClearRecentSearchesAsync(stateKey: null, cancellationToken);
 
-    public void ClearRecentSearches(string? stateKey)
-    {
-        lock (_syncRoot)
-        {
-            RemoveRecentSearchState(stateKey);
-        }
-    }
+    public Task ClearRecentSearchesAsync(string? stateKey, CancellationToken cancellationToken = default)
+        => _recentSearchStore.ClearRecentSearchesAsync(cancellationToken);
 
     public void RemoveState(string? stateKey)
     {
-        lock (_syncRoot)
-        {
-            RemoveRecentSearchState(stateKey);
-        }
     }
 
-    private void RegisterRecentSearch(RecentSearchState state, string query)
+    public Task RecordInteractionAsync(SearchInteractionRequest request, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.VideoId == Guid.Empty)
         {
-            return;
+            throw new ArgumentException("A video id is required to record a search interaction.", nameof(request));
         }
 
-        var normalizedQuery = query.Trim();
-        lock (_syncRoot)
+        if (string.IsNullOrWhiteSpace(request.ResultType))
         {
-            var retainedValues = new List<string>();
-            while (state.RecentSearches.Count > 0)
-            {
-                var current = state.RecentSearches.Dequeue();
-                if (string.IsNullOrWhiteSpace(current))
-                {
-                    continue;
-                }
-
-                var trimmedCurrent = current.Trim();
-                if (string.Equals(trimmedCurrent, normalizedQuery, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                retainedValues.Add(trimmedCurrent);
-            }
-
-            foreach (var retainedValue in retainedValues)
-            {
-                state.RecentSearches.Enqueue(retainedValue);
-            }
-
-            state.RecentSearches.Enqueue(normalizedQuery);
-
-            while (state.RecentSearches.Count > 8)
-            {
-                state.RecentSearches.Dequeue();
-            }
-        }
-    }
-
-    private RecentSearchState GetOrCreateRecentSearchState(string? stateKey)
-    {
-        PruneExpiredRecentSearchStates();
-        var effectiveStateKey = NormalizeStateKey(stateKey);
-        if (_recentSearchStates.TryGetValue(effectiveStateKey, out var state))
-        {
-            state.LastAccessedAt = DateTimeOffset.UtcNow;
-            return state;
+            throw new ArgumentException("A result type is required to record a search interaction.", nameof(request));
         }
 
-        var createdState = new RecentSearchState();
-        _recentSearchStates[effectiveStateKey] = createdState;
-        return createdState;
-    }
-
-    private void RemoveRecentSearchState(string? stateKey)
-    {
-        _recentSearchStates.Remove(NormalizeStateKey(stateKey));
-    }
-
-    private void PruneExpiredRecentSearchStates()
-    {
-        var cutoff = DateTimeOffset.UtcNow.Subtract(RecentSearchStateLifetime);
-        foreach (var expiredState in _recentSearchStates.Where(state => state.Value.LastAccessedAt < cutoff).Select(state => state.Key).ToList())
+        if (string.IsNullOrWhiteSpace(request.EventType))
         {
-            _recentSearchStates.Remove(expiredState);
+            throw new ArgumentException("An event type is required to record a search interaction.", nameof(request));
         }
+
+        return _recentSearchStore.RecordInteractionAsync(
+            new SearchInteractionEvent(
+                request.RecentSearchId,
+                request.VideoId,
+                request.SearchDocumentId,
+                request.ResultType.Trim(),
+                request.EventType.Trim(),
+                request.MetadataJson,
+                DateTimeOffset.UtcNow),
+            cancellationToken);
     }
 
-    private SearchResponse CreateEmptyResponse(string query, RecentSearchState state)
+    private static SearchResponse CreateEmptyResponse(
+        string query,
+        Guid recentSearchId,
+        IReadOnlyList<string> recentSearches,
+        SearchUiSettings settings)
     {
         return new SearchResponse
         {
             Query = query,
+            RecentSearchId = recentSearchId,
             Results = Array.Empty<SearchResultClusterResponse>(),
-            RecentSearches = state.RecentSearches
-                .Where(item => !string.IsNullOrWhiteSpace(item))
-                .Select(item => item.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(8)
-                .ToList(),
-            Settings = CloneSettings(_settings),
+            RecentSearches = recentSearches,
+            Settings = settings,
             Summary = "No clusters matched the current filters."
         };
     }
@@ -240,17 +194,6 @@ public sealed class SearchUiService
             TextWeight = settings?.TextWeight ?? SearchUiSettings.Default.TextWeight,
             VectorWeight = settings?.VectorWeight ?? SearchUiSettings.Default.VectorWeight
         };
-    }
-
-    private static string NormalizeStateKey(string? stateKey)
-    {
-        return string.IsNullOrWhiteSpace(stateKey) ? "__default__" : stateKey;
-    }
-
-    private sealed class RecentSearchState
-    {
-        public DateTimeOffset LastAccessedAt { get; set; } = DateTimeOffset.UtcNow;
-        public Queue<string> RecentSearches { get; } = new();
     }
 
     private static bool MatchesFilters(SearchClusterSeed seed, SearchFilters filters)
@@ -314,7 +257,11 @@ public sealed class SearchUiService
         return true;
     }
 
-    private static HybridClusterCandidate CreateClusterCandidate(SearchClusterSeed seed, string query, IReadOnlyList<string> terms)
+    private static HybridClusterCandidate CreateClusterCandidate(
+        SearchClusterSeed seed,
+        string query,
+        IReadOnlyList<string> terms,
+        int recentOpenCount)
     {
         var documents = seed.Documents.Select(document =>
         {
@@ -333,7 +280,7 @@ public sealed class SearchUiService
             Id: seed.Id,
             Title: seed.Title,
             Documents: documents,
-            RecentOpenCount: seed.RecentOpenCount,
+            RecentOpenCount: recentOpenCount,
             HasMatchingNote: seed.HasMatchingNote);
     }
 
@@ -343,6 +290,7 @@ public sealed class SearchUiService
         return new SearchResultClusterResponse
         {
             ClusterId = ranking.ClusterId,
+            VideoId = seed.VideoId,
             Title = seed.Title,
             Channel = seed.Channel,
             PublishDate = seed.PublishDate,
@@ -356,6 +304,7 @@ public sealed class SearchUiService
             MatchesInsideCount = seed.MatchesInsideCount,
             PrimaryMatch = primarySnippet?.Detail ?? seed.PrimaryMatch,
             PrimaryMatchTimestamp = primarySnippet?.TimestampLabel ?? seed.PrimaryMatchTimestamp,
+            PrimaryMatchUrl = primarySnippet?.Url,
             Score = ranking.Score,
             ScoreExplanation = ranking.Explanation,
             RelativeSimilarityPercent = ranking.RelativeSimilarityPercent,
@@ -378,7 +327,7 @@ public sealed class SearchUiService
                 Type = item.Type,
                 Url = item.Url,
                 RelativeSimilarityPercent = item.RelativeSimilarityPercent,
-                Detail = item.Detail
+                Detail = item.Detail ?? string.Empty
             }).ToList(),
             ScoreComponents = new SearchScoreComponentsResponse
             {
@@ -471,6 +420,7 @@ public sealed class SearchUiService
         {
             new(
                 Id: "cluster-search-ui",
+                VideoId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
                 Title: "Designing a search-first video knowledge base",
                 Channel: "Tonbis AI Garage",
                 PublishDate: new DateTimeOffset(2024, 1, 12, 10, 30, 0, TimeSpan.Zero),
@@ -500,7 +450,6 @@ public sealed class SearchUiService
                     new SearchRelatedItemSeed("Note: curation workflow", "note", 84.3, "/notes/cluster-search-ui", "The note explains why search quality depends on ranking weights and related items."),
                     new SearchRelatedItemSeed("Website page: ranking guidance", "website", 79.5, "https://docs.streaming-digest.dev/search", "The page is similar because it explains how text and vector ranking should be blended.")
                 },
-                RecentOpenCount: 8,
                 HasMatchingNote: true,
                 Documents: new[]
                 {
@@ -512,6 +461,7 @@ public sealed class SearchUiService
                 }),
             new(
                 Id: "cluster-ranking-weights",
+                VideoId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
                 Title: "Balancing text and vector ranking weights",
                 Channel: "Microsoft Build",
                 PublishDate: new DateTimeOffset(2024, 2, 22, 14, 20, 0, TimeSpan.Zero),
@@ -539,7 +489,6 @@ public sealed class SearchUiService
                     new SearchRelatedItemSeed("Learn: hybrid retrieval", "website", 76.8, "https://learn.microsoft.com/azure/search", "The page is similar because it describes hybrid retrieval and weighted scoring."),
                     new SearchRelatedItemSeed("Transcript segment: tuning weights", "segment", 72.1, "/watch/cluster-ranking-weights#t=724", "The transcript segment is very close to the ranking-weight language in the query.")
                 },
-                RecentOpenCount: 4,
                 HasMatchingNote: false,
                 Documents: new[]
                 {
@@ -549,6 +498,7 @@ public sealed class SearchUiService
                 }),
             new(
                 Id: "cluster-transcript-notes",
+                VideoId: Guid.Parse("33333333-3333-3333-3333-333333333333"),
                 Title: "Using notes and transcripts to recover hidden context",
                 Channel: "The Practical AI Channel",
                 PublishDate: new DateTimeOffset(2024, 3, 5, 8, 0, 0, TimeSpan.Zero),
@@ -576,7 +526,6 @@ public sealed class SearchUiService
                     new SearchRelatedItemSeed("Note memory reference", "note", 68.9, "/notes/cluster-transcript-notes", "The note is a close match because it mentions search recall and hidden context."),
                     new SearchRelatedItemSeed("Website: notes and search", "website", 66.1, "https://example.com/notes-and-search", "The site focuses on note-assisted recall and the same vocabulary as the query.")
                 },
-                RecentOpenCount: 2,
                 HasMatchingNote: true,
                 Documents: new[]
                 {
@@ -589,6 +538,7 @@ public sealed class SearchUiService
 
     private sealed record SearchClusterSeed(
         string Id,
+        Guid VideoId,
         string Title,
         string Channel,
         DateTimeOffset PublishDate,
@@ -608,7 +558,6 @@ public sealed class SearchUiService
         IReadOnlyList<string> ProcessingWarnings,
         IReadOnlyList<SearchSubmatchSeed> Submatches,
         IReadOnlyList<SearchRelatedItemSeed> RelatedItems,
-        int RecentOpenCount,
         bool HasMatchingNote,
         IReadOnlyList<SearchDocumentSeed> Documents);
 
@@ -658,6 +607,7 @@ public sealed class SearchUiSettings
 public sealed class SearchResponse
 {
     public string Query { get; set; } = string.Empty;
+    public Guid RecentSearchId { get; set; }
     public IReadOnlyList<SearchResultClusterResponse> Results { get; set; } = Array.Empty<SearchResultClusterResponse>();
     public IReadOnlyList<string> RecentSearches { get; set; } = Array.Empty<string>();
     public SearchUiSettings Settings { get; set; } = SearchUiSettings.Default;
@@ -667,6 +617,7 @@ public sealed class SearchResponse
 public sealed class SearchResultClusterResponse
 {
     public string ClusterId { get; set; } = string.Empty;
+    public Guid VideoId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Channel { get; set; } = string.Empty;
     public DateTimeOffset PublishDate { get; set; }
@@ -680,6 +631,7 @@ public sealed class SearchResultClusterResponse
     public int MatchesInsideCount { get; set; }
     public string? PrimaryMatch { get; set; }
     public string? PrimaryMatchTimestamp { get; set; }
+    public string? PrimaryMatchUrl { get; set; }
     public double Score { get; set; }
     public string ScoreExplanation { get; set; } = string.Empty;
     public double RelativeSimilarityPercent { get; set; }
@@ -719,4 +671,14 @@ public sealed class SearchScoreComponentsResponse
     public double CoverageScore { get; set; }
     public double NoteBoost { get; set; }
     public double InteractionBoost { get; set; }
+}
+
+public sealed class SearchInteractionRequest
+{
+    public Guid? RecentSearchId { get; set; }
+    public Guid VideoId { get; set; }
+    public Guid? SearchDocumentId { get; set; }
+    public string ResultType { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string? MetadataJson { get; set; }
 }
