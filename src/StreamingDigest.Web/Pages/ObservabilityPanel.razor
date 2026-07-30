@@ -1,5 +1,6 @@
 @using StreamingDigest.Web.Models
-@inject HttpClient Http
+
+@inject SearchUiSessionService SearchUiSessionService
 
 @if (isLoaded)
 {
@@ -63,7 +64,7 @@
     {
         try
         {
-            var status = await Http.GetFromJsonAsync<ObservabilityStatus>("/api/observability");
+            var status = await SearchUiSessionService.GetAuthenticatedJsonAsync<ObservabilityStatus>("/api/observability");
             if (status is null)
             {
                 return;

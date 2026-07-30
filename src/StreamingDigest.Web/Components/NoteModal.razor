@@ -1,6 +1,5 @@
 @using System.Net.Http.Json
 
-@inject HttpClient Http
 @inject SearchUiSessionService SearchUiSessionService
 
 @if (IsVisible)
@@ -94,7 +93,7 @@
 
         try
         {
-            var response = await Http.GetFromJsonAsync<NoteListResponse>($"/api/notes?targetType={TargetType}&targetId={TargetId}");
+            var response = await SearchUiSessionService.GetAuthenticatedJsonAsync<NoteListResponse>($"/api/notes?targetType={TargetType}&targetId={TargetId}");
             var note = response?.Items?.FirstOrDefault();
             if (note is not null)
             {

@@ -5,7 +5,6 @@
 @using System.Text.Json
 @using StreamingDigest.Web.Pages
 
-@inject HttpClient Http
 @inject SearchUiSessionService SearchUiSessionService
 
 <PageTitle>Admin</PageTitle>
@@ -144,9 +143,9 @@
         {
             await EnsureApiSessionAsync();
 
-            var settings = await Http.GetFromJsonAsync<AdminSettingsResponse>("/api/settings");
-            var runtime = await Http.GetFromJsonAsync<RuntimeSettingsResponse>("/api/config/runtime");
-            var models = await Http.GetFromJsonAsync<ModelsResponse>("/api/models/options");
+            var settings = await SearchUiSessionService.GetAuthenticatedJsonAsync<AdminSettingsResponse>("/api/settings");
+            var runtime = await SearchUiSessionService.GetAuthenticatedJsonAsync<RuntimeSettingsResponse>("/api/config/runtime");
+            var models = await SearchUiSessionService.GetAuthenticatedJsonAsync<ModelsResponse>("/api/models/options");
 
             var values = settings?.Values ?? new Dictionary<string, JsonElement>();
             _observabilityEnabled = ReadBool(values, "observability.enabled", false);

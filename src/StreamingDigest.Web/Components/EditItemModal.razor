@@ -1,6 +1,5 @@
 @using System.Net.Http.Json
 
-@inject HttpClient Http
 @inject SearchUiSessionService SearchUiSessionService
 
 @if (IsVisible)
@@ -206,7 +205,7 @@
     {
         if (ItemType == "video")
         {
-            var detail = await Http.GetFromJsonAsync<VideoDetailResponse>($"/api/videos/{ItemId}/overrides");
+            var detail = await SearchUiSessionService.GetAuthenticatedJsonAsync<VideoDetailResponse>($"/api/videos/{ItemId}/overrides");
             if (detail is not null)
             {
                 _originalTitle = detail.TitleOriginal;
@@ -219,7 +218,7 @@
         }
         else if (ItemType == "external_resource")
         {
-            var detail = await Http.GetFromJsonAsync<ExternalResourceDetailResponse>($"/api/external-resources/{ItemId}/overrides");
+            var detail = await SearchUiSessionService.GetAuthenticatedJsonAsync<ExternalResourceDetailResponse>($"/api/external-resources/{ItemId}/overrides");
             if (detail is not null)
             {
                 _originalTitle = detail.TitleOriginal;
@@ -235,7 +234,7 @@
 
     private async Task LoadNoteAsync()
     {
-        var response = await Http.GetFromJsonAsync<NoteListResponse>($"/api/notes?targetType={ItemType}&targetId={ItemId}");
+        var response = await SearchUiSessionService.GetAuthenticatedJsonAsync<NoteListResponse>($"/api/notes?targetType={ItemType}&targetId={ItemId}");
         var note = response?.Items?.FirstOrDefault();
         if (note is not null)
         {
