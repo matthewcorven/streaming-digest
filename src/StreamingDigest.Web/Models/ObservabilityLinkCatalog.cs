@@ -14,6 +14,7 @@ public static class ObservabilityLinkCatalog
     public static IReadOnlyList<ObservabilityLinkDefinition> Create(
         string? hangfireUrl,
         string? grafanaUrl,
+        string? pgAdminUrl,
         string? prometheusUrl,
         string? lokiUrl,
         string? tempoUrl)
@@ -38,6 +39,16 @@ public static class ObservabilityLinkCatalog
                 Label = "Grafana",
                 Url = "/grafana",
                 Description = "Dashboards and exploration"
+            });
+        }
+
+        if (HasConfiguredUrl(pgAdminUrl))
+        {
+            links.Add(new ObservabilityLinkDefinition
+            {
+                Label = "pgAdmin",
+                Url = "/pgadmin",
+                Description = "PostgreSQL administration"
             });
         }
 

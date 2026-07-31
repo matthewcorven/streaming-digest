@@ -403,6 +403,33 @@ Detailed project documents are available in `docs/`:
 - **Squad** — this repo is developed by a Squad AI team (`.squad/`): roster and routing in `.squad/team.md` / `.squad/routing.md`, agent charters and histories in `.squad/agents/`, and team decisions indexed in `.squad/decisions.md`. Architectural decisions get full ADRs in `docs/adr/`; team/process/scope decisions live in the decisions index.
 - **Verification evidence** — durable verification results (benchmarks, recall reports, cross-platform checks, restore dry-runs, prototype comparisons) are committed append-only under `docs/verification/` as `{task-id}-{slug}.md`, with machine-readable JSON alongside for numeric results. Quality gates citing measured targets are not met until the evidence artifact is committed.
 
+### .NET User Secrets
+
+Use .NET User Secrets for local development credentials instead of committing secrets to `appsettings.json`, `.env`, or source files. The AppHost project already has a `UserSecretsId`, so you can manage its local secrets directly with the .NET CLI.
+
+Useful commands:
+
+```bash
+dotnet user-secrets list --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets set "Parameters:postgres-username" "streamingdigest" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets set "Parameters:postgres-password" "replace-me" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets set "Parameters:grafana-admin-user" "admin" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets set "Parameters:grafana-admin-password" "replace-me" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets set "Parameters:pgadmin-default-email" "admin@streamingdigest.local" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets set "Parameters:pgadmin-default-password" "replace-me" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+```
+
+To remove a single value or clear the local secret store for the AppHost:
+
+```bash
+dotnet user-secrets remove "Parameters:pgadmin-default-password" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets clear --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+```
+
+The AppHost reads these values from the `Parameters:*` configuration keys and passes them through to local resources such as PostgreSQL, Grafana, and pgAdmin at startup.
+
+Official guidance: [Safe storage of app secrets in development in ASP.NET Core](https://learn.microsoft.com/aspnet/core/security/app-secrets?view=aspnetcore-10.0)
+
 ## Legal and privacy notes
 
 Streaming Digest is designed for personal archival and search use on infrastructure you control.
