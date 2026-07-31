@@ -127,6 +127,7 @@ builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
 builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
 builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
 builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>(), sp.GetService<ITranscriptIngestionService>(), sp.GetService<ISearchDocumentRegenerationService>()));
