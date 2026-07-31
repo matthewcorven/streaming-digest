@@ -1,0 +1,413 @@
+{
+  "version": 1,
+  "parameters": "",
+  "projects": [
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Api/StreamingDigest.Api.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Hangfire.AspNetCore",
+              "requestedVersion": "1.8.24",
+              "resolvedVersion": "1.8.24"
+            },
+            {
+              "id": "Hangfire.MemoryStorage",
+              "requestedVersion": "1.8.1",
+              "resolvedVersion": "1.8.1"
+            },
+            {
+              "id": "Hangfire.PostgreSql",
+              "requestedVersion": "1.9.2",
+              "resolvedVersion": "1.9.2"
+            },
+            {
+              "id": "Microsoft.AspNetCore.Components.WebAssembly.Server",
+              "requestedVersion": "10.0.9",
+              "resolvedVersion": "10.0.9"
+            },
+            {
+              "id": "Microsoft.AspNetCore.OpenApi",
+              "requestedVersion": "10.0.10",
+              "resolvedVersion": "10.0.10"
+            },
+            {
+              "id": "Microsoft.OpenApi",
+              "requestedVersion": "2.11.0",
+              "resolvedVersion": "2.11.0"
+            },
+            {
+              "id": "Newtonsoft.Json",
+              "requestedVersion": "13.0.4",
+              "resolvedVersion": "13.0.4"
+            },
+            {
+              "id": "Npgsql",
+              "requestedVersion": "10.0.3",
+              "resolvedVersion": "10.0.3"
+            },
+            {
+              "id": "OpenTelemetry.Exporter.OpenTelemetryProtocol",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            },
+            {
+              "id": "OpenTelemetry.Extensions.Hosting",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            },
+            {
+              "id": "OpenTelemetry.Instrumentation.AspNetCore",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            },
+            {
+              "id": "OpenTelemetry.Instrumentation.EntityFrameworkCore",
+              "requestedVersion": "1.17.0-beta.1",
+              "resolvedVersion": "1.17.0-beta.1"
+            },
+            {
+              "id": "OpenTelemetry.Instrumentation.Http",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            },
+            {
+              "id": "Serilog.AspNetCore",
+              "requestedVersion": "10.0.0",
+              "resolvedVersion": "10.0.0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Aspire.Dashboard.Sdk.osx-arm64",
+              "requestedVersion": "[13.4.6, )",
+              "resolvedVersion": "13.4.6",
+              "autoReferenced": "true"
+            },
+            {
+              "id": "Aspire.Hosting.AppHost",
+              "requestedVersion": "[13.4.6, )",
+              "resolvedVersion": "13.4.6",
+              "autoReferenced": "true"
+            },
+            {
+              "id": "Aspire.Hosting.Docker",
+              "requestedVersion": "13.4.6",
+              "resolvedVersion": "13.4.6"
+            },
+            {
+              "id": "Aspire.Hosting.Orchestration.osx-arm64",
+              "requestedVersion": "[13.4.6, )",
+              "resolvedVersion": "13.4.6",
+              "autoReferenced": "true"
+            },
+            {
+              "id": "Aspire.Hosting.PostgreSQL",
+              "requestedVersion": "13.4.6",
+              "resolvedVersion": "13.4.6"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Application/StreamingDigest.Application.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "JsonSchema.Net",
+              "requestedVersion": "5.0.0",
+              "resolvedVersion": "5.0.0"
+            },
+            {
+              "id": "Microsoft.EntityFrameworkCore",
+              "requestedVersion": "10.0.0",
+              "resolvedVersion": "10.0.0"
+            },
+            {
+              "id": "Microsoft.Extensions.Configuration.Abstractions",
+              "requestedVersion": "10.0.3",
+              "resolvedVersion": "10.0.3"
+            },
+            {
+              "id": "Microsoft.SemanticKernel",
+              "requestedVersion": "1.78.0",
+              "resolvedVersion": "1.78.0"
+            },
+            {
+              "id": "Npgsql",
+              "requestedVersion": "10.0.3",
+              "resolvedVersion": "10.0.3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Domain/StreamingDigest.Domain.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0"
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Infrastructure/StreamingDigest.Infrastructure.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Dapper",
+              "requestedVersion": "2.1.35",
+              "resolvedVersion": "2.1.35"
+            },
+            {
+              "id": "Konscious.Security.Cryptography.Argon2",
+              "requestedVersion": "1.3.1",
+              "resolvedVersion": "1.3.1"
+            },
+            {
+              "id": "Npgsql.EntityFrameworkCore.PostgreSQL",
+              "requestedVersion": "10.0.3",
+              "resolvedVersion": "10.0.3"
+            },
+            {
+              "id": "Pgvector",
+              "requestedVersion": "0.3.0",
+              "resolvedVersion": "0.3.0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.MatrixNotifier/StreamingDigest.MatrixNotifier.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0"
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Web/StreamingDigest.Web.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Microsoft.AspNetCore.App.Internal.Assets",
+              "requestedVersion": "[10.0.10, )",
+              "resolvedVersion": "10.0.10",
+              "autoReferenced": "true"
+            },
+            {
+              "id": "Microsoft.AspNetCore.Components.WebAssembly",
+              "requestedVersion": "10.0.9",
+              "resolvedVersion": "10.0.9"
+            },
+            {
+              "id": "Microsoft.AspNetCore.Components.WebAssembly.DevServer",
+              "requestedVersion": "10.0.9",
+              "resolvedVersion": "10.0.9"
+            },
+            {
+              "id": "Microsoft.FluentUI.AspNetCore.Components",
+              "requestedVersion": "4.11.0",
+              "resolvedVersion": "4.11.0"
+            },
+            {
+              "id": "Microsoft.NET.ILLink.Tasks",
+              "requestedVersion": "[10.0.10, )",
+              "resolvedVersion": "10.0.10",
+              "autoReferenced": "true"
+            },
+            {
+              "id": "Microsoft.NET.Sdk.WebAssembly.Pack",
+              "requestedVersion": "[10.0.10, )",
+              "resolvedVersion": "10.0.10",
+              "autoReferenced": "true"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Worker/StreamingDigest.Worker.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Hangfire.AspNetCore",
+              "requestedVersion": "1.8.24",
+              "resolvedVersion": "1.8.24"
+            },
+            {
+              "id": "Hangfire.MemoryStorage",
+              "requestedVersion": "1.8.1",
+              "resolvedVersion": "1.8.1"
+            },
+            {
+              "id": "Hangfire.PostgreSql",
+              "requestedVersion": "1.9.2",
+              "resolvedVersion": "1.9.2"
+            },
+            {
+              "id": "Microsoft.Extensions.Hosting",
+              "requestedVersion": "10.0.9",
+              "resolvedVersion": "10.0.9"
+            },
+            {
+              "id": "Microsoft.Extensions.Http",
+              "requestedVersion": "10.0.9",
+              "resolvedVersion": "10.0.9"
+            },
+            {
+              "id": "Newtonsoft.Json",
+              "requestedVersion": "13.0.4",
+              "resolvedVersion": "13.0.4"
+            },
+            {
+              "id": "Npgsql",
+              "requestedVersion": "10.0.3",
+              "resolvedVersion": "10.0.3"
+            },
+            {
+              "id": "OpenTelemetry.Exporter.OpenTelemetryProtocol",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            },
+            {
+              "id": "OpenTelemetry.Extensions.Hosting",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            },
+            {
+              "id": "OpenTelemetry.Instrumentation.AspNetCore",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            },
+            {
+              "id": "OpenTelemetry.Instrumentation.EntityFrameworkCore",
+              "requestedVersion": "1.17.0-beta.1",
+              "resolvedVersion": "1.17.0-beta.1"
+            },
+            {
+              "id": "OpenTelemetry.Instrumentation.Http",
+              "requestedVersion": "1.17.0",
+              "resolvedVersion": "1.17.0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/tests/StreamingDigest.IntegrationTests/StreamingDigest.IntegrationTests.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "coverlet.collector",
+              "requestedVersion": "6.0.4",
+              "resolvedVersion": "6.0.4"
+            },
+            {
+              "id": "Microsoft.AspNetCore.Mvc.Testing",
+              "requestedVersion": "10.0.9",
+              "resolvedVersion": "10.0.9"
+            },
+            {
+              "id": "Microsoft.NET.Test.Sdk",
+              "requestedVersion": "17.14.1",
+              "resolvedVersion": "17.14.1"
+            },
+            {
+              "id": "Microsoft.OpenApi",
+              "requestedVersion": "2.11.0",
+              "resolvedVersion": "2.11.0"
+            },
+            {
+              "id": "xunit",
+              "requestedVersion": "2.9.3",
+              "resolvedVersion": "2.9.3"
+            },
+            {
+              "id": "xunit.runner.visualstudio",
+              "requestedVersion": "3.1.4",
+              "resolvedVersion": "3.1.4"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/Users/core/git/matthewcorven/streaming-digest/tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0",
+          "topLevelPackages": [
+            {
+              "id": "Bogus",
+              "requestedVersion": "35.6.1",
+              "resolvedVersion": "35.6.1"
+            },
+            {
+              "id": "coverlet.collector",
+              "requestedVersion": "6.0.4",
+              "resolvedVersion": "6.0.4"
+            },
+            {
+              "id": "Microsoft.Data.Sqlite",
+              "requestedVersion": "10.0.10",
+              "resolvedVersion": "10.0.10"
+            },
+            {
+              "id": "Microsoft.EntityFrameworkCore.Sqlite",
+              "requestedVersion": "10.0.10",
+              "resolvedVersion": "10.0.10"
+            },
+            {
+              "id": "Microsoft.NET.Test.Sdk",
+              "requestedVersion": "17.14.1",
+              "resolvedVersion": "17.14.1"
+            },
+            {
+              "id": "Microsoft.OpenApi",
+              "requestedVersion": "2.11.0",
+              "resolvedVersion": "2.11.0"
+            },
+            {
+              "id": "SQLitePCLRaw.lib.e_sqlite3",
+              "requestedVersion": "3.53.3",
+              "resolvedVersion": "3.53.3"
+            },
+            {
+              "id": "xunit",
+              "requestedVersion": "2.9.3",
+              "resolvedVersion": "2.9.3"
+            },
+            {
+              "id": "xunit.runner.visualstudio",
+              "requestedVersion": "3.1.4",
+              "resolvedVersion": "3.1.4"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
