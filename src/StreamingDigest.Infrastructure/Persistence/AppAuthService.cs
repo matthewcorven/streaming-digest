@@ -203,7 +203,7 @@ public sealed class AppAuthService
 
     public async Task<bool> ChangePasswordAsync(string connectionString, Guid userId, string currentPassword, string newPassword, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 12)
+        if (!IsPasswordStrongEnough(newPassword))
         {
             return false;
         }
@@ -261,6 +261,11 @@ public sealed class AppAuthService
         return Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     }
 
+    public static bool IsPasswordStrongEnough(string? password)
+    {
+        return !string.IsNullOrWhiteSpace(password) && password.Length >= 12;
+    }
+
     private bool IsRateLimited(string username, string? remoteIpAddress)
     {
         var key = BuildRateLimitKey(username, remoteIpAddress);
@@ -304,12 +309,12 @@ public sealed class AppAuthService
         return Convert.ToHexString(RandomNumberGenerator.GetBytes(48));
     }
 
-    private static string HashPassword(string password)
+    public static string HashPassword(string password)
     {
         return PasswordHasher.HashPassword(string.Empty, password);
     }
 
-    private static bool VerifyPassword(string password, string storedHash)
+    public static bool VerifyPassword(string password, string storedHash)
     {
         if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(storedHash))
         {

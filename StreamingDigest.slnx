@@ -15,6 +15,7 @@
     <Project Path="src/StreamingDigest.Worker/StreamingDigest.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/StreamingDigest.E2E/StreamingDigest.E2E.csproj" />
     <Project Path="tests/StreamingDigest.IntegrationTests/StreamingDigest.IntegrationTests.csproj" />
     <Project Path="tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj" />
   </Folder>

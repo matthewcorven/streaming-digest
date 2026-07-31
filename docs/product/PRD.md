@@ -293,7 +293,8 @@ MVP must include:
 MVP must include:
 
 - Single-user local login.
-- Username/password seeded from environment variables at first startup, then stored hashed in DB.
+- Username/password may be created through the first-run setup UI when no app user exists.
+- Optional bootstrap credentials may still be seeded from environment variables at first startup, then stored hashed in DB.
 - Argon2id password hashing.
 - Secure cookies.
 - CSRF protection for mutating endpoints.
@@ -306,8 +307,10 @@ MVP must include:
 
 MVP first-run onboarding distinguishes core value from full operational hardening:
 
-- The app starts in onboarding if setup is incomplete.
-- Required before first ingestion: admin password setup/change, embedding model verification, local LLM verification, first public YouTube channel, and ingestion schedule confirmation.
+- If no app user exists, anonymous users land on `/setup` to create the first local account before any authenticated workflow begins.
+- If a bootstrap admin user was created from environment variables, the app routes that user through the forced password change path after first sign-in.
+- The app starts in onboarding if readiness is incomplete after the user account step is satisfied.
+- Required before first ingestion: first user creation or bootstrap-password rotation, embedding model verification, local LLM verification, first public YouTube channel, and ingestion schedule confirmation.
 - Audio-to-text/Whisper verification is required for full setup completeness and for no-caption video support, but captioned-video ingestion may still proceed with a prominent warning if it is unavailable.
 - Matrix bot login/verification and room send are required for full notification readiness, but missing Matrix configuration should block notifications, not basic search UI access. Matrix end-to-end encryption is MVP+.
 - Grafana/observability endpoint verification is required for full operational readiness, but missing dashboard links should surface as warnings, not block search UI access.
@@ -315,7 +318,7 @@ MVP first-run onboarding distinguishes core value from full operational hardenin
 - Default ingestion schedule is 6 AM in the user's local time and is configurable during first run.
 - Scheduled ingestion runs pause during an Embedding Transition (ADR-0011); a single catch-up run fires on transition completion.
 - Until the first ingestion run completes with at least one video, the search page redirects to a waiting state with a run-now action — the flagship feature's first impression is never an unexplained void. A zero-video first run keeps the waiting state with backfill guidance.
-- Post-login routing precedence is: incomplete onboarding, last selected mode, dashboard summary after the first daily run, then ingestion/new-videos digest.
+- Post-login routing precedence is: forced password change when required, incomplete onboarding, last selected mode, dashboard summary after the first daily run, then ingestion/new-videos digest.
 
 ### 2.11 Backup/restore scope
 

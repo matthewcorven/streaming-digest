@@ -80,6 +80,12 @@ public sealed class AppReadinessStateService
         var steps = new List<OnboardingStepStatus>();
         foreach (var definition in DefaultStepDefinitions)
         {
+            if (string.Equals(definition.Key, "admin_password_changed", StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(await BuildAdminPasswordStepAsync(connection, definition, rowLookup, cancellationToken));
+                continue;
+            }
+
             if (!rowLookup.TryGetValue(definition.Key, out var row))
             {
                 steps.Add(CreatePendingStep(definition));
@@ -352,6 +358,76 @@ public sealed class AppReadinessStateService
         }
     }
 
+    private static async Task<OnboardingStepStatus> BuildAdminPasswordStepAsync(
+        NpgsqlConnection connection,
+        ReadinessStepDefinition definition,
+        IReadOnlyDictionary<string, StoredReadinessCheck> rowLookup,
+        CancellationToken cancellationToken)
+    {
+        var userPasswordState = await TryGetUserPasswordStateAsync(connection, cancellationToken);
+        if (userPasswordState is { TotalUsers: > 0, UsersRequiringPasswordChange: 0 })
+        {
+            return new OnboardingStepStatus(
+                definition.Key,
+                definition.Label,
+                "succeeded",
+                definition.RequiredForCoreSetup,
+                definition.RequiredForFullReadiness,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                null,
+                new Dictionary<string, object?>
+                {
+                    ["derivedFromUserState"] = true,
+                    ["userCount"] = userPasswordState.TotalUsers
+                });
+        }
+
+        if (rowLookup.TryGetValue(definition.Key, out var storedRow))
+        {
+            var status = NormalizeStatus(storedRow.Status) ?? "pending";
+            var details = ParseDetails(storedRow.DetailsJson);
+            return new OnboardingStepStatus(
+                definition.Key,
+                definition.Label,
+                status,
+                definition.RequiredForCoreSetup,
+                definition.RequiredForFullReadiness,
+                storedRow.LastCheckedAt,
+                storedRow.LastSuccessAt,
+                storedRow.LastErrorSummary,
+                details);
+        }
+
+        return CreatePendingStep(definition);
+    }
+
+    private static async Task<UserPasswordState?> TryGetUserPasswordStateAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var command = new NpgsqlCommand(
+                """
+                SELECT
+                    COUNT(*) AS total_users,
+                    COUNT(*) FILTER (WHERE must_change_password) AS users_requiring_password_change
+                FROM public.app_users
+                """,
+                connection);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            var totalUsers = reader.GetInt64(0);
+            var usersRequiringPasswordChange = reader.GetInt64(1);
+            await reader.CloseAsync();
+            return new UserPasswordState(totalUsers, usersRequiringPasswordChange);
+        }
+        catch (PostgresException ex) when (string.Equals(ex.SqlState, PostgresErrorCodes.UndefinedTable, StringComparison.Ordinal))
+        {
+            return null;
+        }
+    }
+
     private static OnboardingStepStatus CreatePendingStep(ReadinessStepDefinition definition)
     {
         return new OnboardingStepStatus(
@@ -413,6 +489,8 @@ public sealed class AppReadinessStateService
         public bool RequiredForFullReadiness { get; init; }
         public DateTimeOffset UpdatedAt { get; init; }
     }
+
+    private sealed record UserPasswordState(long TotalUsers, long UsersRequiringPasswordChange);
 }
 
 public sealed record OnboardingStepVerificationRequest(string? Status = null, string? ErrorSummary = null, Dictionary<string, object?>? Details = null);

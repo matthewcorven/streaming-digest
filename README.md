@@ -274,9 +274,10 @@ Streaming Digest is intended for private on-prem use, typically accessed through
 Security features:
 
 - single-user login
-- bootstrap admin credentials from environment variables on first startup
+- first-run setup UI when no app user exists
+- optional bootstrap admin credentials from environment variables on first startup
 - password hashed with Argon2id and stored in PostgreSQL
-- forced password change after bootstrap
+- forced password change only for environment-bootstrapped credentials
 - secure HTTP-only cookies
 - CSRF protection for mutating endpoints
 - login rate limiting
@@ -334,8 +335,8 @@ http://localhost:8080
 
 On first startup:
 
-1. Sign in using the bootstrap admin credentials configured in the environment.
-2. Change the bootstrap password.
+1. If no bootstrap admin user was created from environment variables, open `/setup` and create the first account in the web UI.
+2. If bootstrap admin credentials were configured in the environment, sign in with them and complete the forced password change.
 3. Configure Ollama embedding and LLM models.
 4. Configure the local audio-to-text service.
 5. Configure Matrix bot credentials and room ID; encrypted room setup is MVP+.

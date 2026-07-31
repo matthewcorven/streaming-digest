@@ -118,6 +118,7 @@ builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredServic
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
+builder.Services.AddSingleton<FirstUserSetupService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
 builder.Services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddSingleton<SearchUiService>();
@@ -137,6 +138,7 @@ builder.Services.AddScoped<IChannelRepository, ChannelRepository>();
 
 var app = builder.Build();
 var authService = app.Services.GetRequiredService<AppAuthService>();
+var useSecureCookies = !app.Environment.IsDevelopment();
 
 static IResult CreateAdminOperationResponse(AdminActionResult result)
 {
@@ -1116,8 +1118,8 @@ app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authSe
             return Results.Json(new { error = result.ErrorMessage }, statusCode: result.StatusCode);
         }
 
-        context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions());
-        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions());
+        context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions(useSecureCookies));
+        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions(useSecureCookies));
 
         return Results.Ok(new { username = result.User!.Username, mustChangePassword = result.User.MustChangePassword });
     }
@@ -1126,6 +1128,40 @@ app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authSe
         app.Logger.LogError(ex, "Login request failed.");
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Login failed", detail: ex.Message);
     }
+});
+app.MapGet("/api/setup/status", async (FirstUserSetupService setupService, CancellationToken cancellationToken) =>
+    Results.Ok(await setupService.GetStatusAsync(connectionString, cancellationToken)));
+app.MapPost("/api/setup/initialize", async (HttpContext context, FirstUserSetupService setupService, CancellationToken cancellationToken) =>
+{
+    FirstUserInitializationRequest? requestBody;
+    try
+    {
+        requestBody = await JsonSerializer.DeserializeAsync<FirstUserInitializationRequest>(context.Request.Body, jsonOptions, cancellationToken);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "The request body is invalid." });
+    }
+
+    if (requestBody is null)
+    {
+        return Results.BadRequest(new { error = "The request body is required." });
+    }
+
+    var result = await setupService.InitializeAsync(
+        connectionString,
+        requestBody.Username ?? string.Empty,
+        requestBody.Password ?? string.Empty,
+        cancellationToken);
+
+    return result.Outcome switch
+    {
+        FirstUserInitializationOutcome.Success => Results.Created("/login", new { username = result.Username }),
+        FirstUserInitializationOutcome.AlreadyInitialized => Results.Conflict(new { error = result.ErrorMessage }),
+        FirstUserInitializationOutcome.InvalidUsername => Results.BadRequest(new { error = result.ErrorMessage }),
+        FirstUserInitializationOutcome.WeakPassword => Results.BadRequest(new { error = result.ErrorMessage }),
+        _ => Results.BadRequest(new { error = "The request could not be completed." })
+    };
 });
 app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
@@ -1137,8 +1173,8 @@ app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authS
 
     searchUiService.RemoveState(GetSearchUiStateKey(context));
 
-    context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
-    context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = true, SameSite = SameSiteMode.Lax });
+    context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = useSecureCookies, SameSite = SameSiteMode.Lax });
+    context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = useSecureCookies, SameSite = SameSiteMode.Lax });
 
     return Results.Ok(new { success = true });
 });
@@ -1163,7 +1199,7 @@ app.MapGet("/api/auth/csrf", async (HttpContext context, AppAuthService authServ
         csrfToken = authService.CreateCsrfToken();
     }
 
-    context.Response.Cookies.Append("csrf-token", csrfToken, CreateCsrfCookieOptions());
+    context.Response.Cookies.Append("csrf-token", csrfToken, CreateCsrfCookieOptions(useSecureCookies));
     return Results.Ok(new { token = csrfToken });
 });
 app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
@@ -1652,22 +1688,16 @@ app.MapGet("/{*path}", async context =>
         return;
     }
 
-    var webRootPath = app.Environment.WebRootPath;
-    if (string.IsNullOrWhiteSpace(webRootPath))
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    var indexPath = Path.Combine(webRootPath, "index.html");
-    if (!File.Exists(indexPath))
+    var indexFile = app.Environment.WebRootFileProvider.GetFileInfo("index.html");
+    if (!indexFile.Exists)
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;
     }
 
     context.Response.ContentType = "text/html; charset=utf-8";
-    await context.Response.SendFileAsync(indexPath);
+    await using var stream = indexFile.CreateReadStream();
+    await stream.CopyToAsync(context.Response.Body);
 });
 
 app.Run();
@@ -2028,24 +2058,24 @@ static bool ShouldAllowPasswordChangeFlow(HttpRequest request)
         || path.StartsWith("/api/auth/logout", StringComparison.Ordinal);
 }
 
-static CookieOptions CreateSessionCookieOptions()
+static CookieOptions CreateSessionCookieOptions(bool useSecureCookies)
 {
     return new CookieOptions
     {
         HttpOnly = true,
-        Secure = true,
+        Secure = useSecureCookies,
         SameSite = SameSiteMode.Lax,
         Path = "/",
         MaxAge = TimeSpan.FromHours(8)
     };
 }
 
-static CookieOptions CreateCsrfCookieOptions()
+static CookieOptions CreateCsrfCookieOptions(bool useSecureCookies)
 {
     return new CookieOptions
     {
         HttpOnly = false,
-        Secure = true,
+        Secure = useSecureCookies,
         SameSite = SameSiteMode.Lax,
         Path = "/",
         MaxAge = TimeSpan.FromHours(8)
@@ -2145,6 +2175,7 @@ sealed class PassThroughDashboardAuthorizationFilter : IDashboardAuthorizationFi
 sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
 
 public sealed record LoginRequest(string Username, string Password);
+public sealed record FirstUserInitializationRequest(string? Username, string? Password);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
 public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);

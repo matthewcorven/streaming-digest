@@ -27,6 +27,7 @@
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageVersion Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.11.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="Microsoft.Playwright" Version="1.61.0" />
     <!-- Security pin: explicit 2.x compatibility line chosen to clear GHSA-v5pm-xwqc-g5wc while remaining compatible with Microsoft.AspNetCore.OpenApi source generation. -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.11.0" />
     <!-- Security pin: upgraded to clear GHSA-2ww3-72rp-wpp4. -->

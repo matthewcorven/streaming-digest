@@ -76,25 +76,34 @@ else
 
 @code {
     private bool IsNavOpen = true;
+    private string? _pendingNavigationTarget;
 
     protected override async Task OnInitializedAsync()
     {
-        AuthenticationService.Changed += StateHasChanged;
+        AuthenticationService.Changed += HandleAuthenticationChanged;
         await AuthenticationService.InitializeAsync();
+        _pendingNavigationTarget = ResolveNavigationTarget();
+    }
 
-        if (AuthenticationService.RequiresPasswordChange && !IsPasswordChangeRoute())
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!string.IsNullOrWhiteSpace(_pendingNavigationTarget))
         {
-            NavigationManager.NavigateTo("/change-password", true);
-        }
-        else if (!AuthenticationService.IsAuthenticated && !IsPublicRoute())
-        {
-            NavigationManager.NavigateTo("/login", true);
+            var navigationTarget = _pendingNavigationTarget;
+            _pendingNavigationTarget = null;
+            NavigationManager.NavigateTo(navigationTarget, true);
         }
     }
 
     public void Dispose()
     {
-        AuthenticationService.Changed -= StateHasChanged;
+        AuthenticationService.Changed -= HandleAuthenticationChanged;
+    }
+
+    private void HandleAuthenticationChanged()
+    {
+        _pendingNavigationTarget = ResolveNavigationTarget();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private void ToggleNav() => IsNavOpen = !IsNavOpen;
@@ -128,12 +137,35 @@ else
 
     private string GetRelativePath() => NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', 2)[0].Split('#', 2)[0];
 
+    private string? ResolveNavigationTarget()
+    {
+        if (AuthenticationService.IsSetupRequired && !IsSetupRoute())
+        {
+            return "/setup";
+        }
+
+        if (AuthenticationService.RequiresPasswordChange && !IsPasswordChangeRoute())
+        {
+            return "/change-password";
+        }
+
+        if (!AuthenticationService.IsAuthenticated && !IsPublicRoute())
+        {
+            return "/login";
+        }
+
+        return null;
+    }
+
     private bool IsPublicRoute()
     {
         var route = GetRelativePath();
         return string.Equals(route, "login", StringComparison.OrdinalIgnoreCase)
+            || IsSetupRoute()
             || IsPasswordChangeRoute();
     }
+
+    private bool IsSetupRoute() => string.Equals(GetRelativePath(), "setup", StringComparison.OrdinalIgnoreCase);
 
     private bool IsPasswordChangeRoute() => string.Equals(GetRelativePath(), "change-password", StringComparison.OrdinalIgnoreCase);
 }

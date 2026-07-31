@@ -144,7 +144,51 @@ Detail/edit DTOs should use this shape for scraped editable fields:
 
 List DTOs may flatten effective values for brevity, but detail/edit responses should preserve all three values.
 
-## 3. Auth endpoints
+## 3. Setup and auth endpoints
+
+### GET `/api/setup/status`
+
+Returns whether first-time setup is still required.
+
+```json
+{
+  "setupRequired": true,
+  "userCount": 0
+}
+```
+
+Notes:
+
+- Public endpoint.
+- `setupRequired` is `true` only while `public.app_users` has zero rows.
+
+### POST `/api/setup/initialize`
+
+Creates the first local user only while `public.app_users` is empty.
+
+Request:
+
+```json
+{
+  "username": "admin",
+  "password": "setup-passw0rd!"
+}
+```
+
+Successful response:
+
+```json
+{
+  "username": "admin"
+}
+```
+
+Notes:
+
+- Public endpoint.
+- Rejects the request once any user already exists.
+- Stores only the Argon2id hash; plaintext passwords are never persisted.
+- Does not create an authenticated session. The client redirects to `/login` after success.
 
 ### POST `/api/auth/login`
 
@@ -170,6 +214,7 @@ Notes:
 
 - Rate limited.
 - Sets secure HTTP-only auth cookie.
+- `mustChangePassword` is expected only for the environment-bootstrap path; users created through `/api/setup/initialize` sign in normally without a synthetic password-change step.
 
 ### POST `/api/auth/logout`
 

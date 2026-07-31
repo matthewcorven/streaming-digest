@@ -85,6 +85,47 @@ public sealed class AppReadinessStateServiceTests : IAsyncLifetime
         Assert.True(finalReadiness.IsFullyReady);
     }
 
+    [Fact]
+    public async Task GetStatusAsync_marks_admin_password_changed_succeeded_when_existing_users_do_not_require_rotation()
+    {
+        var runner = new PostgresMigrationRunner(_connectionString!);
+        await runner.ApplyAsync();
+
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO public.app_users (
+                id,
+                username,
+                password_hash,
+                password_hash_algorithm,
+                must_change_password,
+                created_at,
+                updated_at)
+            VALUES (
+                @id,
+                @username,
+                @passwordHash,
+                'argon2id',
+                false,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP)
+            """,
+            connection);
+        command.Parameters.AddWithValue("id", Guid.NewGuid());
+        command.Parameters.AddWithValue("username", "founder");
+        command.Parameters.AddWithValue("passwordHash", AppAuthService.HashPassword("setup-passw0rd!"));
+        await command.ExecuteNonQueryAsync();
+
+        var service = new AppReadinessStateService();
+        var status = await service.GetStatusAsync(_connectionString!);
+
+        var adminPasswordStep = Assert.Single(status.Steps, step => step.Key == "admin_password_changed");
+        Assert.Equal("succeeded", adminPasswordStep.Status);
+        Assert.Equal(true, adminPasswordStep.Details["derivedFromUserState"]);
+    }
+
     private async Task StartPostgresContainerAsync()
     {
         var dockerArgs = new[]

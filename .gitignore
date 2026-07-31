@@ -151,6 +151,10 @@ ipch/
 
 # Visual Studio Trace Files
 *.e2e
+!tests/StreamingDigest.E2E/
+!tests/StreamingDigest.E2E/**
+tests/StreamingDigest.E2E/bin/
+tests/StreamingDigest.E2E/obj/
 
 # TFS 2012 Local Workspace
 $tf/

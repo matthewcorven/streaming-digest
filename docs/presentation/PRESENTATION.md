@@ -128,6 +128,7 @@ Drawer overlay (on ☰):
 
 | Route | Page | Notes |
 |---|---|---|
+| `/setup` | First-time account setup | Public route shown only while no app user exists. |
 | `/login` | Login | Outside shell. |
 | `/change-password` | Forced password change | Outside shell; separate screen, not a modal. |
 | `/onboarding` | Onboarding wizard/checklist | Inside shell but nav locked until core setup complete. |
@@ -138,16 +139,17 @@ Drawer overlay (on ☰):
 | `/ingestion/runs/{runId}` | Ingestion Run Detail | |
 | `/settings` | Admin/Settings | Tabbed; `/settings/{tab}` deep-links to a tab. |
 
-**Post-login routing precedence** (PRD §2.10): incomplete onboarding → forced password change → last selected mode → dashboard (after first daily run) → ingestion digest. The client evaluates this after `GET /api/auth/me` + `GET /api/onboarding/status` on bootstrap.
+**Post-login routing precedence** (PRD §2.10): setup-required redirect → forced password change → incomplete onboarding → last selected mode → dashboard (after first daily run) → ingestion digest. The client evaluates this after `GET /api/setup/status`, `GET /api/auth/me`, and `GET /api/onboarding/status` during bootstrap.
 
 ### 3.4 Bootstrap sequence
 
 1. Load `blazor.webassembly.js`, register `service-worker.js` (§8.2).
-2. `GET /api/auth/me` → if 401, route to `/login`.
-3. If `mustChangePassword: true` → route to `/change-password`.
-4. `GET /api/onboarding/status` → if `isCoreSetupComplete: false` → route to `/onboarding`.
-5. Open SSE connection (§6.1).
-6. Render shell + default route.
+2. `GET /api/setup/status` → if `setupRequired: true`, route anonymous users to `/setup`.
+3. `GET /api/auth/me` → if 401 and setup is not required, route to `/login`.
+4. If `mustChangePassword: true` → route to `/change-password`.
+5. `GET /api/onboarding/status` → if `isCoreSetupComplete: false` → route to `/onboarding`.
+6. Open SSE connection (§6.1).
+7. Render shell + default route.
 
 ---
 
@@ -195,6 +197,7 @@ DESKTOP + MOBILE (same layout, card width adapts: 380px desktop, full-width mobi
 
 - Submit on Enter or button click → `POST /api/auth/login`.
 - Password visibility toggle (eye icon).
+- If `GET /api/setup/status` reports `setupRequired: true`, the page redirects to `/setup` instead of showing login fields.
 - On success with `mustChangePassword: true` → route to `/change-password`.
 - On success otherwise → bootstrap routing precedence (§3.4).
 - Rate-limit responses (429 from login endpoint) show a friendly cooldown message.
@@ -205,6 +208,8 @@ DESKTOP + MOBILE (same layout, card width adapts: 380px desktop, full-width mobi
 - `GET /api/auth/csrf` — fetched immediately after login for mutating endpoints.
 
 **Forced password change** (`/change-password`): separate screen with the same branded shell — current password, new password (with strength hints), confirm new password. Submits to `POST /api/auth/change-password`. On success, routes into the app. It is deliberately a full screen, not a modal, because it is a blocking security gate.
+
+**First-time setup** (`/setup`): matching public card layout for username, password, and confirm-password entry. Submits to `POST /api/setup/initialize` only while the user table is empty. On success, the client redirects to `/login` with a setup-complete message and requires an explicit sign-in rather than auto-creating a session.
 
 **Empty state:** n/a (form page).
 
