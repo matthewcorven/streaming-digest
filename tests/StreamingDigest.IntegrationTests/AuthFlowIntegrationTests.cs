@@ -5,7 +5,10 @@ using System.Net.Sockets;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using StreamingDigest.Application;
 using StreamingDigest.Infrastructure.Persistence;
 
 namespace StreamingDigest.IntegrationTests;
@@ -192,9 +195,9 @@ public sealed class AuthFlowIntegrationTests : IAsyncLifetime
         Assert.NotNull(payload);
 
         var cluster = Assert.Single(payload!.Results, result => result.ClusterId == "cluster-search-ui");
-        Assert.Equal("Designing a search-first knowledge base", cluster.Title);
-        Assert.Equal(4, cluster.MatchesInsideCount);
-        Assert.Equal(2, cluster.Submatches.Count(match => string.Equals(match.Type, "segment", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal("Designing a search-first video knowledge base", cluster.Title);
+        Assert.Equal(12, cluster.MatchesInsideCount);
+        Assert.Equal(1, cluster.Submatches.Count(match => string.Equals(match.Type, "segment", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -435,6 +438,12 @@ public sealed class AuthFlowIntegrationTests : IAsyncLifetime
                     ["BOOTSTRAP_ADMIN_USERNAME"] = BootstrapUsername,
                     ["BOOTSTRAP_ADMIN_PASSWORD"] = BootstrapPassword
                 });
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IEmbeddingService>();
+                services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
             });
         }
     }

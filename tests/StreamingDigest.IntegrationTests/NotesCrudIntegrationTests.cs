@@ -5,7 +5,10 @@ using System.Net.Sockets;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using StreamingDigest.Application;
 using StreamingDigest.Infrastructure.Persistence;
 
 namespace StreamingDigest.IntegrationTests;
@@ -66,7 +69,7 @@ public sealed class NotesCrudIntegrationTests : IAsyncLifetime
         Assert.Equal(targetId, created.TargetId);
         Assert.Equal("Test Note", created.Title);
         Assert.Equal("Some **markdown** content.", created.Markdown);
-        Assert.Equal("stale", created.EmbeddingStatus);
+        Assert.Equal("succeeded", created.EmbeddingStatus);
 
         // Get by ID
         using var getResponse = await client.GetAsync($"/api/notes/{created.Id}");
@@ -94,7 +97,7 @@ public sealed class NotesCrudIntegrationTests : IAsyncLifetime
         Assert.NotNull(updatePayload);
         Assert.Equal("updated", updatePayload!.Status);
         Assert.Equal("Updated Title", updatePayload.Resource.Title);
-        Assert.Equal("stale", updatePayload.Resource.EmbeddingStatus);
+        Assert.Equal("succeeded", updatePayload.Resource.EmbeddingStatus);
 
         // Delete (soft)
         var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/notes/{created.Id}");
@@ -337,6 +340,12 @@ public sealed class NotesCrudIntegrationTests : IAsyncLifetime
                     ["BOOTSTRAP_ADMIN_USERNAME"] = BootstrapUsername,
                     ["BOOTSTRAP_ADMIN_PASSWORD"] = BootstrapPassword
                 });
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IEmbeddingService>();
+                services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
             });
         }
     }

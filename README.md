@@ -317,7 +317,13 @@ Create a local environment file from the deployment template and then start the 
 
 ```bash
 cp .env.example .env
-docker compose -p streaming-digest up -d
+docker compose up -d
+```
+
+`compose.yaml` is a checked-in artifact generated from the Aspire AppHost. Regenerate it after AppHost deployment changes with:
+
+```bash
+./scripts/publish_compose.sh
 ```
 
 Open the web application:
