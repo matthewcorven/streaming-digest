@@ -8,25 +8,28 @@ public sealed class SearchUiService
     private readonly IRecentSearchStore _recentSearchStore;
     private readonly IReadOnlyList<SearchCorpusClusterSeed> _candidateSeeds;
     private readonly HybridRankingService? _injectedRankingService;
+    private readonly bool _useSeedRecentOpenCount;
     private SearchUiSettings _settings = SearchUiSettings.Default;
 
     public SearchUiService(IRecentSearchStore recentSearchStore, HybridRankingService? rankingService = null)
-        : this(recentSearchStore, SearchUiCorpusCatalog.CreateDefaultFixtureCorpus(), rankingService)
+        : this(recentSearchStore, SearchUiCorpusCatalog.CreateDefaultFixtureCorpus(), rankingService, useSeedRecentOpenCount: false)
     {
     }
 
     public SearchUiService(
         IRecentSearchStore recentSearchStore,
         IReadOnlyList<SearchCorpusClusterSeed> candidateSeeds,
-        HybridRankingService? rankingService = null)
+        HybridRankingService? rankingService = null,
+        bool useSeedRecentOpenCount = false)
     {
         _recentSearchStore = recentSearchStore ?? throw new ArgumentNullException(nameof(recentSearchStore));
         _candidateSeeds = candidateSeeds ?? throw new ArgumentNullException(nameof(candidateSeeds));
         _injectedRankingService = rankingService;
+        _useSeedRecentOpenCount = useSeedRecentOpenCount;
     }
 
     public SearchUiService(IReadOnlyList<SearchCorpusClusterSeed> candidateSeeds)
-        : this(new InMemoryRecentSearchStore(), candidateSeeds)
+        : this(new InMemoryRecentSearchStore(), candidateSeeds, useSeedRecentOpenCount: true)
     {
     }
 
@@ -70,6 +73,12 @@ public sealed class SearchUiService
     public Task<SearchResponse> SearchAsync(SearchRequest request, CancellationToken cancellationToken = default)
         => SearchAsync(request, stateKey: null, cancellationToken);
 
+    public SearchResponse Search(SearchRequest request)
+        => Search(request, stateKey: null);
+
+    public SearchResponse Search(SearchRequest request, string? stateKey)
+        => SearchAsync(request, stateKey, CancellationToken.None).GetAwaiter().GetResult();
+
     public async Task<SearchResponse> SearchAsync(SearchRequest request, string? stateKey, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -105,7 +114,8 @@ public sealed class SearchUiService
                 seed,
                 normalizedQuery,
                 terms,
-                seed.RecentOpenCount + (recentOpenCounts.TryGetValue(GetVideoId(seed), out var recentOpenCount) ? recentOpenCount : 0)))
+                (_useSeedRecentOpenCount ? seed.RecentOpenCount : 0)
+                + (recentOpenCounts.TryGetValue(GetVideoId(seed), out var recentOpenCount) ? recentOpenCount : 0)))
             .ToList();
 
         var rankingService = CreateRankingService(effectiveSettings);
