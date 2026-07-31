@@ -1648,7 +1648,31 @@ app.MapDelete("/api/notes/{noteId:guid}", async (Guid noteId, StreamingDigestDbC
     return Results.Ok(new { status = "deleted", entityType = "note", entityId = noteId });
 });
 
-app.MapFallbackToFile("index.html");
+app.MapGet("/{*path}", async context =>
+{
+    if (!ShouldServeSpaFallback(context.Request.Path))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    var webRootPath = app.Environment.WebRootPath;
+    if (string.IsNullOrWhiteSpace(webRootPath))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    var indexPath = Path.Combine(webRootPath, "index.html");
+    if (!File.Exists(indexPath))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    context.Response.ContentType = "text/html; charset=utf-8";
+    await context.Response.SendFileAsync(indexPath);
+});
 
 app.Run();
 
@@ -2086,6 +2110,23 @@ static string BuildDisabledPlaceholder(string serviceName)
 </body>
 </html>
 """;
+}
+
+static bool ShouldServeSpaFallback(PathString path)
+{
+    if (path.StartsWithSegments("/api") ||
+        path.StartsWithSegments("/admin") ||
+        path.StartsWithSegments("/internal") ||
+        path.StartsWithSegments("/grafana") ||
+        path.StartsWithSegments("/pgadmin") ||
+        path.StartsWithSegments("/prometheus") ||
+        path.StartsWithSegments("/loki") ||
+        path.StartsWithSegments("/tempo"))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 internal sealed record CreateChannelRequest(string? SourceUrl, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
