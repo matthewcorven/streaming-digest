@@ -11,6 +11,8 @@ public interface ISearchDocumentGenerator
 
 public sealed class SearchDocumentGenerator : ISearchDocumentGenerator
 {
+    public const string DocumentConstructionVersion = "effective-value-title-body-v1";
+
     public IReadOnlyList<GeneratedSearchDocument> Generate(SearchDocumentGenerationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);

@@ -1,12 +1,153 @@
 {
+  "dataset_version": "2026-07-30",
+  "authorship_rule": "Queries are authored query-first against the Task 0.4 fixture corpus and must not be copied from finalized fixture titles or metadata text.",
   "queries": [
     {
-      "query": "news about ai",
-      "expected_clusters": ["ai", "technology"]
+      "id": "search-ui-01",
+      "query": "that one where I could jump from a rough project idea straight to the repo and links I needed",
+      "expected_cluster_id": "cluster-search-ui",
+      "expected_video_title": "Designing a search-first video knowledge base",
+      "provenance_notes": "Authored query-first; focuses on the user journey instead of the fixture title."
     },
     {
-      "query": "video about cats",
-      "expected_clusters": ["animals", "pets"]
+      "id": "search-ui-02",
+      "query": "video about turning a pile of engineering watch notes into something I can actually search later",
+      "expected_cluster_id": "cluster-search-ui",
+      "expected_video_title": "Designing a search-first video knowledge base",
+      "provenance_notes": "Query-first phrasing around curation and recall."
+    },
+    {
+      "id": "search-ui-03",
+      "query": "I only remember there was a result card with timestamps and a repo link for the same video",
+      "expected_cluster_id": "cluster-search-ui",
+      "expected_video_title": "Designing a search-first video knowledge base",
+      "provenance_notes": "Refers to the cluster UX instead of the metadata wording."
+    },
+    {
+      "id": "search-ui-04",
+      "query": "which clip showed how search, notes, and websites all reinforced the same answer",
+      "expected_cluster_id": "cluster-search-ui",
+      "expected_video_title": "Designing a search-first video knowledge base",
+      "provenance_notes": "Query-first; no direct title overlap."
+    },
+    {
+      "id": "search-ui-05",
+      "query": "something about a searchable memory for long videos where the repo mattered too",
+      "expected_cluster_id": "cluster-search-ui",
+      "expected_video_title": "Designing a search-first video knowledge base",
+      "provenance_notes": "Natural-language intent phrasing, not excerpted metadata."
+    },
+    {
+      "id": "search-ui-06",
+      "query": "the demo where vague searches still landed on the right project video with timestamps",
+      "expected_cluster_id": "cluster-search-ui",
+      "expected_video_title": "Designing a search-first video knowledge base",
+      "provenance_notes": "Captures the recall target and clustered timestamp surface."
+    },
+    {
+      "id": "search-ui-07",
+      "query": "I want the talk that made finding the right engineering video feel like browsing a knowledge base",
+      "expected_cluster_id": "cluster-search-ui",
+      "expected_video_title": "Designing a search-first video knowledge base",
+      "provenance_notes": "Query-first summary of the perceived experience."
+    },
+    {
+      "id": "ranking-01",
+      "query": "the one about balancing keyword matches with vector matches when the prompt is fuzzy",
+      "expected_cluster_id": "cluster-ranking-weights",
+      "expected_video_title": "Balancing text and vector ranking weights",
+      "provenance_notes": "Intent-first wording around hybrid ranking."
+    },
+    {
+      "id": "ranking-02",
+      "query": "video on why relevance shifts when you tune lexical versus semantic search weights",
+      "expected_cluster_id": "cluster-ranking-weights",
+      "expected_video_title": "Balancing text and vector ranking weights",
+      "provenance_notes": "Uses hybrid-search concepts, not the exact fixture title."
+    },
+    {
+      "id": "ranking-03",
+      "query": "which talk explained how to trust the similarity percentage on a search result",
+      "expected_cluster_id": "cluster-ranking-weights",
+      "expected_video_title": "Balancing text and vector ranking weights",
+      "provenance_notes": "Anchored on the explanation behavior surfaced in the UI."
+    },
+    {
+      "id": "ranking-04",
+      "query": "I remember a walkthrough of score breakdowns for semantic search tuning",
+      "expected_cluster_id": "cluster-ranking-weights",
+      "expected_video_title": "Balancing text and vector ranking weights",
+      "provenance_notes": "Query-first framing around diagnostics and tuning."
+    },
+    {
+      "id": "ranking-05",
+      "query": "something about the wrong result winning until the text and vector blend got fixed",
+      "expected_cluster_id": "cluster-ranking-weights",
+      "expected_video_title": "Balancing text and vector ranking weights",
+      "provenance_notes": "Natural-language description of the problem, not the title."
+    },
+    {
+      "id": "ranking-06",
+      "query": "which video compared lexical ranking to embedding ranking for undefined prompts",
+      "expected_cluster_id": "cluster-ranking-weights",
+      "expected_video_title": "Balancing text and vector ranking weights",
+      "provenance_notes": "Intent-first paraphrase of the technical problem."
+    },
+    {
+      "id": "ranking-07",
+      "query": "that search relevance clip about weight tuning and relative similarity trust",
+      "expected_cluster_id": "cluster-ranking-weights",
+      "expected_video_title": "Balancing text and vector ranking weights",
+      "provenance_notes": "Vague query composed before fixture metadata finalization."
+    },
+    {
+      "id": "transcript-01",
+      "query": "video where notes rescued the search because the transcript alone was too thin",
+      "expected_cluster_id": "cluster-transcript-notes",
+      "expected_video_title": "Using notes and transcripts to recover hidden context",
+      "provenance_notes": "Intent-first phrasing about note-assisted recall."
+    },
+    {
+      "id": "transcript-02",
+      "query": "I barely remember the idea, but there was a clip about recovering hidden context from notes",
+      "expected_cluster_id": "cluster-transcript-notes",
+      "expected_video_title": "Using notes and transcripts to recover hidden context",
+      "provenance_notes": "Captures the vague-search scenario directly."
+    },
+    {
+      "id": "transcript-03",
+      "query": "which talk showed that a half remembered thought could still find the right video because of notes",
+      "expected_cluster_id": "cluster-transcript-notes",
+      "expected_video_title": "Using notes and transcripts to recover hidden context",
+      "provenance_notes": "Written query-first to avoid title leakage."
+    },
+    {
+      "id": "transcript-04",
+      "query": "something about sparse transcripts and extra note context making recall work",
+      "expected_cluster_id": "cluster-transcript-notes",
+      "expected_video_title": "Using notes and transcripts to recover hidden context",
+      "provenance_notes": "Uses problem language rather than fixture wording."
+    },
+    {
+      "id": "transcript-05",
+      "query": "the note-assisted search example for old project ideas that never made it into the title",
+      "expected_cluster_id": "cluster-transcript-notes",
+      "expected_video_title": "Using notes and transcripts to recover hidden context",
+      "provenance_notes": "Query-first recall scenario focused on missing metadata."
+    },
+    {
+      "id": "transcript-06",
+      "query": "which video explained hidden context recovery when the spoken words were a weak match",
+      "expected_cluster_id": "cluster-transcript-notes",
+      "expected_video_title": "Using notes and transcripts to recover hidden context",
+      "provenance_notes": "Natural-language phrasing of the expected recovery mechanism."
+    },
+    {
+      "id": "transcript-07",
+      "query": "I want the clip about finding the right result from notes, transcript crumbs, and a vague memory",
+      "expected_cluster_id": "cluster-transcript-notes",
+      "expected_video_title": "Using notes and transcripts to recover hidden context",
+      "provenance_notes": "Authored before final fixture metadata; avoids direct title overlap."
     }
   ]
 }
