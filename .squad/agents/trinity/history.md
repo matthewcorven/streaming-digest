@@ -33,3 +33,25 @@ Frontend work should assume no SSR and should support desktop and mobile admin u
 - SSE four streams: ingestion run progress, pending-action inbox changes, operation status, digest availability. Fallback to 30s polling after 3 failed reconnects; re-fetch on reconnect to close event gaps.
 - Result card contract: collapsed = thumbnail + title/channel/date/duration/match-count/primary-snippet/type+score/action links (per PRD §2.5 + API_SPEC §8 video-cluster shape); expanded = submatches, related items w/ relative %, screenshot gallery, timestamps, score breakdown, warnings, Edit/Notes.
 - Search state lives in the URL (query + filters + weights + page) for bookmarking/refresh/history.
+
+## 2026-07-30 — Issue #30 Dashboard Digest
+
+✅ **Session 6acd1378-ea22-4bb4-ba22-fbb3ca848601 COMPLETED**
+
+**Branch:** matthewcorven-issue-30-dashboard-digest-inbox  
+**Commit:** 191d4e6  
+**Closed on GitHub:** Issue #30 — "Implemented in this commit."
+
+**Implementation Summary:**
+
+- Reordered dashboard to: daily digest → search launchpad → pending-action inbox
+- Added fixture-backed dashboard summary service/models for digest sections
+- Implemented live deferment tracking
+- High-signal recent-search matches with relative-similarity percentages, timestamp/repository/website links
+- Ordered pending-action rows with Retry/Approve/Test actions
+- Updated login routing preference order
+- Search honors ?q= launchpad routing
+- Search waits for completed corpus before enabling
+- Focused unit tests: digest ordering, links, actions, route resolution, session mode tracking
+
+**Status:** ✅ Complete — Issue closed on GitHub.

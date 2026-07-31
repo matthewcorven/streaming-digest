@@ -119,6 +119,7 @@ builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
+builder.Services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddSingleton<SearchUiService>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
@@ -126,6 +127,7 @@ builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
 builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
 builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
 builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
 builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>(), sp.GetService<ITranscriptIngestionService>(), sp.GetService<ISearchDocumentRegenerationService>()));
@@ -1394,11 +1396,11 @@ app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiServi
     searchUiService.UpdateSettings(request);
     return Results.Ok(searchUiService.GetSettings());
 });
-app.MapGet("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
+app.MapGet("/api/search-ui/recent", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
     IsAuthenticated(context.Request)
-        ? Results.Ok(searchUiService.GetRecentSearches(GetSearchUiStateKey(context)))
+        ? Results.Ok(await searchUiService.GetRecentSearchesAsync(GetSearchUiStateKey(context), cancellationToken))
         : Results.Unauthorized());
-app.MapDelete("/api/search-ui/recent", (HttpContext context, SearchUiService searchUiService) =>
+app.MapDelete("/api/search-ui/recent", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
     if (!IsAuthenticated(context.Request))
     {
@@ -1410,7 +1412,7 @@ app.MapDelete("/api/search-ui/recent", (HttpContext context, SearchUiService sea
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
-    searchUiService.ClearRecentSearches(GetSearchUiStateKey(context));
+    await searchUiService.ClearRecentSearchesAsync(GetSearchUiStateKey(context), cancellationToken);
     return Results.Ok();
 });
 app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
@@ -1431,8 +1433,29 @@ app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService
         return Results.BadRequest();
     }
 
-    var response = searchUiService.Search(request, GetSearchUiStateKey(context));
+    var response = await searchUiService.SearchAsync(request, GetSearchUiStateKey(context), cancellationToken);
     return Results.Ok(response);
+});
+app.MapPost("/api/search-ui/interactions", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
+{
+    if (!IsAuthenticated(context.Request))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!HasCsrfToken(context.Request))
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    var request = await JsonSerializer.DeserializeAsync<SearchInteractionRequest>(context.Request.Body, cancellationToken: cancellationToken);
+    if (request is null)
+    {
+        return Results.BadRequest();
+    }
+
+    await searchUiService.RecordInteractionAsync(request, cancellationToken);
+    return Results.Ok();
 });
 app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
 {

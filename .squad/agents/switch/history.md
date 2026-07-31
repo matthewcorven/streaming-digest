@@ -25,3 +25,16 @@ Switch is the primary tester and reviewer gate for the squad.
 ## 2026-07-28 — Independent re-review: PR #180 final verdict
 
 Completed final independent re-review of PR #180 ([Task 11.4] Store embeddings in pgvector), revision commit 4b34e19 (Morpheus). All prior blockers verified resolved: production path into transcript ingestion + embedding persistence; host wiring for whisper fallback/media resolver; API host wiring for IStreamingDigestDbContext mapping; regression coverage alignment with shipped DI wiring. **Verdict: ready for review.** Ralph is in stopped state; this is a one-off sign-off entry, not a resumed queue loop.
+
+## 2026-07-30 — Completed issue #31 search recall harness
+
+Completed implementation of issue #31 ([Task 12.7] Search recall harness) on branch `matthewcorven-search-recall-harness` (commit 8812621). Issue #31 closed on GitHub as resolved.
+
+Key implementation highlights:
+- 500-video recall harness with 21-query golden dataset
+- Deterministic distractor corpus builder
+- Verification evidence committed to docs/verification/12.7-search-recall-harness.md and .json
+- Unit regression and snapshot tests added
+- Authenticated API integration test asserting each expected cluster stays in top 3
+
+Session: 06b75168-0971-4ee2-9346-108721347684

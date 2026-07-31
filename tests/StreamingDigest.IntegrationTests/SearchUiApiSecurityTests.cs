@@ -32,6 +32,9 @@ public sealed class SearchUiApiSecurityTests : IClassFixture<WebApplicationFacto
 
         var searchPost = await client.PostAsJsonAsync("/api/search-ui/search", new { query = "demo" });
         Assert.Equal(HttpStatusCode.Unauthorized, searchPost.StatusCode);
+
+        var interactionPost = await client.PostAsJsonAsync("/api/search-ui/interactions", new { videoId = Guid.NewGuid(), resultType = "video", eventType = "result_opened" });
+        Assert.Equal(HttpStatusCode.Unauthorized, interactionPost.StatusCode);
     }
 
 }

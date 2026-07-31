@@ -43,3 +43,11 @@ PR #180 ([Task 11.4] Store embeddings in pgvector) merged into main. Issue #20 c
 ## 2026-07-28 — Issue #100 resolved via PR #181 merge
 
 PR #181 ([Task 12.x] Calibrate ADR-0012 high-signal absolute-cosine threshold against the real embedding provider) merged into main. Issue #100 closed as resolved. Ralph remains in stopped state. Status recorded by Scribe.
+
+## 2026-07-30 — Issue #22 completed by Neo: recent-search storage
+
+Neo completed issue #22 (recent-search storage) on branch `matthewcorven-issue-22-recent-search-storage` (commit 4f3e309). Issue #22 now closed on GitHub as resolved.
+
+**Implementation scope:** PostgreSQL-backed recent-search persistence, query embeddings for ranking, user interaction tracking on opened results, clear-history API wiring, interaction-count ranking boosts, migration 016_add_recent_search_history.sql, focused unit/integration coverage.
+
+Session: b06ad641-c9b7-4ab7-bfef-034c158d2688

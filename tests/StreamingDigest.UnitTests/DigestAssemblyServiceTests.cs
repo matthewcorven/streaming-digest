@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using StreamingDigest.Domain;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.MatrixNotifier;
@@ -90,6 +91,54 @@ public sealed class DigestAssemblyServiceTests
             Assert.Equal("sent", outboxMessage.Status);
             Assert.Equal(1, outboxMessage.AttemptCount);
             Assert.NotNull(outboxMessage.SentAt);
+        }
+        finally
+        {
+            await context.DisposeAsync();
+            DeleteDatabaseFile(databaseFilePath);
+        }
+    }
+
+    [Fact]
+    public async Task Assemble_and_persist_digest_keeps_only_fixture_matches_that_clear_the_configured_threshold()
+    {
+        var (context, databaseFilePath) = await CreateContextAsync();
+
+        try
+        {
+            var fixture = LoadHighSignalCalibrationFixture();
+            var service = new DigestAssemblyService(context);
+            var request = new DigestAssemblyRequest
+            {
+                IngestionRunId = Guid.NewGuid(),
+                HighSignalThresholdPercent = fixture.RecommendedThreshold.ThresholdPercent,
+                HighSignalMatches = fixture.Cases
+                    .SelectMany(testCase => new[]
+                    {
+                        new HighSignalMatch
+                        {
+                            Id = $"{testCase.Id}-intended",
+                            Label = testCase.IntendedCandidateTitle,
+                            SimilarityPercent = Math.Round(testCase.IntendedSimilarity * 100, 2)
+                        },
+                        new HighSignalMatch
+                        {
+                            Id = $"{testCase.Id}-best-other",
+                            Label = testCase.BestOther.Title,
+                            SimilarityPercent = Math.Round(testCase.BestOther.Similarity * 100, 2)
+                        }
+                    })
+                    .ToArray()
+            };
+
+            var digest = await service.AssembleAndPersistAsync(request);
+            var payload = DigestPayloadSerializer.Deserialize(digest.PayloadJson);
+
+            Assert.Equal(fixture.RecommendedThreshold.OwnPassCount, payload.HighSignalMatches.Count);
+            Assert.Equal(
+                fixture.Cases.Select(testCase => testCase.IntendedCandidateTitle).OrderBy(title => title, StringComparer.Ordinal).ToArray(),
+                payload.HighSignalMatches.Select(match => match.Label).OrderBy(label => label, StringComparer.Ordinal).ToArray());
+            Assert.All(payload.HighSignalMatches, match => Assert.EndsWith("-intended", match.Id, StringComparison.Ordinal));
         }
         finally
         {
@@ -209,6 +258,24 @@ public sealed class DigestAssemblyServiceTests
             NotificationTarget = "#matrix"
         };
 
+    private static HighSignalCalibrationFixture LoadHighSignalCalibrationFixture()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "docs", "verification", "12.x-high-signal-threshold-calibration.json")))
+        {
+            directory = directory.Parent;
+        }
+
+        if (directory is null)
+        {
+            throw new InvalidOperationException("Could not locate the high-signal threshold calibration fixture.");
+        }
+
+        var path = Path.Combine(directory.FullName, "docs", "verification", "12.x-high-signal-threshold-calibration.json");
+        var json = File.ReadAllText(path);
+        return JsonSerializer.Deserialize<HighSignalCalibrationFixture>(json) ?? throw new InvalidOperationException("Could not deserialize the high-signal threshold calibration fixture.");
+    }
+
     private sealed class FakeMatrixNotificationService(int successOnAttempt, string? providerMessageId = null) : IMatrixNotificationService
     {
         private int _attempts;
@@ -228,5 +295,37 @@ public sealed class DigestAssemblyServiceTests
 
         public Task<MatrixSendResult> SendTestNotificationAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new MatrixSendResult(true, "Matrix message sent.", "{\"event_id\":\"$test\"}", "$test"));
+    }
+
+    private sealed class HighSignalCalibrationFixture
+    {
+        public List<HighSignalCalibrationCase> Cases { get; set; } = new();
+
+        public HighSignalRecommendedThreshold RecommendedThreshold { get; set; } = new();
+    }
+
+    private sealed class HighSignalCalibrationCase
+    {
+        public string Id { get; set; } = string.Empty;
+
+        public string IntendedCandidateTitle { get; set; } = string.Empty;
+
+        public double IntendedSimilarity { get; set; }
+
+        public HighSignalCalibrationBestOther BestOther { get; set; } = new();
+    }
+
+    private sealed class HighSignalCalibrationBestOther
+    {
+        public string Title { get; set; } = string.Empty;
+
+        public double Similarity { get; set; }
+    }
+
+    private sealed class HighSignalRecommendedThreshold
+    {
+        public double ThresholdPercent { get; set; }
+
+        public int OwnPassCount { get; set; }
     }
 }

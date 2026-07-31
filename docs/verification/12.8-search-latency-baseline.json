@@ -1,0 +1,72 @@
+{
+  "task": "12.8-search-latency",
+  "generated_at_utc": "2026-07-31T00:17:46.905829+00:00",
+  "ranking_formula_version": "hybrid-max-top3-coverage-v1",
+  "candidate_scoring_version": "seeded-heuristic-blend-v1",
+  "document_construction_version": "effective-value-title-body-v1",
+  "progress_indicator_delay_ms": 1000,
+  "environment": {
+    "os": "macOS 26.5.2",
+    "architecture": "Arm64",
+    "dotnet_sdk": "10.0.10",
+    "processor_count": 16
+  },
+  "corpora": [
+    {
+      "VideoCount": 500,
+      "QueryCount": 240,
+      "MeasurementCount": 720,
+      "TargetP50Ms": 2000,
+      "TargetP95Ms": 5000,
+      "P50Ms": 3.15095,
+      "P95Ms": 7.78149,
+      "AverageMs": 3.580495833333335,
+      "MaxMs": 11.4315,
+      "EntityCounts": {
+        "Segments": 500,
+        "TranscriptClusters": 500,
+        "Links": 584,
+        "RepositoryLinks": 84,
+        "NoteClusters": 167,
+        "SearchDocuments": 1253,
+        "Embeddings": 1253
+      },
+      "SampleQueries": [
+        "half remembered walkthrough about balancing text vector",
+        "searching for the clip that covered ranking, workshop, and #002",
+        "project idea query around trust and workshop with #005",
+        "which video explained blend plus workshop near #008",
+        "find the segment about score workshop #011"
+      ],
+      "MeetsLatencyTarget": true
+    },
+    {
+      "VideoCount": 2000,
+      "QueryCount": 240,
+      "MeasurementCount": 720,
+      "TargetP50Ms": 3000,
+      "TargetP95Ms": 10000,
+      "P50Ms": 24.7658,
+      "P95Ms": 27.991274999999998,
+      "AverageMs": 24.98210541666664,
+      "MaxMs": 30.2176,
+      "EntityCounts": {
+        "Segments": 2000,
+        "TranscriptClusters": 2000,
+        "Links": 2334,
+        "RepositoryLinks": 334,
+        "NoteClusters": 667,
+        "SearchDocuments": 5003,
+        "Embeddings": 5003
+      },
+      "SampleQueries": [
+        "half remembered walkthrough about balancing text vector",
+        "searching for the clip that covered ranking, workshop, and #002",
+        "project idea query around trust and workshop with #005",
+        "which video explained blend plus workshop near #008",
+        "find the segment about score workshop #011"
+      ],
+      "MeetsLatencyTarget": true
+    }
+  ]
+}

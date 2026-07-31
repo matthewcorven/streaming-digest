@@ -131,6 +131,7 @@ builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGe
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
 builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
 builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
 builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
 {

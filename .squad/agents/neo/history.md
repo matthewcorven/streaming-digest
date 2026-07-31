@@ -55,3 +55,18 @@ Ran the 11.3a throwaway prototype end-to-end against the **real Aspire-managed P
 **Issue #25 (pgvector-backed embedding_vector column):** Implemented pgvector column on embedding_vector, integrated vector similarity search into search_videos query path. Added regression test validating vector similarity scoring. Branch: local; tests passing.
 
 **Blocker:** GitHub issue state has not advanced—both issues still reported as available by helper. Downstream issues (#20–#23, #26–#28, #30–#32, #100) remain blocked by dependency metadata. Awaiting upstream sync to unblock queue.
+
+## 2026-07-30 — Issue #22 recent-search storage completed (Neo)
+
+Completed implementation of issue #22 on branch `matthewcorven-issue-22-recent-search-storage` (commit 4f3e309). Issue #22 closed on GitHub as resolved.
+
+**Implementation Summary:**
+- PostgreSQL-backed recent-search storage with full persistence layer
+- Query embeddings computed and stored for ranking
+- User interaction events recorded for opened search results
+- Search API and UI wired to clear history and record opens
+- Interaction counts integrated into ranking boosts
+- Migration 016_add_recent_search_history.sql added
+- Focused unit and integration coverage for persistence, clear-all behavior, and interaction-driven ranking
+
+Session: b06ad641-c9b7-4ab7-bfef-034c158d2688

@@ -124,6 +124,48 @@ public sealed class HybridRankingServiceTests
     }
 
     [Fact]
+    public void Rank_uses_the_weighted_cluster_formula_with_top_three_coverage_and_boosts()
+    {
+        var service = new HybridRankingService();
+        var results = service.Rank(
+            new[]
+            {
+                new HybridClusterCandidate(
+                    Id: "cluster-a",
+                    Title: "Cluster A",
+                    Documents: new[]
+                    {
+                        new HybridDocumentCandidate("a-1", "title", 0.8, 0.8, new[] { "title" }, "Title hit"),
+                        new HybridDocumentCandidate("a-2", "transcript", 0.5, 0.5, new[] { "transcript" }, "Transcript hit"),
+                        new HybridDocumentCandidate("a-3", "note", 0.3, 0.3, new[] { "note" }, "Note hit"),
+                        new HybridDocumentCandidate("a-4", "website", 0.1, 0.1, new[] { "website" }, "Website hit")
+                    },
+                    RecentOpenCount: 3,
+                    HasMatchingNote: true),
+                new HybridClusterCandidate(
+                    Id: "cluster-b",
+                    Title: "Cluster B",
+                    Documents: new[]
+                    {
+                        new HybridDocumentCandidate("b-1", "segment", 1.0, 1.0, new[] { "transcript" }, "Top signal"),
+                        new HybridDocumentCandidate("b-2", "segment", 0.0, 0.0, new[] { "transcript" }, "Low signal")
+                    },
+                    RecentOpenCount: 0,
+                    HasMatchingNote: false)
+            },
+            new[] { 0.8, 1.0 });
+
+        var cluster = Assert.Single(results, result => result.ClusterId == "cluster-a");
+        Assert.Equal(0.8633, cluster.Score, precision: 4);
+        Assert.Equal(0.7533, cluster.ScoreComponents.BaseScore, precision: 4);
+        Assert.Equal(0.8, cluster.ScoreComponents.MaxDocumentScore, precision: 4);
+        Assert.Equal(0.5333, cluster.ScoreComponents.AverageTopThreeDocumentScore, precision: 4);
+        Assert.Equal(1.0, cluster.ScoreComponents.CoverageScore, precision: 4);
+        Assert.Equal(0.08, cluster.ScoreComponents.NoteBoost, precision: 4);
+        Assert.Equal(0.03, cluster.ScoreComponents.InteractionBoost, precision: 4);
+    }
+
+    [Fact]
     public void Rank_returns_empty_results_for_empty_input()
     {
         var service = new HybridRankingService();

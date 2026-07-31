@@ -1,7 +1,10 @@
 @page "/search"
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
 @inject SearchUiSessionService SearchUiSessionService
 @using System.Net.Http.Json
+@using System.Text.Json
+@using StreamingDigest.Web.Services
 
 <PageTitle>Search</PageTitle>
 
@@ -18,6 +21,31 @@
         </div>
     </section>
 
+    @if (_showWaitingState)
+    {
+        <section class="state-card waiting-state">
+            <div>
+                <p class="eyebrow">Pre-corpus waiting state</p>
+                <h2>@_waitingHeadline</h2>
+                <p>@_waitingMessage</p>
+                @if (!string.IsNullOrWhiteSpace(_backfillGuidance))
+                {
+                    <p class="page-description">@_backfillGuidance</p>
+                }
+                @if (!string.IsNullOrWhiteSpace(_errorMessage))
+                {
+                    <div class="status-message status-warning">@_errorMessage</div>
+                }
+            </div>
+            <div class="hero-actions">
+                <button class="primary-button" type="button" @onclick="TriggerRunIngestionAsync" disabled="@_isWaitingActionBusy">@(_isWaitingActionBusy ? "Working…" : "Run ingestion now")</button>
+                <button class="secondary-button" type="button" @onclick="TriggerBackfillAsync" disabled="@_isWaitingActionBusy">Backfill guidance</button>
+                <a class="secondary-button" href="/channels">Add a channel</a>
+            </div>
+        </section>
+    }
+    else
+    {
     <section class="search-layout">
         <div class="search-main">
            <div class="search-box">
@@ -36,6 +64,17 @@
                    <div class="status-message status-warning">@_errorMessage</div>
                }
            </div>
+
+           @if (_searchProgress.IsVisible)
+           {
+               <div class="state-card state-card--progress" role="status" aria-live="polite">
+                   <div class="progress-spinner" aria-hidden="true"></div>
+                   <div>
+                       <strong>Still searching…</strong>
+                       <p>Large searches can take a moment. Results will appear as soon as the response is ready.</p>
+                   </div>
+               </div>
+           }
 
            @if (_isLoading)
            {
@@ -92,9 +131,13 @@
 
                        <div class="result-card__footer">
                            <span class="chip">@(result.MatchesInsideCount) matches inside</span>
-                           @if (!string.IsNullOrWhiteSpace(result.PrimaryMatchTimestamp))
+                           @if (!string.IsNullOrWhiteSpace(result.PrimaryMatchTimestamp) && !string.IsNullOrWhiteSpace(result.PrimaryMatchUrl))
                            {
-                               <a class="link-pill" href="#">Best timestamp: @result.PrimaryMatchTimestamp</a>
+                               <button class="link-pill link-pill--button"
+                                       type="button"
+                                       @onclick='() => OpenTrackedResultAsync(result, result.PrimaryMatchUrl!, result.ResultType, "timestamp_opened", result.PrimaryMatchTimestamp)'>
+                                   Best timestamp: @result.PrimaryMatchTimestamp
+                               </button>
                            }
                            @if (result.HasRepo || result.WebsiteLinks.Count > 0)
                            {
@@ -116,7 +159,11 @@
                                                        <strong>@submatch.Title</strong>
                                                        @if (!string.IsNullOrWhiteSpace(submatch.TimestampLabel))
                                                        {
-                                                           <a class="link-pill" href="@submatch.Url">@submatch.TimestampLabel</a>
+                                                           <button class="link-pill link-pill--button"
+                                                                   type="button"
+                                                                   @onclick='() => OpenTrackedResultAsync(result, submatch.Url, submatch.Type, ResolveEventType(submatch.Type, hasTimestamp: true), submatch.Title)'>
+                                                               @submatch.TimestampLabel
+                                                           </button>
                                                        }
                                                    </div>
                                                    <p>@submatch.Detail</p>
@@ -138,12 +185,17 @@
                                                    <p>@item.Detail</p>
                                                    @if (!string.IsNullOrWhiteSpace(item.Url))
                                                    {
-                                                       <a class="link-pill" href="@item.Url" target="_blank" rel="noreferrer">Open</a>
+                                                       <button class="link-pill link-pill--button"
+                                                               type="button"
+                                                               @onclick='() => OpenTrackedResultAsync(result, item.Url, item.Type, ResolveEventType(item.Type), item.Title)'>
+                                                           Open
+                                                       </button>
                                                    }
                                                </div>
                                            }
                                        </div>
                                    </section>
+                                   }
                                </div>
 
                                <div class="result-card__expanded-grid">
@@ -159,7 +211,11 @@
                                                <strong>Repositories</strong>
                                                @foreach (var link in result.RepositoryLinks)
                                                {
-                                                   <a class="link-pill" href="@link" target="_blank" rel="noreferrer">@link</a>
+                                                   <button class="link-pill link-pill--button"
+                                                           type="button"
+                                                           @onclick='() => OpenTrackedResultAsync(result, link, "repository", "repository_opened", link)'>
+                                                       @link
+                                                   </button>
                                                }
                                            </div>
                                        }
@@ -169,7 +225,11 @@
                                                <strong>Websites</strong>
                                                @foreach (var link in result.WebsiteLinks)
                                                {
-                                                   <a class="link-pill" href="@link" target="_blank" rel="noreferrer">@link</a>
+                                                   <button class="link-pill link-pill--button"
+                                                           type="button"
+                                                           @onclick='() => OpenTrackedResultAsync(result, link, "website", "website_opened", link)'>
+                                                       @link
+                                                   </button>
                                                }
                                            </div>
                                        }
@@ -183,6 +243,7 @@
                                            <li><strong>Warnings</strong><p>@string.Join(" · ", result.ProcessingWarnings)</p></li>
                                        </ul>
                                    </section>
+                                   }
                                </div>
                            </div>
                        }
@@ -296,12 +357,14 @@
            </div>
         </aside>
     </section>
+    }
 </div>
 
 <style>
     .page-shell { display: grid; gap: 1.25rem; }
     .hero-card, .search-box, .panel-card, .result-card, .state-card, .results-summary { background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 1rem; padding: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
     .hero-card { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+    .waiting-state { display: grid; gap: 1rem; }
     .search-layout { display: grid; gap: 1rem; grid-template-columns: minmax(0, 2fr) minmax(280px, 360px); align-items: start; }
     .search-main { display: grid; gap: 1rem; }
     .side-panel { display: grid; gap: 1rem; }
@@ -332,8 +395,12 @@
     .status-message { margin-top: 0.7rem; padding: 0.7rem 0.95rem; border-radius: 0.75rem; }
     .status-warning { background: rgba(255, 193, 7, 0.14); color: var(--warning-text); }
     .link-pill { color: var(--accent-primary); text-decoration: none; }
+    .link-pill--button { border: none; background: transparent; cursor: pointer; padding: 0; font: inherit; }
     .ghost-button { border: none; background: transparent; color: var(--accent-primary); cursor: pointer; padding: 0; }
     .chip-stack { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .state-card--progress { display: flex; align-items: center; gap: 0.85rem; }
+    .progress-spinner { width: 1.2rem; height: 1.2rem; border: 3px solid rgba(26, 115, 232, 0.2); border-top-color: var(--accent-primary); border-radius: 50%; animation: search-spin 0.8s linear infinite; }
+    @@keyframes search-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @@media (max-width: 1000px) {
         .search-layout { grid-template-columns: 1fr; }
         .side-panel { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
@@ -341,21 +408,32 @@
 </style>
 
 @code {
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Query { get; set; }
+
     private readonly HashSet<string> _expandedClusterIds = new(StringComparer.OrdinalIgnoreCase);
     private string _query = "project idea search";
     private string _errorMessage = string.Empty;
     private bool _isSearching;
     private bool _isLoading = true;
+    private bool _showWaitingState;
+    private bool _isWaitingActionBusy;
+    private string _waitingHeadline = "Nothing to search yet";
+    private string _waitingMessage = "Run ingestion now to build the first searchable corpus.";
+    private string _backfillGuidance = string.Empty;
     private SearchResponse? _searchResponse;
     private readonly List<string> _recentSearches = new();
     private readonly SearchUiSettings _settings = new();
     private readonly SearchFilters _filters = new();
+    private Guid? _activeRecentSearchId;
+    private readonly DelayedBusyIndicator _searchProgress = new(TimeSpan.FromSeconds(1));
     private string _hasTranscriptFilter = string.Empty;
     private string _hasRepoFilter = string.Empty;
     private string _hasNotesFilter = string.Empty;
 
     protected override async Task OnInitializedAsync()
     {
+        SearchUiSessionService.RememberSelectedMode("/search");
         await LoadInitialStateAsync();
     }
 
@@ -363,42 +441,137 @@
     {
         try
         {
-           await EnsureApiSessionAsync();
+            await EnsureApiSessionAsync();
+            if (!await EnsureSearchableCorpusAsync())
+            {
+                return;
+            }
 
-           var settings = await SearchUiSessionService.GetAuthenticatedJsonAsync<SearchUiSettings>("/api/search-ui/settings");
-           if (settings is not null)
-           {
-               _settings.TextWeight = settings.TextWeight;
-               _settings.VectorWeight = settings.VectorWeight;
-           }
+            if (!string.IsNullOrWhiteSpace(Query))
+            {
+                _query = Query.Trim();
+            }
 
-           var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
-           if (recentSearches is not null)
-           {
-               _recentSearches.Clear();
-               _recentSearches.AddRange(recentSearches);
-           }
+            var settings = await SearchUiSessionService.GetAuthenticatedJsonAsync<SearchUiSettings>("/api/search-ui/settings");
+            if (settings is not null)
+            {
+                _settings.TextWeight = settings.TextWeight;
+                _settings.VectorWeight = settings.VectorWeight;
+            }
 
-           await RunSearchAsync();
+            var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
+            if (recentSearches is not null)
+            {
+                _recentSearches.Clear();
+                _recentSearches.AddRange(recentSearches);
+            }
+
+            await RunSearchAsync();
         }
         catch (UnauthorizedAccessException)
         {
-           NavigationManager.NavigateTo("/login", true);
+            NavigationManager.NavigateTo("/login", true);
         }
         catch (Exception ex)
         {
-           _errorMessage = ex.Message;
+            _errorMessage = ex.Message;
         }
         finally
         {
-           _isLoading = false;
+            _isLoading = false;
         }
     }
+
+    private async Task<bool> EnsureSearchableCorpusAsync()
+    {
+        var runs = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<IngestionRunFixtureSummary>>("/api/internal/ingestion-runs?limit=5")
+            ?? [];
+
+        if (runs.Count == 0)
+        {
+            SetWaitingState(
+                "Nothing to search yet",
+                "Until the first ingestion run completes with at least one ingested video, search stays in a pre-corpus waiting state.",
+                string.Empty);
+            return false;
+        }
+
+        IngestionRunDetailViewModel? latestCompletedRun = null;
+        foreach (var run in runs)
+        {
+            if (!Guid.TryParse(run.Id, out var runId))
+            {
+                continue;
+            }
+
+            var detail = await SearchUiSessionService.GetAuthenticatedJsonAsync<IngestionRunDetailViewModel>($"/api/internal/ingestion-runs/{runId}");
+            if (detail is null)
+            {
+                continue;
+            }
+
+            latestCompletedRun ??= detail;
+            if (detail.FrozenOutcome.ProcessedVideos > 0)
+            {
+                _showWaitingState = false;
+                _backfillGuidance = string.Empty;
+                return true;
+            }
+        }
+
+        var guidance = latestCompletedRun is not null && latestCompletedRun.FrozenOutcome.ProcessedVideos == 0
+            ? "The latest completed run finished with zero ingested videos. Widen the backfill window or add another channel before returning to search."
+            : string.Empty;
+
+        SetWaitingState(
+            "Corpus still warming up",
+            "Search opens as soon as a completed run ingests at least one video.",
+            guidance);
+
+        return false;
+    }
+
+    private void SetWaitingState(string headline, string message, string backfillGuidance)
+    {
+        _showWaitingState = true;
+        _waitingHeadline = headline;
+        _waitingMessage = message;
+        _backfillGuidance = backfillGuidance;
+    }
+
+    private async Task TriggerSearchWaitingActionAsync(string endpoint, string actionLabel)
+    {
+        _isWaitingActionBusy = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            using var request = await CreateMutatingRequestAsync(HttpMethod.Post, endpoint);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
+            response.EnsureSuccessStatusCode();
+            _waitingMessage = $"{actionLabel} requested. Refresh after the run completes to unlock search.";
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isWaitingActionBusy = false;
+        }
+    }
+
+    private Task TriggerRunIngestionAsync()
+        => TriggerSearchWaitingActionAsync("/api/admin/operations/ingestion/run", "Run ingestion now");
+
+    private Task TriggerBackfillAsync()
+        => TriggerSearchWaitingActionAsync("/api/admin/operations/ingestion/channel-backfill", "Run channel backfill");
 
     private async Task RunSearchAsync()
     {
         _isSearching = true;
         _errorMessage = string.Empty;
+        _searchProgress.Start(() => InvokeAsync(StateHasChanged));
         try
         {
            await EnsureApiSessionAsync();
@@ -412,11 +585,11 @@
            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
            response.EnsureSuccessStatusCode();
            _searchResponse = await response.Content.ReadFromJsonAsync<SearchResponse>();
-           var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
-           if (recentSearches is not null)
+           if (_searchResponse is not null)
            {
+               _activeRecentSearchId = _searchResponse.RecentSearchId;
                _recentSearches.Clear();
-               _recentSearches.AddRange(recentSearches);
+               _recentSearches.AddRange(_searchResponse.RecentSearches);
            }
         }
         catch (UnauthorizedAccessException)
@@ -429,6 +602,7 @@
         }
         finally
         {
+           await _searchProgress.StopAsync(() => InvokeAsync(StateHasChanged));
            _isSearching = false;
         }
     }
@@ -465,6 +639,7 @@
            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
            response.EnsureSuccessStatusCode();
            _recentSearches.Clear();
+           _activeRecentSearchId = null;
         }
         catch (UnauthorizedAccessException)
         {
@@ -488,6 +663,46 @@
         _ = InvokeAsync(RunSearchAsync);
     }
 
+    private async Task OpenTrackedResultAsync(
+        SearchResultClusterResponse result,
+        string? url,
+        string resultType,
+        string eventType,
+        string? label)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        try
+        {
+            using var request = await CreateMutatingRequestAsync(HttpMethod.Post, "/api/search-ui/interactions", new SearchInteractionRequest
+            {
+                RecentSearchId = _activeRecentSearchId,
+                VideoId = result.VideoId,
+                ResultType = resultType,
+                EventType = eventType,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    label,
+                    url
+                })
+            });
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
+            response.EnsureSuccessStatusCode();
+            await NavigateToUrlAsync(url);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            NavigationManager.NavigateTo("/login", true);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+    }
+
     private void HandleInputKeyDown(KeyboardEventArgs args)
     {
         if (args.Key == "Enter")
@@ -498,6 +713,17 @@
 
     private Task EnsureApiSessionAsync()
         => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
+
+    private async Task NavigateToUrlAsync(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out _))
+        {
+            await JSRuntime.InvokeVoidAsync("open", url, "_blank", "noopener,noreferrer");
+            return;
+        }
+
+        NavigationManager.NavigateTo(url, forceLoad: true);
+    }
 
     private async Task<HttpRequestMessage> CreateMutatingRequestAsync(HttpMethod method, string requestUri, object? payload = null)
     {
@@ -546,6 +772,22 @@
         return bool.Parse(value);
     }
 
+    private static string ResolveEventType(string resultType, bool hasTimestamp = false)
+    {
+        if (hasTimestamp)
+        {
+            return "timestamp_opened";
+        }
+
+        return resultType?.Trim().ToLowerInvariant() switch
+        {
+            "repository" => "repository_opened",
+            "website" => "website_opened",
+            "note" => "note_opened",
+            _ => "result_opened"
+        };
+    }
+
     private sealed class SearchRequest
     {
         public string Query { get; set; } = string.Empty;
@@ -573,13 +815,16 @@
     private sealed class SearchResponse
     {
         public string Query { get; set; } = string.Empty;
+        public Guid RecentSearchId { get; set; }
         public List<SearchResultClusterResponse> Results { get; set; } = new();
+        public List<string> RecentSearches { get; set; } = new();
         public string Summary { get; set; } = string.Empty;
     }
 
     private sealed class SearchResultClusterResponse
     {
         public string ClusterId { get; set; } = string.Empty;
+        public Guid VideoId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Channel { get; set; } = string.Empty;
         public DateTimeOffset PublishDate { get; set; }
@@ -593,6 +838,7 @@
         public int MatchesInsideCount { get; set; }
         public string? PrimaryMatch { get; set; }
         public string? PrimaryMatchTimestamp { get; set; }
+        public string? PrimaryMatchUrl { get; set; }
         public double Score { get; set; }
         public List<string> ProcessingWarnings { get; set; } = new();
         public List<string> RepositoryLinks { get; set; } = new();
@@ -627,5 +873,14 @@
         public double MaxDocumentScore { get; set; }
         public double AverageTopThreeDocumentScore { get; set; }
         public double CoverageScore { get; set; }
+    }
+
+    private sealed class SearchInteractionRequest
+    {
+        public Guid? RecentSearchId { get; set; }
+        public Guid VideoId { get; set; }
+        public string ResultType { get; set; } = string.Empty;
+        public string EventType { get; set; } = string.Empty;
+        public string? MetadataJson { get; set; }
     }
 }

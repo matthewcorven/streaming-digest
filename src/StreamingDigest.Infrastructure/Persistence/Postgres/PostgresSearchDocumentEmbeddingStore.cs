@@ -38,6 +38,7 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         command.Parameters.AddWithValue("parent_video_id", videoId);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await MarkClusterEmbeddingsStaleAsync(connection, transaction, [videoId], cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -45,6 +46,13 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        var affectedVideoIds = await LoadAffectedVideoIdsForSourceAsync(
+            connection,
+            transaction,
+            sourceEntityType,
+            sourceEntityId,
+            cancellationToken);
 
         await using var command = new NpgsqlCommand(
             "DELETE FROM public.search_documents WHERE source_entity_type = @source_entity_type AND source_entity_id = @source_entity_id;",
@@ -54,6 +62,7 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         command.Parameters.AddWithValue("source_entity_id", sourceEntityId);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await MarkClusterEmbeddingsStaleAsync(connection, transaction, affectedVideoIds, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -72,6 +81,7 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
 
         var embeddingCache = new Dictionary<string, CachedEmbedding>(StringComparer.Ordinal);
         var storedEmbeddings = new List<StoredSearchDocumentEmbedding>(candidates.Count);
+        var affectedVideoIds = new HashSet<Guid>();
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -80,11 +90,20 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         {
             if (!TryBuildEmbeddingInput(document, out var sourceText))
             {
-                await DeleteSearchDocumentByIdentityAsync(connection, transaction, document, cancellationToken);
+                var deletedParentVideoId = await DeleteSearchDocumentByIdentityAsync(connection, transaction, document, cancellationToken);
+                if (deletedParentVideoId is Guid deletedVideoId)
+                {
+                    affectedVideoIds.Add(deletedVideoId);
+                }
+
                 continue;
             }
 
-            var searchDocumentId = await UpsertSearchDocumentAsync(connection, transaction, document, cancellationToken);
+            var upsertedDocument = await UpsertSearchDocumentAsync(connection, transaction, document, cancellationToken);
+            if (upsertedDocument.ShouldMarkClusterStale && upsertedDocument.ParentVideoId is Guid parentVideoId)
+            {
+                affectedVideoIds.Add(parentVideoId);
+            }
 
             if (!embeddingCache.TryGetValue(document.ContentHash, out var cachedEmbedding))
             {
@@ -99,14 +118,14 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
             var embeddingId = await UpsertEmbeddingAsync(
                 connection,
                 transaction,
-                searchDocumentId,
+                upsertedDocument.Id,
                 document.ContentHash,
                 cachedEmbedding,
                 generatedByOperationId,
                 cancellationToken);
 
             storedEmbeddings.Add(new StoredSearchDocumentEmbedding(
-                searchDocumentId,
+                upsertedDocument.Id,
                 embeddingId,
                 cachedEmbedding.Result.Provider,
                 cachedEmbedding.Result.Model,
@@ -115,16 +134,23 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
                 cachedEmbedding.SourceTextHash));
         }
 
+        await MarkClusterEmbeddingsStaleAsync(connection, transaction, affectedVideoIds, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return storedEmbeddings;
     }
 
-    private static async Task DeleteSearchDocumentByIdentityAsync(
+    private static async Task<Guid?> DeleteSearchDocumentByIdentityAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         GeneratedSearchDocument document,
         CancellationToken cancellationToken)
     {
+        var existingDocument = await GetExistingSearchDocumentAsync(connection, transaction, document, cancellationToken);
+        if (existingDocument is null)
+        {
+            return null;
+        }
+
         await using var command = new NpgsqlCommand(
             """
             DELETE FROM public.search_documents
@@ -144,14 +170,17 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         command.Parameters.AddWithValue("chunk_index", (object?)document.ChunkIndex ?? DBNull.Value);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+        return existingDocument.ParentVideoId;
     }
 
-    private static async Task<Guid> UpsertSearchDocumentAsync(
+    private static async Task<UpsertedSearchDocument> UpsertSearchDocumentAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         GeneratedSearchDocument document,
         CancellationToken cancellationToken)
     {
+        var existingDocument = await GetExistingSearchDocumentAsync(connection, transaction, document, cancellationToken);
+
         await using var command = new NpgsqlCommand(
             """
             INSERT INTO public.search_documents (
@@ -228,9 +257,18 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         command.Parameters.AddWithValue("content_hash", document.ContentHash);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result is Guid id
-            ? id
-            : throw new InvalidOperationException("PostgreSQL did not return a search document id.");
+        if (result is not Guid id)
+        {
+            throw new InvalidOperationException("PostgreSQL did not return a search document id.");
+        }
+
+        var shouldMarkClusterStale =
+            document.ParentVideoId is not null
+            && (existingDocument is null
+                || existingDocument.ContentHash != document.ContentHash
+                || existingDocument.ParentVideoId != document.ParentVideoId);
+
+        return new UpsertedSearchDocument(id, document.ParentVideoId, shouldMarkClusterStale);
     }
 
     private static async Task<Guid> UpsertEmbeddingAsync(
@@ -333,7 +371,100 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
+    private static async Task<ExistingSearchDocument?> GetExistingSearchDocumentAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        GeneratedSearchDocument document,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT id, parent_video_id, content_hash
+            FROM public.search_documents
+            WHERE parent_video_id IS NOT DISTINCT FROM @parent_video_id
+              AND source_entity_type = @source_entity_type
+              AND source_entity_id = @source_entity_id
+              AND source_field_name IS NOT DISTINCT FROM @source_field_name
+              AND chunk_index IS NOT DISTINCT FROM @chunk_index
+            LIMIT 1;
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("parent_video_id", (object?)document.ParentVideoId ?? DBNull.Value);
+        command.Parameters.AddWithValue("source_entity_type", document.SourceEntityType);
+        command.Parameters.AddWithValue("source_entity_id", document.SourceEntityId);
+        command.Parameters.AddWithValue("source_field_name", (object?)document.SourceFieldName ?? DBNull.Value);
+        command.Parameters.AddWithValue("chunk_index", (object?)document.ChunkIndex ?? DBNull.Value);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new ExistingSearchDocument(
+            reader.GetGuid(0),
+            reader.IsDBNull(1) ? null : reader.GetGuid(1),
+            reader.GetString(2));
+    }
+
+    private static async Task<HashSet<Guid>> LoadAffectedVideoIdsForSourceAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string sourceEntityType,
+        Guid sourceEntityId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT DISTINCT parent_video_id
+            FROM public.search_documents
+            WHERE source_entity_type = @source_entity_type
+              AND source_entity_id = @source_entity_id
+              AND parent_video_id IS NOT NULL;
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("source_entity_type", sourceEntityType);
+        command.Parameters.AddWithValue("source_entity_id", sourceEntityId);
+
+        var videoIds = new HashSet<Guid>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            videoIds.Add(reader.GetGuid(0));
+        }
+
+        return videoIds;
+    }
+
+    private static async Task MarkClusterEmbeddingsStaleAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IReadOnlyCollection<Guid> videoIds,
+        CancellationToken cancellationToken)
+    {
+        if (videoIds.Count == 0)
+        {
+            return;
+        }
+
+        await using var command = new NpgsqlCommand(
+            """
+            UPDATE public.video_cluster_embeddings
+            SET is_stale = TRUE,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE video_id = ANY(@video_ids);
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("video_ids", videoIds.ToArray());
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public ValueTask DisposeAsync() => _dataSource.DisposeAsync();
 
     private sealed record CachedEmbedding(EmbeddingGenerationResult Result, string SourceTextHash, Vector Vector);
+    private sealed record ExistingSearchDocument(Guid Id, Guid? ParentVideoId, string ContentHash);
+    private sealed record UpsertedSearchDocument(Guid Id, Guid? ParentVideoId, bool ShouldMarkClusterStale);
 }

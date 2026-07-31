@@ -2,6 +2,7 @@ namespace StreamingDigest.Application;
 
 public sealed class HybridRankingService
 {
+    public const string FormulaVersion = "hybrid-max-top3-coverage-v1";
     private readonly HybridRankingOptions _options;
 
     public HybridRankingService(HybridRankingOptions? options = null)
