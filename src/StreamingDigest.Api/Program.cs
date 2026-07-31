@@ -1287,6 +1287,7 @@ app.MapGet("/api/observability", () => Results.Ok(new
     links = ObservabilityLinkCatalog.Create(
         observabilityRuntime.HangfireUrl,
         observabilityRuntime.GrafanaUrl,
+        observabilityRuntime.PgAdminUrl,
         observabilityRuntime.PrometheusUrl,
         observabilityRuntime.LokiUrl,
         observabilityRuntime.TempoUrl),
@@ -1294,6 +1295,7 @@ app.MapGet("/api/observability", () => Results.Ok(new
     {
         hangfire = observabilityRuntime.HangfireUrl,
         grafana = observabilityRuntime.GrafanaUrl,
+        pgadmin = observabilityRuntime.PgAdminUrl,
         prometheus = observabilityRuntime.PrometheusUrl,
         loki = observabilityRuntime.LokiUrl,
         tempo = observabilityRuntime.TempoUrl,
@@ -1323,6 +1325,8 @@ app.MapPost("/api/observability/toggle/{enabled:bool}", async (bool enabled, Htt
 
 app.MapMethods("/grafana/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
     await ProxyObservabilityRequestAsync(context, httpClientFactory, observabilityRuntime, "grafana", observabilityRuntime.GrafanaUrl, cancellationToken));
+app.MapMethods("/pgadmin/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
+    await ProxyObservabilityRequestAsync(context, httpClientFactory, observabilityRuntime, "pgadmin", observabilityRuntime.PgAdminUrl, cancellationToken));
 app.MapMethods("/prometheus/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
     await ProxyObservabilityRequestAsync(context, httpClientFactory, observabilityRuntime, "prometheus", observabilityRuntime.PrometheusUrl, cancellationToken));
 app.MapMethods("/loki/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
@@ -1773,6 +1777,7 @@ static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogg
     var resolvedEnabled = ResolveDefaultObservabilityEnabled(configuration, environment, defaultEnabled);
     var resolvedRetentionDays = defaultRetentionDays;
     var grafanaUrl = configuration["observability:services:grafana:url"] ?? "http://grafana:3000";
+    var pgAdminUrl = configuration["observability:services:pgadmin:url"] ?? "http://pgadmin:5050";
     var prometheusUrl = configuration["observability:services:prometheus:url"] ?? "http://prometheus:9090";
     var lokiUrl = configuration["observability:services:loki:url"] ?? "http://loki:3100";
     var tempoUrl = configuration["observability:services:tempo:url"] ?? "http://tempo:3200";
@@ -1788,6 +1793,7 @@ static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogg
             resolvedEnabled = await ReadBoolSettingAsync(connection, "observability.enabled", resolvedEnabled);
             resolvedRetentionDays = await ReadIntSettingAsync(connection, "observability.retentionDays", resolvedRetentionDays);
             grafanaUrl = await ReadStringSettingAsync(connection, "observability.links.grafanaUrl", grafanaUrl);
+            pgAdminUrl = await ReadStringSettingAsync(connection, "observability.links.pgadminUrl", pgAdminUrl);
             prometheusUrl = await ReadStringSettingAsync(connection, "observability.links.prometheusUrl", prometheusUrl);
             lokiUrl = await ReadStringSettingAsync(connection, "observability.links.lokiUrl", lokiUrl);
             tempoUrl = await ReadStringSettingAsync(connection, "observability.links.tempoUrl", tempoUrl);
@@ -1806,6 +1812,7 @@ static async Task<ObservabilityRuntimeState> LoadObservabilityRuntimeAsync(ILogg
         RetentionDays = resolvedRetentionDays,
         RetentionWarning = resolvedRetentionDays <= 0,
         GrafanaUrl = grafanaUrl,
+        PgAdminUrl = pgAdminUrl,
         PrometheusUrl = prometheusUrl,
         LokiUrl = lokiUrl,
         TempoUrl = tempoUrl,
@@ -1827,6 +1834,7 @@ static async Task EnsureObservabilityReadinessAsync(ILogger logger, Observabilit
         var probeTargets = new[]
         {
             (Name: "grafana", Url: observabilityRuntime.GrafanaUrl),
+            (Name: "pgadmin", Url: observabilityRuntime.PgAdminUrl),
             (Name: "prometheus", Url: observabilityRuntime.PrometheusUrl),
             (Name: "loki", Url: observabilityRuntime.LokiUrl),
             (Name: "tempo", Url: observabilityRuntime.TempoUrl)
@@ -2070,6 +2078,7 @@ static Uri BuildProxyUri(PathString requestPath, string upstreamBaseUrl, string?
 {
     var baseUri = new Uri(upstreamBaseUrl.EndsWith('/') ? upstreamBaseUrl : upstreamBaseUrl + "/");
     var relativePath = requestPath.Value?.Replace("/grafana", string.Empty, StringComparison.OrdinalIgnoreCase)
+        .Replace("/pgadmin", string.Empty, StringComparison.OrdinalIgnoreCase)
         .Replace("/prometheus", string.Empty, StringComparison.OrdinalIgnoreCase)
         .Replace("/loki", string.Empty, StringComparison.OrdinalIgnoreCase)
         .Replace("/tempo", string.Empty, StringComparison.OrdinalIgnoreCase)
@@ -2109,6 +2118,7 @@ static bool ShouldServeSpaFallback(PathString path)
         path.StartsWithSegments("/admin") ||
         path.StartsWithSegments("/internal") ||
         path.StartsWithSegments("/grafana") ||
+        path.StartsWithSegments("/pgadmin") ||
         path.StartsWithSegments("/prometheus") ||
         path.StartsWithSegments("/loki") ||
         path.StartsWithSegments("/tempo"))
@@ -2156,6 +2166,7 @@ public sealed class ObservabilityRuntimeState
     public int RetentionDays { get; set; }
     public bool RetentionWarning { get; set; }
     public string GrafanaUrl { get; set; } = string.Empty;
+    public string PgAdminUrl { get; set; } = string.Empty;
     public string PrometheusUrl { get; set; } = string.Empty;
     public string LokiUrl { get; set; } = string.Empty;
     public string TempoUrl { get; set; } = string.Empty;

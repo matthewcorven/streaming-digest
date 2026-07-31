@@ -78,6 +78,7 @@ public sealed class AppSettingsSeeder(ILogger? logger = null)
             ["observability.retentionDays"] = retentionDays,
             ["observability.retentionWarning"] = StorageRetentionPolicy.HasObservabilityRetentionWarning(retentionDays),
             ["observability.links.grafanaUrl"] = "http://localhost:3000",
+            ["observability.links.pgadminUrl"] = "http://localhost:5050",
             ["observability.links.prometheusUrl"] = "http://localhost:9090",
             ["observability.links.lokiUrl"] = "http://localhost:3100",
             ["observability.links.tempoUrl"] = "http://localhost:3200",
