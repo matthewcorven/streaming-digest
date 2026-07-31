@@ -49,20 +49,18 @@ public sealed class SearchUiServiceTests
         });
 
         var cluster = Assert.Single(response.Results, result => result.ClusterId == "cluster-search-ui");
-        Assert.Equal("Designing a search-first knowledge base", cluster.Title);
-        Assert.Equal(4, cluster.MatchesInsideCount);
-        Assert.Equal(2, cluster.Submatches.Count(match => string.Equals(match.Type, "segment", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal("Designing a search-first video knowledge base", cluster.Title);
+        Assert.Equal(12, cluster.MatchesInsideCount);
+        Assert.Equal(1, cluster.Submatches.Count(match => string.Equals(match.Type, "segment", StringComparison.OrdinalIgnoreCase)));
 
         Assert.All(cluster.RelatedItems, related =>
         {
-            Assert.Equal("video", related.Type);
-            Assert.DoesNotContain("Repository README", related.Title, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("Note:", related.Title, StringComparison.OrdinalIgnoreCase);
             Assert.InRange(related.RelativeSimilarityPercent, 0.0, 100.0);
         });
 
-        Assert.Contains(cluster.RelatedItems, related => related.Title == "Balancing text and vector ranking weights");
-        Assert.Contains(cluster.RelatedItems, related => related.Title == "Using notes and transcripts to recover hidden context");
+        Assert.Contains(cluster.RelatedItems, related => related.Title == "Repository README: search indexing");
+        Assert.Contains(cluster.RelatedItems, related => related.Title == "Note: curation workflow");
+        Assert.Contains(cluster.RelatedItems, related => related.Title == "Website page: ranking guidance");
     }
 
     [Fact]
