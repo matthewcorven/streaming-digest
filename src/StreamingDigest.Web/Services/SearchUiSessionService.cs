@@ -3,6 +3,7 @@ namespace StreamingDigest.Web.Services;
 public sealed class SearchUiSessionService
 {
     private readonly AuthenticationService _authenticationService;
+    private string? _lastSelectedModeRoute;
 
     public SearchUiSessionService(AuthenticationService authenticationService)
     {
@@ -17,4 +18,16 @@ public sealed class SearchUiSessionService
 
     public Task<T?> GetAuthenticatedJsonAsync<T>(string requestUri, CancellationToken cancellationToken = default)
         => _authenticationService.GetAuthenticatedJsonAsync<T>(requestUri, cancellationToken);
+
+    public string? GetLastSelectedModeRoute() => _lastSelectedModeRoute;
+
+    public void RememberSelectedMode(string route)
+    {
+        if (string.IsNullOrWhiteSpace(route))
+        {
+            return;
+        }
+
+        _lastSelectedModeRoute = route.Trim();
+    }
 }

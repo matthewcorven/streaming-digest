@@ -1,44 +1,296 @@
-﻿@page "/"
+@page "/"
 @page "/dashboard"
+@inject DashboardSummaryService DashboardSummaryService
+@inject SearchUiSessionService SearchUiSessionService
+@inject NavigationManager NavigationManager
 
 <PageTitle>Dashboard</PageTitle>
 
 <div class="page-shell">
     <section class="hero-card">
         <div>
-            <p class="eyebrow">Overview</p>
+            <p class="eyebrow">Dashboard</p>
             <h1>Welcome back</h1>
-            <p>Keep an eye on the search loop, ingestion health, and the channels that feed your digest.</p>
+            <p>@_summary.Summary</p>
         </div>
         <div class="hero-actions">
-            <a class="primary-button" href="/search">Open search</a>
+            <button class="primary-button" type="button" @onclick="OpenSearchAsync">Open search</button>
             <a class="secondary-button" href="/ingestion">Review runs</a>
         </div>
     </section>
 
-    <section class="card-grid">
-        <article class="card">
-            <div class="card-header">
-                <h2>Pending review</h2>
-                <span class="status-pill status-warning">3 items</span>
+    <section class="dashboard-grid">
+        <article class="surface-card dashboard-panel dashboard-panel--digest">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Daily digest</p>
+                    <h2>@_summary.Digest.Heading</h2>
+                </div>
+                <p class="panel-caption">@_summary.Digest.Caption</p>
             </div>
-            <p class="card-body">The latest runs still need operator confirmation before one of the clusters can be promoted.</p>
+
+            @if (_summary.Digest.LiveDeferments.Count > 0)
+            {
+                <div class="deferment-banner">
+                    <strong>Live deferments</strong>
+                    <div class="deferment-list">
+                        @foreach (var deferment in _summary.Digest.LiveDeferments)
+                        {
+                            <div class="deferment-chip">
+                                <span>@deferment.Scope</span>
+                                <span>@deferment.Reason</span>
+                                <span>@deferment.ResumeLabel</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (_summary.Digest.IsEmpty)
+            {
+                <div class="empty-state-card">
+                    <h3>@_summary.Digest.EmptyHeadline</h3>
+                    <p>@_summary.Digest.EmptyMessage</p>
+                    <div class="hero-actions">
+                        <a class="primary-button" href="/channels">Add a channel</a>
+                        <a class="secondary-button" href="/ingestion">Run ingestion</a>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @foreach (var section in _summary.Digest.Sections.OrderBy(section => section.Order))
+                {
+                    <section class="digest-section">
+                        <div class="panel-header panel-header--compact">
+                            <div>
+                                <h3>@section.Title</h3>
+                                <p class="panel-caption">@section.Summary</p>
+                            </div>
+                        </div>
+                        <div class="digest-card-grid">
+                            @foreach (var card in section.Cards)
+                            {
+                                <article class="digest-card">
+                                    <div class="digest-card__header">
+                                        <div>
+                                            <h4>@card.Title</h4>
+                                            <p>@card.Subtitle</p>
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(card.Badge))
+                                        {
+                                            <span class="status-pill status-pill--@card.BadgeTone">@card.Badge</span>
+                                        }
+                                    </div>
+                                    <p class="digest-card__detail">@card.Detail</p>
+                                    @if (card.RelativeSimilarityPercent.HasValue || !string.IsNullOrWhiteSpace(card.MatchingQuery))
+                                    {
+                                        <div class="digest-card__meta">
+                                            @if (card.RelativeSimilarityPercent.HasValue)
+                                            {
+                                                <span class="chip chip--warning">@($"{card.RelativeSimilarityPercent.Value:0}% relative similarity")</span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(card.MatchingQuery))
+                                            {
+                                                <span class="chip">Recent search: @card.MatchingQuery</span>
+                                            }
+                                        </div>
+                                    }
+                                    <div class="digest-card__links">
+                                        @if (!string.IsNullOrWhiteSpace(card.TimestampUrl))
+                                        {
+                                            <a class="link-pill" href="@card.TimestampUrl" target="_blank" rel="noreferrer">@(card.TimestampLabel ?? "Timestamp")</a>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(card.RepositoryUrl))
+                                        {
+                                            <a class="link-pill" href="@card.RepositoryUrl" target="_blank" rel="noreferrer">Repository</a>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(card.WebsiteUrl))
+                                        {
+                                            <a class="link-pill" href="@card.WebsiteUrl" target="_blank" rel="noreferrer">Website</a>
+                                        }
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    </section>
+                }
+            }
         </article>
 
-        <article class="card">
-            <div class="card-header">
-                <h2>Active ingestion</h2>
-                <span class="status-pill status-ready">Healthy</span>
+        <article class="surface-card dashboard-panel dashboard-panel--search">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Search launchpad</p>
+                    <h2>@_summary.SearchLaunchpad.Heading</h2>
+                </div>
             </div>
-            <p class="card-body">Two channels are currently processing content and one is waiting for retry.</p>
+            <p class="panel-caption">@_summary.SearchLaunchpad.Prompt</p>
+            <div class="search-launchpad">
+                <input class="search-input"
+                       @bind="_launchpadQuery"
+                       @bind:event="oninput"
+                       placeholder="@_summary.SearchLaunchpad.QueryPlaceholder"
+                       @onkeydown="HandleLaunchpadKeyDown" />
+                <button class="primary-button" type="button" @onclick="OpenSearchAsync">Search</button>
+            </div>
+            @if (_recentSearches.Count > 0)
+            {
+                <div class="chip-stack">
+                    @foreach (var recentSearch in _recentSearches)
+                    {
+                        <button class="chip chip--selectable" type="button" @onclick="() => OpenSearchAsync(recentSearch)">@recentSearch</button>
+                    }
+                </div>
+            }
         </article>
 
-        <article class="card">
-            <div class="card-header">
-                <h2>Search quality</h2>
-                <span class="status-pill status-neutral">Stable</span>
+        <article class="surface-card dashboard-panel dashboard-panel--pending">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Pending-action inbox</p>
+                    <h2>Needs attention</h2>
+                </div>
+                <span class="status-pill status-pill--warning">@_summary.PendingActions.Count item@(_summary.PendingActions.Count == 1 ? string.Empty : "s")</span>
             </div>
-            <p class="card-body">The latest search run surfaced the expected clusters with no critical degrades.</p>
+            @if (_summary.PendingActions.Count == 0)
+            {
+                <div class="empty-state-card empty-state-card--compact">
+                    <h3>All clear</h3>
+                    <p>Nothing needs your attention right now.</p>
+                </div>
+            }
+            else
+            {
+                <div class="pending-list">
+                    @foreach (var item in _summary.PendingActions.OrderBy(item => item.Order))
+                    {
+                        <article class="pending-item">
+                            <div class="pending-item__header">
+                                <div>
+                                    <h3>@item.Title</h3>
+                                    <p>@item.Summary</p>
+                                </div>
+                                <span class="status-pill status-pill--@item.Severity">@item.Count</span>
+                            </div>
+                            @if (item.Actions.Count > 0)
+                            {
+                                <div class="pending-item__actions">
+                                    @foreach (var action in item.Actions)
+                                    {
+                                        <a class="@(action.IsPrimary ? "primary-button compact" : "secondary-button compact")" href="@action.Href">@action.Label</a>
+                                    }
+                                </div>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(item.DeepLink))
+                            {
+                                <div class="pending-item__actions">
+                                    <a class="secondary-button compact" href="@item.DeepLink">Review</a>
+                                </div>
+                            }
+                        </article>
+                    }
+                </div>
+            }
         </article>
     </section>
 </div>
+
+<style>
+    .page-shell { display: grid; gap: 1.25rem; }
+    .hero-card, .surface-card { background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 1rem; padding: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
+    .hero-card { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+    .hero-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .dashboard-grid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); grid-template-areas: "digest search" "digest pending"; align-items: start; }
+    .dashboard-panel { display: grid; gap: 1rem; }
+    .dashboard-panel--digest { grid-area: digest; }
+    .dashboard-panel--search { grid-area: search; }
+    .dashboard-panel--pending { grid-area: pending; }
+    .panel-header { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+    .panel-header--compact { align-items: center; }
+    .panel-caption { margin: 0; color: var(--text-muted); }
+    .deferment-banner { display: grid; gap: 0.65rem; padding: 0.9rem; border-radius: 0.85rem; background: rgba(255, 193, 7, 0.16); color: var(--warning-text); }
+    .deferment-list { display: grid; gap: 0.5rem; }
+    .deferment-chip { display: grid; gap: 0.15rem; padding: 0.7rem; border-radius: 0.75rem; background: rgba(255,255,255,0.65); }
+    .digest-section { display: grid; gap: 0.75rem; }
+    .digest-card-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .digest-card, .pending-item, .empty-state-card { border: 1px solid var(--surface-border); border-radius: 0.85rem; padding: 0.9rem; background: rgba(255,255,255,0.7); display: grid; gap: 0.75rem; }
+    .empty-state-card--compact { min-height: 0; }
+    .digest-card__header, .pending-item__header { display: flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start; }
+    .digest-card__header h4, .pending-item__header h3 { margin: 0; }
+    .digest-card__header p, .pending-item__header p, .digest-card__detail { margin: 0; color: var(--text-muted); }
+    .digest-card__meta, .digest-card__links, .pending-item__actions, .chip-stack { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .search-launchpad { display: flex; gap: 0.75rem; align-items: center; }
+    .search-input { flex: 1; padding: 0.85rem 1rem; border-radius: 999px; border: 1px solid var(--surface-border); }
+    .pending-list { display: grid; gap: 0.75rem; }
+    .status-pill--success { background: rgba(25, 135, 84, 0.14); color: var(--accent-success); }
+    .status-pill--warning { background: rgba(255, 193, 7, 0.16); color: var(--warning-text); }
+    .status-pill--danger { background: rgba(220, 53, 69, 0.14); color: var(--accent-danger); }
+    .status-pill--info, .status-pill--accent { background: rgba(13, 110, 253, 0.12); color: var(--accent-primary); }
+    .status-pill--neutral { background: rgba(108, 117, 125, 0.12); color: var(--text-muted); }
+    .chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.65rem; border-radius: 999px; background: rgba(13, 110, 253, 0.12); color: var(--accent-primary); font-size: 0.85rem; border: none; }
+    .chip--warning { background: rgba(255, 193, 7, 0.16); color: var(--warning-text); }
+    .chip--selectable { cursor: pointer; }
+    .link-pill { color: var(--accent-primary); text-decoration: none; }
+    @@media (max-width: 1100px) {
+        .dashboard-grid { grid-template-columns: 1fr; grid-template-areas: "digest" "search" "pending"; }
+    }
+    @@media (max-width: 720px) {
+        .hero-card, .search-launchpad { grid-template-columns: 1fr; display: grid; }
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "fixture")]
+    public string? Fixture { get; set; }
+
+    private DashboardSummary _summary = new();
+    private readonly List<string> _recentSearches = [];
+    private string _launchpadQuery = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        SearchUiSessionService.RememberSelectedMode("/dashboard");
+        _summary = DashboardSummaryService.GetSummary(Fixture);
+        _recentSearches.AddRange(_summary.SearchLaunchpad.RecentSearches);
+        _launchpadQuery = _recentSearches.FirstOrDefault() ?? string.Empty;
+
+        try
+        {
+            var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
+            if (recentSearches is { Count: > 0 })
+            {
+                _recentSearches.Clear();
+                _recentSearches.AddRange(recentSearches.Take(5));
+                _launchpadQuery = _recentSearches[0];
+            }
+        }
+        catch
+        {
+            // Fall back to the dashboard fixture data when the live API is unavailable.
+        }
+    }
+
+    private Task OpenSearchAsync()
+        => OpenSearchAsync(_launchpadQuery);
+
+    private Task OpenSearchAsync(string? query)
+    {
+        var encodedQuery = Uri.EscapeDataString(string.IsNullOrWhiteSpace(query) ? string.Empty : query.Trim());
+        var uri = string.IsNullOrWhiteSpace(encodedQuery)
+            ? "/search"
+            : $"/search?q={encodedQuery}";
+        NavigationManager.NavigateTo(uri);
+        return Task.CompletedTask;
+    }
+
+    private Task HandleLaunchpadKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            return OpenSearchAsync();
+        }
+
+        return Task.CompletedTask;
+    }
+}

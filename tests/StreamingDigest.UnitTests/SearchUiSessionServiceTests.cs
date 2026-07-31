@@ -94,6 +94,23 @@ public sealed class SearchUiSessionServiceTests
         Assert.Equal(new[] { "/api/auth/me", "/api/auth/csrf", "/api/search-ui/settings" }, requests);
     }
 
+    [Fact]
+    public void RememberSelectedMode_tracks_the_latest_dashboard_or_search_route()
+    {
+        using var client = new HttpClient(new StubHttpMessageHandler((_, _) => new HttpResponseMessage(HttpStatusCode.OK)))
+        {
+            BaseAddress = new Uri("http://localhost")
+        };
+
+        var service = new SearchUiSessionService(new AuthenticationService(client));
+
+        service.RememberSelectedMode("/dashboard");
+        Assert.Equal("/dashboard", service.GetLastSelectedModeRoute());
+
+        service.RememberSelectedMode("/search");
+        Assert.Equal("/search", service.GetLastSelectedModeRoute());
+    }
+
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

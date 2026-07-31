@@ -20,6 +20,31 @@
         </div>
     </section>
 
+    @if (_showWaitingState)
+    {
+        <section class="state-card waiting-state">
+            <div>
+                <p class="eyebrow">Pre-corpus waiting state</p>
+                <h2>@_waitingHeadline</h2>
+                <p>@_waitingMessage</p>
+                @if (!string.IsNullOrWhiteSpace(_backfillGuidance))
+                {
+                    <p class="page-description">@_backfillGuidance</p>
+                }
+                @if (!string.IsNullOrWhiteSpace(_errorMessage))
+                {
+                    <div class="status-message status-warning">@_errorMessage</div>
+                }
+            </div>
+            <div class="hero-actions">
+                <button class="primary-button" type="button" @onclick="TriggerRunIngestionAsync" disabled="@_isWaitingActionBusy">@(_isWaitingActionBusy ? "Working…" : "Run ingestion now")</button>
+                <button class="secondary-button" type="button" @onclick="TriggerBackfillAsync" disabled="@_isWaitingActionBusy">Backfill guidance</button>
+                <a class="secondary-button" href="/channels">Add a channel</a>
+            </div>
+        </section>
+    }
+    else
+    {
     <section class="search-layout">
         <div class="search-main">
            <div class="search-box">
@@ -158,6 +183,7 @@
                                            }
                                        </div>
                                    </section>
+                                   }
                                </div>
 
                                <div class="result-card__expanded-grid">
@@ -205,6 +231,7 @@
                                            <li><strong>Warnings</strong><p>@string.Join(" · ", result.ProcessingWarnings)</p></li>
                                        </ul>
                                    </section>
+                                   }
                                </div>
                            </div>
                        }
@@ -318,12 +345,14 @@
            </div>
         </aside>
     </section>
+    }
 </div>
 
 <style>
     .page-shell { display: grid; gap: 1.25rem; }
     .hero-card, .search-box, .panel-card, .result-card, .state-card, .results-summary { background: var(--surface-card); border: 1px solid var(--surface-border); border-radius: 1rem; padding: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
     .hero-card { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+    .waiting-state { display: grid; gap: 1rem; }
     .search-layout { display: grid; gap: 1rem; grid-template-columns: minmax(0, 2fr) minmax(280px, 360px); align-items: start; }
     .search-main { display: grid; gap: 1rem; }
     .side-panel { display: grid; gap: 1rem; }
@@ -364,11 +393,19 @@
 </style>
 
 @code {
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Query { get; set; }
+
     private readonly HashSet<string> _expandedClusterIds = new(StringComparer.OrdinalIgnoreCase);
     private string _query = "project idea search";
     private string _errorMessage = string.Empty;
     private bool _isSearching;
     private bool _isLoading = true;
+    private bool _showWaitingState;
+    private bool _isWaitingActionBusy;
+    private string _waitingHeadline = "Nothing to search yet";
+    private string _waitingMessage = "Run ingestion now to build the first searchable corpus.";
+    private string _backfillGuidance = string.Empty;
     private SearchResponse? _searchResponse;
     private readonly List<string> _recentSearches = new();
     private readonly SearchUiSettings _settings = new();
@@ -380,6 +417,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        SearchUiSessionService.RememberSelectedMode("/search");
         await LoadInitialStateAsync();
     }
 
@@ -387,37 +425,131 @@
     {
         try
         {
-           await EnsureApiSessionAsync();
+            await EnsureApiSessionAsync();
+            if (!await EnsureSearchableCorpusAsync())
+            {
+                return;
+            }
 
-           var settings = await SearchUiSessionService.GetAuthenticatedJsonAsync<SearchUiSettings>("/api/search-ui/settings");
-           if (settings is not null)
-           {
-               _settings.TextWeight = settings.TextWeight;
-               _settings.VectorWeight = settings.VectorWeight;
-           }
+            if (!string.IsNullOrWhiteSpace(Query))
+            {
+                _query = Query.Trim();
+            }
 
-           var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
-           if (recentSearches is not null)
-           {
-               _recentSearches.Clear();
-               _recentSearches.AddRange(recentSearches);
-           }
+            var settings = await SearchUiSessionService.GetAuthenticatedJsonAsync<SearchUiSettings>("/api/search-ui/settings");
+            if (settings is not null)
+            {
+                _settings.TextWeight = settings.TextWeight;
+                _settings.VectorWeight = settings.VectorWeight;
+            }
 
-           await RunSearchAsync();
+            var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
+            if (recentSearches is not null)
+            {
+                _recentSearches.Clear();
+                _recentSearches.AddRange(recentSearches);
+            }
+
+            await RunSearchAsync();
         }
         catch (UnauthorizedAccessException)
         {
-           NavigationManager.NavigateTo("/login", true);
+            NavigationManager.NavigateTo("/login", true);
         }
         catch (Exception ex)
         {
-           _errorMessage = ex.Message;
+            _errorMessage = ex.Message;
         }
         finally
         {
-           _isLoading = false;
+            _isLoading = false;
         }
     }
+
+    private async Task<bool> EnsureSearchableCorpusAsync()
+    {
+        var runs = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<IngestionRunFixtureSummary>>("/api/internal/ingestion-runs?limit=5")
+            ?? [];
+
+        if (runs.Count == 0)
+        {
+            SetWaitingState(
+                "Nothing to search yet",
+                "Until the first ingestion run completes with at least one ingested video, search stays in a pre-corpus waiting state.",
+                string.Empty);
+            return false;
+        }
+
+        IngestionRunDetailViewModel? latestCompletedRun = null;
+        foreach (var run in runs)
+        {
+            if (!Guid.TryParse(run.Id, out var runId))
+            {
+                continue;
+            }
+
+            var detail = await SearchUiSessionService.GetAuthenticatedJsonAsync<IngestionRunDetailViewModel>($"/api/internal/ingestion-runs/{runId}");
+            if (detail is null)
+            {
+                continue;
+            }
+
+            latestCompletedRun ??= detail;
+            if (detail.FrozenOutcome.ProcessedVideos > 0)
+            {
+                _showWaitingState = false;
+                _backfillGuidance = string.Empty;
+                return true;
+            }
+        }
+
+        var guidance = latestCompletedRun is not null && latestCompletedRun.FrozenOutcome.ProcessedVideos == 0
+            ? "The latest completed run finished with zero ingested videos. Widen the backfill window or add another channel before returning to search."
+            : string.Empty;
+
+        SetWaitingState(
+            "Corpus still warming up",
+            "Search opens as soon as a completed run ingests at least one video.",
+            guidance);
+
+        return false;
+    }
+
+    private void SetWaitingState(string headline, string message, string backfillGuidance)
+    {
+        _showWaitingState = true;
+        _waitingHeadline = headline;
+        _waitingMessage = message;
+        _backfillGuidance = backfillGuidance;
+    }
+
+    private async Task TriggerSearchWaitingActionAsync(string endpoint, string actionLabel)
+    {
+        _isWaitingActionBusy = true;
+        _errorMessage = string.Empty;
+
+        try
+        {
+            using var request = await CreateMutatingRequestAsync(HttpMethod.Post, endpoint);
+            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
+            response.EnsureSuccessStatusCode();
+            _waitingMessage = $"{actionLabel} requested. Refresh after the run completes to unlock search.";
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isWaitingActionBusy = false;
+        }
+    }
+
+    private Task TriggerRunIngestionAsync()
+        => TriggerSearchWaitingActionAsync("/api/admin/operations/ingestion/run", "Run ingestion now");
+
+    private Task TriggerBackfillAsync()
+        => TriggerSearchWaitingActionAsync("/api/admin/operations/ingestion/channel-backfill", "Run channel backfill");
 
     private async Task RunSearchAsync()
     {
