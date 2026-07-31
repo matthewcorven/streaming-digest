@@ -11,19 +11,25 @@ const string defaultEmbeddingModel = "bge-m3";
 const string defaultLlmModel = "llama3.1:8b";
 const string ollamaDataVolumeName = "streamingdigest-ollama-data";
 
-var postgresUsername = builder.AddParameter("postgres-username");
-var postgresPassword = builder.AddParameter("postgres-password", secret: true);
-var grafanaAdminUser = builder.AddParameter("grafana-admin-user");
-var grafanaAdminPassword = builder.AddParameter("grafana-admin-password", secret: true);
+var postgresUsername = builder.AddParameterFromConfiguration(
+    "postgres-username",
+    "Parameters:postgres-username");
+var postgresPassword = builder.AddParameterFromConfiguration(
+    "postgres-password",
+    "Parameters:postgres-password",
+    secret: true);
+var grafanaAdminUser = builder.AddParameterFromConfiguration(
+    "grafana-admin-user",
+    "Parameters:grafana-admin-user");
+var grafanaAdminPassword = builder.AddParameterFromConfiguration(
+    "grafana-admin-password",
+    "Parameters:grafana-admin-password",
+    secret: true);
 
 builder.AddDockerComposeEnvironment("docker-compose")
     .WithDashboard(false)
     .ConfigureEnvFile(env =>
     {
-        SetEnvDefault(env, "GRAFANA_ADMIN_USER", "admin");
-        SetEnvDefault(env, "GRAFANA_ADMIN_PASSWORD", "admin");
-        SetEnvDefault(env, "POSTGRES_USERNAME", "streamingdigest");
-        SetEnvDefault(env, "POSTGRES_PASSWORD", "streamingdigest");
         SetEnvDefault(env, "GRAFANA_BINDMOUNT_0", "./compose/observability/grafana/provisioning");
         SetEnvDefault(env, "GRAFANA_BINDMOUNT_1", "./compose/observability/grafana/dashboards");
         SetEnvDefault(env, "LOKI_BINDMOUNT_0", "./compose/observability/loki-config.yaml");
