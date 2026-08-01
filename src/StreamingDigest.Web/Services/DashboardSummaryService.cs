@@ -413,17 +413,17 @@ public sealed class DashboardSummaryService
     {
         return new DashboardSummary
         {
-            Summary = "The dashboard is ready, but your first ingestion run has not produced a corpus yet.",
+            Summary = "Add a channel to begin building the corpus.",
             Digest = new DashboardDigestSummary
             {
                 IsEmpty = true,
-                Caption = "Add a channel and run ingestion to start building the digest.",
+                Caption = "Add a channel to unlock the dashboard experience.",
                 EmptyHeadline = "Your daily digest will appear here",
-                EmptyMessage = "Add your first channel and run ingestion to start building your knowledge base."
+                EmptyMessage = "Add your first channel to start building your knowledge base."
             },
             SearchLaunchpad = new DashboardSearchLaunchpad
             {
-                Prompt = "Recent searches will appear here once the corpus is ready."
+                Prompt = "Add a channel to unlock search and recent searches."
             },
             PendingActions = [],
             Corpus = new DashboardCorpusState
@@ -431,8 +431,9 @@ public sealed class DashboardSummaryService
                 HasSearchableCorpus = false,
                 HasCompletedRun = false,
                 LatestCompletedRunFoundZeroVideos = false,
-                WaitingMessage = "Until the first run ingests at least one video, search stays in a pre-corpus waiting state with a run-now action.",
-                BackfillGuidance = "If the first completed run still finds zero videos, expand the backfill window before returning to search."
+                WaitingHeadline = "Start by adding a channel",
+                WaitingMessage = "Add a channel to begin building the corpus. Search, the dashboard, and run history will appear after the first videos become available.",
+                BackfillGuidance = string.Empty
             }
         };
     }

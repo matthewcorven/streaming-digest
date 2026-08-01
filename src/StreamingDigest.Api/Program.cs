@@ -118,6 +118,7 @@ builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredServic
 builder.Services.AddSingleton<BootstrapAdminUserService>();
 builder.Services.AddSingleton<AppAuthService>();
 builder.Services.AddSingleton<AppReadinessStateService>();
+builder.Services.AddSingleton<FirstUserSetupService>();
 builder.Services.AddSingleton<ModelDiscoveryService>();
 builder.Services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddSingleton<SearchUiService>();
@@ -137,6 +138,7 @@ builder.Services.AddScoped<IChannelRepository, ChannelRepository>();
 
 var app = builder.Build();
 var authService = app.Services.GetRequiredService<AppAuthService>();
+var useSecureCookies = !app.Environment.IsDevelopment();
 
 static IResult CreateAdminOperationResponse(AdminActionResult result)
 {
@@ -387,6 +389,17 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseRouting();
+app.Use(async (context, next) =>
+{
+    if (ShouldRejectDirectSpaDocumentRequest(context.Request))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    await next();
+});
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
 
@@ -1116,8 +1129,8 @@ app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authSe
             return Results.Json(new { error = result.ErrorMessage }, statusCode: result.StatusCode);
         }
 
-        context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions());
-        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions());
+        context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions(useSecureCookies));
+        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions(useSecureCookies));
 
         return Results.Ok(new { username = result.User!.Username, mustChangePassword = result.User.MustChangePassword });
     }
@@ -1126,6 +1139,40 @@ app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authSe
         app.Logger.LogError(ex, "Login request failed.");
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Login failed", detail: ex.Message);
     }
+});
+app.MapGet("/api/setup/status", async (FirstUserSetupService setupService, CancellationToken cancellationToken) =>
+    Results.Ok(await setupService.GetStatusAsync(connectionString, cancellationToken)));
+app.MapPost("/api/setup/initialize", async (HttpContext context, FirstUserSetupService setupService, CancellationToken cancellationToken) =>
+{
+    FirstUserInitializationRequest? requestBody;
+    try
+    {
+        requestBody = await JsonSerializer.DeserializeAsync<FirstUserInitializationRequest>(context.Request.Body, jsonOptions, cancellationToken);
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "The request body is invalid." });
+    }
+
+    if (requestBody is null)
+    {
+        return Results.BadRequest(new { error = "The request body is required." });
+    }
+
+    var result = await setupService.InitializeAsync(
+        connectionString,
+        requestBody.Username ?? string.Empty,
+        requestBody.Password ?? string.Empty,
+        cancellationToken);
+
+    return result.Outcome switch
+    {
+        FirstUserInitializationOutcome.Success => Results.Created("/login", new { username = result.Username }),
+        FirstUserInitializationOutcome.AlreadyInitialized => Results.Conflict(new { error = result.ErrorMessage }),
+        FirstUserInitializationOutcome.InvalidUsername => Results.BadRequest(new { error = result.ErrorMessage }),
+        FirstUserInitializationOutcome.WeakPassword => Results.BadRequest(new { error = result.ErrorMessage }),
+        _ => Results.BadRequest(new { error = "The request could not be completed." })
+    };
 });
 app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authService, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
@@ -1137,8 +1184,8 @@ app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authS
 
     searchUiService.RemoveState(GetSearchUiStateKey(context));
 
-    context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
-    context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = true, SameSite = SameSiteMode.Lax });
+    context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = useSecureCookies, SameSite = SameSiteMode.Lax });
+    context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = useSecureCookies, SameSite = SameSiteMode.Lax });
 
     return Results.Ok(new { success = true });
 });
@@ -1163,7 +1210,7 @@ app.MapGet("/api/auth/csrf", async (HttpContext context, AppAuthService authServ
         csrfToken = authService.CreateCsrfToken();
     }
 
-    context.Response.Cookies.Append("csrf-token", csrfToken, CreateCsrfCookieOptions());
+    context.Response.Cookies.Append("csrf-token", csrfToken, CreateCsrfCookieOptions(useSecureCookies));
     return Results.Ok(new { token = csrfToken });
 });
 app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
@@ -1321,6 +1368,17 @@ app.MapPost("/api/observability/toggle/{enabled:bool}", async (bool enabled, Htt
     }
 
     return Results.Ok(new { enabled, mode = enabled ? "enabled" : "disabled" });
+});
+
+app.MapMethods("/grafana", ["GET", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
+{
+    if (context.Request.Path.Equals("/grafana/", StringComparison.OrdinalIgnoreCase))
+    {
+        return await ProxyObservabilityRequestAsync(context, httpClientFactory, observabilityRuntime, "grafana", observabilityRuntime.GrafanaUrl, cancellationToken);
+    }
+
+    var target = string.Concat("/grafana/", context.Request.QueryString.Value);
+    return Results.Redirect(target, permanent: false);
 });
 
 app.MapMethods("/grafana/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
@@ -1648,31 +1706,7 @@ app.MapDelete("/api/notes/{noteId:guid}", async (Guid noteId, StreamingDigestDbC
     return Results.Ok(new { status = "deleted", entityType = "note", entityId = noteId });
 });
 
-app.MapGet("/{*path}", async context =>
-{
-    if (!ShouldServeSpaFallback(context.Request.Path))
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    var webRootPath = app.Environment.WebRootPath;
-    if (string.IsNullOrWhiteSpace(webRootPath))
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    var indexPath = Path.Combine(webRootPath, "index.html");
-    if (!File.Exists(indexPath))
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    context.Response.ContentType = "text/html; charset=utf-8";
-    await context.Response.SendFileAsync(indexPath);
-});
+app.MapFallbackToFile("index.html");
 
 app.Run();
 
@@ -1905,8 +1939,9 @@ static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, I
     try
     {
         using var client = httpClientFactory.CreateClient();
-        var targetUri = BuildProxyUri(context.Request.Path, upstreamBaseUrl, context.Request.QueryString.Value);
+        var targetUri = BuildProxyUri(context.Request.Path, serviceName, upstreamBaseUrl, context.Request.QueryString.Value);
         using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri);
+        var forwardedHost = context.Request.Host.HasValue ? context.Request.Host.Value : null;
 
         if (ShouldForwardRequestBody(context.Request))
         {
@@ -1921,6 +1956,15 @@ static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, I
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(forwardedHost))
+        {
+            request.Headers.Host = forwardedHost;
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Host", forwardedHost);
+        }
+
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", context.Request.Scheme);
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/{serviceName}");
+
         foreach (var header in context.Request.Headers)
         {
             if (header.Key.Equals("host", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("content-length", StringComparison.OrdinalIgnoreCase))
@@ -1934,11 +1978,46 @@ static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, I
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
         var responseBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-        return Results.Bytes(responseBytes, contentType);
+
+        context.Response.StatusCode = (int)response.StatusCode;
+        CopyProxyResponseHeaders(context.Response, response);
+
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            context.Response.ContentType = contentType;
+        }
+
+        await context.Response.Body.WriteAsync(responseBytes, cancellationToken);
+        return Results.Empty;
     }
     catch (Exception ex)
     {
         return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
+    }
+}
+
+static void CopyProxyResponseHeaders(HttpResponse destination, HttpResponseMessage source)
+{
+    foreach (var header in source.Headers)
+    {
+        if (header.Key.Equals("transfer-encoding", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        destination.Headers[header.Key] = header.Value.ToArray();
+    }
+
+    foreach (var header in source.Content.Headers)
+    {
+        if (header.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase)
+            || header.Key.Equals("content-length", StringComparison.OrdinalIgnoreCase)
+            || header.Key.Equals("transfer-encoding", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        destination.Headers[header.Key] = header.Value.ToArray();
     }
 }
 
@@ -2036,24 +2115,24 @@ static bool ShouldAllowPasswordChangeFlow(HttpRequest request)
         || path.StartsWith("/api/auth/logout", StringComparison.Ordinal);
 }
 
-static CookieOptions CreateSessionCookieOptions()
+static CookieOptions CreateSessionCookieOptions(bool useSecureCookies)
 {
     return new CookieOptions
     {
         HttpOnly = true,
-        Secure = true,
+        Secure = useSecureCookies,
         SameSite = SameSiteMode.Lax,
         Path = "/",
         MaxAge = TimeSpan.FromHours(8)
     };
 }
 
-static CookieOptions CreateCsrfCookieOptions()
+static CookieOptions CreateCsrfCookieOptions(bool useSecureCookies)
 {
     return new CookieOptions
     {
         HttpOnly = false,
-        Secure = true,
+        Secure = useSecureCookies,
         SameSite = SameSiteMode.Lax,
         Path = "/",
         MaxAge = TimeSpan.FromHours(8)
@@ -2074,15 +2153,16 @@ static async Task<byte[]> ReadRequestBodyAsync(HttpRequest request, Cancellation
     return buffer.ToArray();
 }
 
-static Uri BuildProxyUri(PathString requestPath, string upstreamBaseUrl, string? query)
+static Uri BuildProxyUri(PathString requestPath, string serviceName, string upstreamBaseUrl, string? query)
 {
     var baseUri = new Uri(upstreamBaseUrl.EndsWith('/') ? upstreamBaseUrl : upstreamBaseUrl + "/");
-    var relativePath = requestPath.Value?.Replace("/grafana", string.Empty, StringComparison.OrdinalIgnoreCase)
-        .Replace("/pgadmin", string.Empty, StringComparison.OrdinalIgnoreCase)
-        .Replace("/prometheus", string.Empty, StringComparison.OrdinalIgnoreCase)
-        .Replace("/loki", string.Empty, StringComparison.OrdinalIgnoreCase)
-        .Replace("/tempo", string.Empty, StringComparison.OrdinalIgnoreCase)
-        ?? string.Empty;
+    var requestPathValue = requestPath.Value ?? string.Empty;
+    var servicePrefix = $"/{serviceName}";
+    var relativePath = serviceName.Equals("grafana", StringComparison.OrdinalIgnoreCase)
+        ? requestPathValue
+        : requestPathValue.StartsWith(servicePrefix, StringComparison.OrdinalIgnoreCase)
+            ? requestPathValue[servicePrefix.Length..]
+            : requestPathValue;
 
     var sanitizedPath = string.IsNullOrWhiteSpace(relativePath) ? "/" : relativePath;
     var builder = new UriBuilder(baseUri)
@@ -2112,21 +2192,28 @@ static string BuildDisabledPlaceholder(string serviceName)
 """;
 }
 
-static bool ShouldServeSpaFallback(PathString path)
+static bool ShouldRejectDirectSpaDocumentRequest(HttpRequest request)
 {
-    if (path.StartsWithSegments("/api") ||
-        path.StartsWithSegments("/admin") ||
-        path.StartsWithSegments("/internal") ||
-        path.StartsWithSegments("/grafana") ||
-        path.StartsWithSegments("/pgadmin") ||
-        path.StartsWithSegments("/prometheus") ||
-        path.StartsWithSegments("/loki") ||
-        path.StartsWithSegments("/tempo"))
+    var path = request.Path.Value;
+    if (string.IsNullOrWhiteSpace(path))
     {
         return false;
     }
 
-    return true;
+    if (request.Path.StartsWithSegments("/api") ||
+        request.Path.StartsWithSegments("/admin") ||
+        request.Path.StartsWithSegments("/internal") ||
+        request.Path.StartsWithSegments("/grafana") ||
+        request.Path.StartsWithSegments("/pgadmin") ||
+        request.Path.StartsWithSegments("/prometheus") ||
+        request.Path.StartsWithSegments("/loki") ||
+        request.Path.StartsWithSegments("/tempo"))
+    {
+        return false;
+    }
+
+    return path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/index.htm", StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed record CreateChannelRequest(string? SourceUrl, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
@@ -2155,6 +2242,7 @@ sealed class PassThroughDashboardAuthorizationFilter : IDashboardAuthorizationFi
 sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
 
 public sealed record LoginRequest(string Username, string Password);
+public sealed record FirstUserInitializationRequest(string? Username, string? Password);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
 public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);

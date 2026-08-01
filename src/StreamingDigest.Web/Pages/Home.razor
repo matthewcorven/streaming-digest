@@ -1,199 +1,215 @@
 @page "/"
 @page "/dashboard"
 @inject DashboardSummaryService DashboardSummaryService
+@inject CorpusReadinessService CorpusReadinessService
 @inject SearchUiSessionService SearchUiSessionService
 @inject NavigationManager NavigationManager
 
 <PageTitle>Dashboard</PageTitle>
 
 <div class="page-shell">
-    <section class="hero-card">
-        <div>
-            <p class="eyebrow">Dashboard</p>
-            <h1>Welcome back</h1>
-            <p>@_summary.Summary</p>
-        </div>
-        <div class="hero-actions">
-            <button class="primary-button" type="button" @onclick="OpenSearchAsync">Open search</button>
-            <a class="secondary-button" href="/ingestion">Review runs</a>
-        </div>
-    </section>
-
-    <section class="dashboard-grid">
-        <article class="surface-card dashboard-panel dashboard-panel--digest">
-            <div class="panel-header">
-                <div>
-                    <p class="eyebrow">Daily digest</p>
-                    <h2>@_summary.Digest.Heading</h2>
-                </div>
-                <p class="panel-caption">@_summary.Digest.Caption</p>
+    @if (!_summary.Corpus.HasSearchableCorpus)
+    {
+        <section class="hero-card">
+            <div>
+                <p class="eyebrow">Dashboard</p>
+                <h1>@_summary.Digest.EmptyHeadline</h1>
+                <p>@_summary.Digest.EmptyMessage</p>
             </div>
+            <div class="hero-actions">
+                <a class="primary-button" href="/channels">Add a channel</a>
+            </div>
+        </section>
+    }
+    else
+    {
+        <section class="hero-card">
+            <div>
+                <p class="eyebrow">Dashboard</p>
+                <h1>Welcome back</h1>
+                <p>@_summary.Summary</p>
+            </div>
+            <div class="hero-actions">
+                <button class="primary-button" type="button" @onclick="OpenSearchAsync">Open search</button>
+                <a class="secondary-button" href="/ingestion">Review runs</a>
+            </div>
+        </section>
 
-            @if (_summary.Digest.LiveDeferments.Count > 0)
-            {
-                <div class="deferment-banner">
-                    <strong>Live deferments</strong>
-                    <div class="deferment-list">
-                        @foreach (var deferment in _summary.Digest.LiveDeferments)
-                        {
-                            <div class="deferment-chip">
-                                <span>@deferment.Scope</span>
-                                <span>@deferment.Reason</span>
-                                <span>@deferment.ResumeLabel</span>
+        <section class="dashboard-grid">
+            <article class="surface-card dashboard-panel dashboard-panel--digest">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Daily digest</p>
+                        <h2>@_summary.Digest.Heading</h2>
+                    </div>
+                    <p class="panel-caption">@_summary.Digest.Caption</p>
+                </div>
+
+                @if (_summary.Digest.LiveDeferments.Count > 0)
+                {
+                    <div class="deferment-banner">
+                        <strong>Live deferments</strong>
+                        <div class="deferment-list">
+                            @foreach (var deferment in _summary.Digest.LiveDeferments)
+                            {
+                                <div class="deferment-chip">
+                                    <span>@deferment.Scope</span>
+                                    <span>@deferment.Reason</span>
+                                    <span>@deferment.ResumeLabel</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (_summary.Digest.IsEmpty)
+                {
+                    <div class="empty-state-card">
+                        <h3>@_summary.Digest.EmptyHeadline</h3>
+                        <p>@_summary.Digest.EmptyMessage</p>
+                        <div class="hero-actions">
+                            <a class="primary-button" href="/channels">Add a channel</a>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var section in _summary.Digest.Sections.OrderBy(section => section.Order))
+                    {
+                        <section class="digest-section">
+                            <div class="panel-header panel-header--compact">
+                                <div>
+                                    <h3>@section.Title</h3>
+                                    <p class="panel-caption">@section.Summary</p>
+                                </div>
                             </div>
+                            <div class="digest-card-grid">
+                                @foreach (var card in section.Cards)
+                                {
+                                    <article class="digest-card">
+                                        <div class="digest-card__header">
+                                            <div>
+                                                <h4>@card.Title</h4>
+                                                <p>@card.Subtitle</p>
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(card.Badge))
+                                            {
+                                                <span class="status-pill status-pill--@card.BadgeTone">@card.Badge</span>
+                                            }
+                                        </div>
+                                        <p class="digest-card__detail">@card.Detail</p>
+                                        @if (card.RelativeSimilarityPercent.HasValue || !string.IsNullOrWhiteSpace(card.MatchingQuery))
+                                        {
+                                            <div class="digest-card__meta">
+                                                @if (card.RelativeSimilarityPercent.HasValue)
+                                                {
+                                                    <span class="chip chip--warning">@($"{card.RelativeSimilarityPercent.Value:0}% relative similarity")</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(card.MatchingQuery))
+                                                {
+                                                    <span class="chip">Recent search: @card.MatchingQuery</span>
+                                                }
+                                            </div>
+                                        }
+                                        <div class="digest-card__links">
+                                            @if (!string.IsNullOrWhiteSpace(card.TimestampUrl))
+                                            {
+                                                <a class="link-pill" href="@card.TimestampUrl" target="_blank" rel="noreferrer">@(card.TimestampLabel ?? "Timestamp")</a>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(card.RepositoryUrl))
+                                            {
+                                                <a class="link-pill" href="@card.RepositoryUrl" target="_blank" rel="noreferrer">Repository</a>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(card.WebsiteUrl))
+                                            {
+                                                <a class="link-pill" href="@card.WebsiteUrl" target="_blank" rel="noreferrer">Website</a>
+                                            }
+                                        </div>
+                                    </article>
+                                }
+                            </div>
+                        </section>
+                    }
+                }
+            </article>
+
+            <article class="surface-card dashboard-panel dashboard-panel--search">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Search launchpad</p>
+                        <h2>@_summary.SearchLaunchpad.Heading</h2>
+                    </div>
+                </div>
+                <p class="panel-caption">@_summary.SearchLaunchpad.Prompt</p>
+                <div class="search-launchpad">
+                    <input class="search-input"
+                           @bind="_launchpadQuery"
+                           @bind:event="oninput"
+                           placeholder="@_summary.SearchLaunchpad.QueryPlaceholder"
+                           @onkeydown="HandleLaunchpadKeyDown" />
+                    <button class="primary-button" type="button" @onclick="OpenSearchAsync">Search</button>
+                </div>
+                @if (_recentSearches.Count > 0)
+                {
+                    <div class="chip-stack">
+                        @foreach (var recentSearch in _recentSearches)
+                        {
+                            <button class="chip chip--selectable" type="button" @onclick="() => OpenSearchAsync(recentSearch)">@recentSearch</button>
                         }
                     </div>
-                </div>
-            }
-
-            @if (_summary.Digest.IsEmpty)
-            {
-                <div class="empty-state-card">
-                    <h3>@_summary.Digest.EmptyHeadline</h3>
-                    <p>@_summary.Digest.EmptyMessage</p>
-                    <div class="hero-actions">
-                        <a class="primary-button" href="/channels">Add a channel</a>
-                        <a class="secondary-button" href="/ingestion">Run ingestion</a>
-                    </div>
-                </div>
-            }
-            else
-            {
-                @foreach (var section in _summary.Digest.Sections.OrderBy(section => section.Order))
-                {
-                    <section class="digest-section">
-                        <div class="panel-header panel-header--compact">
-                            <div>
-                                <h3>@section.Title</h3>
-                                <p class="panel-caption">@section.Summary</p>
-                            </div>
-                        </div>
-                        <div class="digest-card-grid">
-                            @foreach (var card in section.Cards)
-                            {
-                                <article class="digest-card">
-                                    <div class="digest-card__header">
-                                        <div>
-                                            <h4>@card.Title</h4>
-                                            <p>@card.Subtitle</p>
-                                        </div>
-                                        @if (!string.IsNullOrWhiteSpace(card.Badge))
-                                        {
-                                            <span class="status-pill status-pill--@card.BadgeTone">@card.Badge</span>
-                                        }
-                                    </div>
-                                    <p class="digest-card__detail">@card.Detail</p>
-                                    @if (card.RelativeSimilarityPercent.HasValue || !string.IsNullOrWhiteSpace(card.MatchingQuery))
-                                    {
-                                        <div class="digest-card__meta">
-                                            @if (card.RelativeSimilarityPercent.HasValue)
-                                            {
-                                                <span class="chip chip--warning">@($"{card.RelativeSimilarityPercent.Value:0}% relative similarity")</span>
-                                            }
-                                            @if (!string.IsNullOrWhiteSpace(card.MatchingQuery))
-                                            {
-                                                <span class="chip">Recent search: @card.MatchingQuery</span>
-                                            }
-                                        </div>
-                                    }
-                                    <div class="digest-card__links">
-                                        @if (!string.IsNullOrWhiteSpace(card.TimestampUrl))
-                                        {
-                                            <a class="link-pill" href="@card.TimestampUrl" target="_blank" rel="noreferrer">@(card.TimestampLabel ?? "Timestamp")</a>
-                                        }
-                                        @if (!string.IsNullOrWhiteSpace(card.RepositoryUrl))
-                                        {
-                                            <a class="link-pill" href="@card.RepositoryUrl" target="_blank" rel="noreferrer">Repository</a>
-                                        }
-                                        @if (!string.IsNullOrWhiteSpace(card.WebsiteUrl))
-                                        {
-                                            <a class="link-pill" href="@card.WebsiteUrl" target="_blank" rel="noreferrer">Website</a>
-                                        }
-                                    </div>
-                                </article>
-                            }
-                        </div>
-                    </section>
                 }
-            }
-        </article>
+            </article>
 
-        <article class="surface-card dashboard-panel dashboard-panel--search">
-            <div class="panel-header">
-                <div>
-                    <p class="eyebrow">Search launchpad</p>
-                    <h2>@_summary.SearchLaunchpad.Heading</h2>
+            <article class="surface-card dashboard-panel dashboard-panel--pending">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Pending-action inbox</p>
+                        <h2>Needs attention</h2>
+                    </div>
+                    <span class="status-pill status-pill--warning">@_summary.PendingActions.Count item@(_summary.PendingActions.Count == 1 ? string.Empty : "s")</span>
                 </div>
-            </div>
-            <p class="panel-caption">@_summary.SearchLaunchpad.Prompt</p>
-            <div class="search-launchpad">
-                <input class="search-input"
-                       @bind="_launchpadQuery"
-                       @bind:event="oninput"
-                       placeholder="@_summary.SearchLaunchpad.QueryPlaceholder"
-                       @onkeydown="HandleLaunchpadKeyDown" />
-                <button class="primary-button" type="button" @onclick="OpenSearchAsync">Search</button>
-            </div>
-            @if (_recentSearches.Count > 0)
-            {
-                <div class="chip-stack">
-                    @foreach (var recentSearch in _recentSearches)
-                    {
-                        <button class="chip chip--selectable" type="button" @onclick="() => OpenSearchAsync(recentSearch)">@recentSearch</button>
-                    }
-                </div>
-            }
-        </article>
-
-        <article class="surface-card dashboard-panel dashboard-panel--pending">
-            <div class="panel-header">
-                <div>
-                    <p class="eyebrow">Pending-action inbox</p>
-                    <h2>Needs attention</h2>
-                </div>
-                <span class="status-pill status-pill--warning">@_summary.PendingActions.Count item@(_summary.PendingActions.Count == 1 ? string.Empty : "s")</span>
-            </div>
-            @if (_summary.PendingActions.Count == 0)
-            {
-                <div class="empty-state-card empty-state-card--compact">
-                    <h3>All clear</h3>
-                    <p>Nothing needs your attention right now.</p>
-                </div>
-            }
-            else
-            {
-                <div class="pending-list">
-                    @foreach (var item in _summary.PendingActions.OrderBy(item => item.Order))
-                    {
-                        <article class="pending-item">
-                            <div class="pending-item__header">
-                                <div>
-                                    <h3>@item.Title</h3>
-                                    <p>@item.Summary</p>
+                @if (_summary.PendingActions.Count == 0)
+                {
+                    <div class="empty-state-card empty-state-card--compact">
+                        <h3>All clear</h3>
+                        <p>Nothing needs your attention right now.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="pending-list">
+                        @foreach (var item in _summary.PendingActions.OrderBy(item => item.Order))
+                        {
+                            <article class="pending-item">
+                                <div class="pending-item__header">
+                                    <div>
+                                        <h3>@item.Title</h3>
+                                        <p>@item.Summary</p>
+                                    </div>
+                                    <span class="status-pill status-pill--@item.Severity">@item.Count</span>
                                 </div>
-                                <span class="status-pill status-pill--@item.Severity">@item.Count</span>
-                            </div>
-                            @if (item.Actions.Count > 0)
-                            {
-                                <div class="pending-item__actions">
-                                    @foreach (var action in item.Actions)
-                                    {
-                                        <a class="@(action.IsPrimary ? "primary-button compact" : "secondary-button compact")" href="@action.Href">@action.Label</a>
-                                    }
-                                </div>
-                            }
-                            else if (!string.IsNullOrWhiteSpace(item.DeepLink))
-                            {
-                                <div class="pending-item__actions">
-                                    <a class="secondary-button compact" href="@item.DeepLink">Review</a>
-                                </div>
-                            }
-                        </article>
-                    }
-                </div>
-            }
-        </article>
-    </section>
+                                @if (item.Actions.Count > 0)
+                                {
+                                    <div class="pending-item__actions">
+                                        @foreach (var action in item.Actions)
+                                        {
+                                            <a class="@(action.IsPrimary ? "primary-button compact" : "secondary-button compact")" href="@action.Href">@action.Label</a>
+                                        }
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(item.DeepLink))
+                                {
+                                    <div class="pending-item__actions">
+                                        <a class="secondary-button compact" href="@item.DeepLink">Review</a>
+                                    </div>
+                                }
+                            </article>
+                        }
+                    </div>
+                }
+            </article>
+        </section>
+    }
 </div>
 
 <style>
@@ -251,23 +267,35 @@
     protected override async Task OnInitializedAsync()
     {
         SearchUiSessionService.RememberSelectedMode("/dashboard");
-        _summary = DashboardSummaryService.GetSummary(Fixture);
+        _summary = string.IsNullOrWhiteSpace(Fixture)
+            ? DashboardSummaryService.GetSummary("empty")
+            : DashboardSummaryService.GetSummary(Fixture);
+
+        if (!string.IsNullOrWhiteSpace(Fixture) || (await CorpusReadinessService.GetReadinessAsync()).HasSearchableCorpus)
+        {
+            _summary = DashboardSummaryService.GetSummary(Fixture);
+        }
+
+        _recentSearches.Clear();
         _recentSearches.AddRange(_summary.SearchLaunchpad.RecentSearches);
         _launchpadQuery = _recentSearches.FirstOrDefault() ?? string.Empty;
 
         try
         {
-            var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
-            if (recentSearches is { Count: > 0 })
+            if (_summary.Corpus.HasSearchableCorpus)
             {
-                _recentSearches.Clear();
-                _recentSearches.AddRange(recentSearches.Take(5));
-                _launchpadQuery = _recentSearches[0];
+                var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
+                if (recentSearches is { Count: > 0 })
+                {
+                    _recentSearches.Clear();
+                    _recentSearches.AddRange(recentSearches.Take(5));
+                    _launchpadQuery = _recentSearches[0];
+                }
             }
         }
         catch
         {
-            // Fall back to the dashboard fixture data when the live API is unavailable.
+            // Keep the current summary when the live API is unavailable.
         }
     }
 

@@ -65,6 +65,12 @@
     color: #0f172a;
 }
 
+.empty-state-link {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+}
+
 .action-button:disabled,
 .secondary-button:disabled {
     opacity: 0.65;

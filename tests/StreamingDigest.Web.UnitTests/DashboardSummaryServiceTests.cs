@@ -59,6 +59,19 @@ public sealed class DashboardSummaryServiceTests
         Assert.DoesNotContain(summary.PendingActions, item => string.Equals(item.DeepLink, "/logs", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Empty_summary_uses_add_channel_only_language_for_pre_corpus_state()
+    {
+        var summary = _service.GetSummary("empty");
+
+        Assert.Equal("Add a channel to begin building the corpus.", summary.Summary);
+        Assert.Contains("Add a channel", summary.Digest.Caption);
+        Assert.DoesNotContain("run ingestion", summary.Digest.Caption, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("run ingestion", summary.Digest.EmptyMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("backfill", summary.SearchLaunchpad.Prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(string.Empty, summary.Corpus.BackfillGuidance);
+    }
+
     [Theory]
     [InlineData(false, null, false, "/channels")]
     [InlineData(true, "/search", false, "/search")]

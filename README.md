@@ -274,9 +274,10 @@ Streaming Digest is intended for private on-prem use, typically accessed through
 Security features:
 
 - single-user login
-- bootstrap admin credentials from environment variables on first startup
+- first-run setup UI when no app user exists
+- optional bootstrap admin credentials from environment variables on first startup
 - password hashed with Argon2id and stored in PostgreSQL
-- forced password change after bootstrap
+- forced password change only for environment-bootstrapped credentials
 - secure HTTP-only cookies
 - CSRF protection for mutating endpoints
 - login rate limiting
@@ -320,11 +321,19 @@ cp .env.example .env
 docker compose up -d
 ```
 
-`compose.yaml` is a checked-in artifact generated from the Aspire AppHost. Regenerate it after AppHost deployment changes with:
+`compose.yaml` is a checked-in artifact generated from the Aspire AppHost rather than the source of truth.
+
+Regenerate it so the committed Compose deployment stays aligned with the current AppHost resource graph and service wiring, including observability resources such as Grafana.
+
+Run the publish script whenever you change AppHost deployment behavior, such as service/resource wiring, exposed endpoints, environment propagation, or other changes that affect Compose output. Do not hand-edit `compose.yaml`; republish it before committing deployment-shape changes.
+
+From the repository root, run:
 
 ```bash
 ./scripts/publish_compose.sh
 ```
+
+The script runs `aspire publish` for `src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj`, then replaces the repository-root `compose.yaml` with the generated `docker-compose.yaml` artifact.
 
 Open the web application:
 
@@ -334,8 +343,8 @@ http://localhost:8080
 
 On first startup:
 
-1. Sign in using the bootstrap admin credentials configured in the environment.
-2. Change the bootstrap password.
+1. If no bootstrap admin user was created from environment variables, open `/setup` and create the first account in the web UI.
+2. If bootstrap admin credentials were configured in the environment, sign in with them and complete the forced password change.
 3. Configure Ollama embedding and LLM models.
 4. Configure the local audio-to-text service.
 5. Configure Matrix bot credentials and room ID; encrypted room setup is MVP+.

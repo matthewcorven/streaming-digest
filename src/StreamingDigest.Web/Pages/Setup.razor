@@ -1,26 +1,21 @@
-@page "/login"
+@page "/setup"
 @layout PublicLayout
 @inject AuthenticationService AuthenticationService
 @inject DashboardSummaryService DashboardSummaryService
 @inject SearchUiSessionService SearchUiSessionService
 @inject NavigationManager NavigationManager
 
-<PageTitle>Login</PageTitle>
+<PageTitle>First-time setup</PageTitle>
 
 <div class="login-page">
     <div class="login-card">
         <div class="brand-block">
             <div class="brand-mark">◉</div>
-            <h1>Stream Digest</h1>
-            <p>Your video knowledge base, tuned for search and operations.</p>
+            <h1>Create the first account</h1>
+            <p>Set the initial administrator credentials for this Stream Digest installation.</p>
         </div>
 
-        @if (!string.IsNullOrWhiteSpace(_successMessage))
-        {
-            <p class="helper-text">@_successMessage</p>
-        }
-
-        <EditForm Model="_model" OnValidSubmit="HandleLoginAsync">
+        <EditForm Model="_model" OnValidSubmit="HandleSetupAsync">
             <div class="form-group">
                 <label for="username">Username</label>
                 <InputText id="username" class="form-control" @bind-Value="_model.Username" />
@@ -36,71 +31,81 @@
                 </div>
             </div>
 
+            <div class="form-group">
+                <label for="confirm-password">Confirm password</label>
+                <InputText id="confirm-password" class="form-control" type="@(_showPassword ? "text" : "password")" @bind-Value="_model.ConfirmPassword" />
+            </div>
+
             @if (!string.IsNullOrWhiteSpace(_errorMessage))
             {
                 <div class="login-error">@_errorMessage</div>
             }
 
-            <button class="primary-button" type="submit">Sign in</button>
+            <button class="primary-button" type="submit">Create account</button>
         </EditForm>
+
+        <p class="helper-text">Passwords must be at least 12 characters. After setup, you will sign in on the normal login page.</p>
     </div>
 </div>
 
 @code {
-    private readonly LoginModel _model = new();
+    private readonly SetupModel _model = new();
     private bool _showPassword;
     private string? _errorMessage;
-    private string? _successMessage;
 
     protected override async Task OnInitializedAsync()
     {
         await AuthenticationService.InitializeAsync();
 
-        if (AuthenticationService.IsSetupRequired)
+        if (!AuthenticationService.IsSetupRequired)
         {
-            NavigationManager.NavigateTo("/setup", true);
-            return;
-        }
-
-        if (AuthenticationService.IsAuthenticated)
-        {
-            NavigationManager.NavigateTo(await DeterminePostLoginRouteAsync(), true);
-            return;
-        }
-
-        var query = NavigationManager.ToAbsoluteUri(NavigationManager.Uri).Query.TrimStart('?');
-        foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = segment.Split('=', 2);
-            if (parts.Length == 2
-                && string.Equals(Uri.UnescapeDataString(parts[0]), "setup", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(Uri.UnescapeDataString(parts[1]), "success", StringComparison.OrdinalIgnoreCase))
+            if (AuthenticationService.IsAuthenticated)
             {
-                _successMessage = "Setup complete. Sign in with the account you just created.";
-                break;
+                NavigationManager.NavigateTo(await DeterminePostLoginRouteAsync(), true);
+                return;
             }
+
+            NavigationManager.NavigateTo("/login", true);
         }
     }
 
-    private async Task HandleLoginAsync()
+    private async Task HandleSetupAsync()
     {
         _errorMessage = null;
 
-        var loginResult = await AuthenticationService.LoginAsync(_model.Username, _model.Password);
-        if (loginResult is AuthenticationService.LoginResult.Success or AuthenticationService.LoginResult.RequiresPasswordChange)
+        if (string.IsNullOrWhiteSpace(_model.Username) || string.IsNullOrWhiteSpace(_model.Password) || string.IsNullOrWhiteSpace(_model.ConfirmPassword))
         {
-            NavigationManager.NavigateTo(await DeterminePostLoginRouteAsync(loginResult), true);
+            _errorMessage = "Please complete all fields.";
             return;
         }
 
-        _errorMessage = "Invalid username or password.";
+        if (!string.Equals(_model.Password, _model.ConfirmPassword, StringComparison.Ordinal))
+        {
+            _errorMessage = "The passwords do not match.";
+            return;
+        }
+
+        var result = await AuthenticationService.InitializeFirstUserAsync(_model.Username, _model.Password);
+        if (result.ResultType == AuthenticationService.FirstUserSetupResultType.Success)
+        {
+            NavigationManager.NavigateTo("/login?setup=success", true);
+            return;
+        }
+
+        if (result.ResultType == AuthenticationService.FirstUserSetupResultType.AlreadyInitialized)
+        {
+            NavigationManager.NavigateTo("/login", true);
+            return;
+        }
+
+        _errorMessage = result.ErrorMessage ?? "The account could not be created.";
     }
 
     private void TogglePasswordVisibility() => _showPassword = !_showPassword;
 
-    private async Task<string> DeterminePostLoginRouteAsync(AuthenticationService.LoginResult? loginResult = null)
+    private async Task<string> DeterminePostLoginRouteAsync()
     {
-        if ((loginResult ?? (AuthenticationService.RequiresPasswordChange ? AuthenticationService.LoginResult.RequiresPasswordChange : AuthenticationService.LoginResult.Success)) == AuthenticationService.LoginResult.RequiresPasswordChange)
+        if (AuthenticationService.RequiresPasswordChange)
         {
             return "/change-password";
         }
@@ -109,10 +114,9 @@
         {
             var onboarding = await SearchUiSessionService.GetAuthenticatedJsonAsync<OnboardingStatusResponse>("/api/onboarding/status");
             var runs = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<IngestionRunFixtureSummary>>("/api/internal/ingestion-runs?limit=1");
-            var lastSelectedMode = SearchUiSessionService.GetLastSelectedModeRoute();
             return DashboardSummaryService.ResolvePostLoginRoute(
                 onboarding?.IsCoreSetupComplete ?? true,
-                lastSelectedMode,
+                SearchUiSessionService.GetLastSelectedModeRoute(),
                 runs is { Count: > 0 });
         }
         catch
@@ -124,10 +128,11 @@
         }
     }
 
-    private sealed class LoginModel
+    private sealed class SetupModel
     {
         public string Username { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
+        public string ConfirmPassword { get; set; } = string.Empty;
     }
 
     private sealed class OnboardingStatusResponse

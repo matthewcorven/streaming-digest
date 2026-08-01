@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -12,8 +11,6 @@ public sealed class BootstrapAdminUserService
 
     private readonly IConfiguration _configuration;
     private readonly ILogger<BootstrapAdminUserService> _logger;
-    private static readonly PasswordHasher<string> PasswordHasher = new();
-
     public BootstrapAdminUserService(IConfiguration configuration, ILogger<BootstrapAdminUserService> logger)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -42,7 +39,7 @@ public sealed class BootstrapAdminUserService
             return;
         }
 
-        var passwordHash = CreatePasswordHash(password);
+        var passwordHash = AppAuthService.HashPassword(password);
         var userId = Guid.NewGuid();
 
         await using var insertCommand = new NpgsqlCommand(
@@ -94,10 +91,5 @@ public sealed class BootstrapAdminUserService
         }
 
         return null;
-    }
-
-    private static string CreatePasswordHash(string password)
-    {
-        return PasswordHasher.HashPassword(string.Empty, password);
     }
 }
