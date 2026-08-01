@@ -48,8 +48,8 @@ public static class CorpusReadinessEvaluator
             HasAnyRuns: false,
             HasSearchableCorpus: false,
             LatestRunFoundZeroVideos: false,
-            WaitingHeadline: "Nothing to search yet",
-            WaitingMessage: "Until the first ingestion run completes with at least one ingested video, search stays in a pre-corpus waiting state.",
+            WaitingHeadline: "Start by adding a channel",
+            WaitingMessage: "Add a channel to begin building the corpus. Search, the dashboard, and run history will appear after the first videos become available.",
             BackfillGuidance: string.Empty);
 
     public static CorpusReadinessState Evaluate(IReadOnlyList<IngestionRunDetailViewModel> runDetails)
@@ -80,11 +80,9 @@ public static class CorpusReadinessEvaluator
             HasAnyRuns: true,
             HasSearchableCorpus: false,
             LatestRunFoundZeroVideos: latestRunFoundZeroVideos,
-            WaitingHeadline: "Corpus still warming up",
-            WaitingMessage: "Search opens as soon as a completed run ingests at least one video.",
-            BackfillGuidance: latestRunFoundZeroVideos
-                ? "The latest completed run finished with zero ingested videos. Widen the backfill window or add another channel before returning to search."
-                : string.Empty);
+            WaitingHeadline: "Add another channel to keep building the corpus",
+            WaitingMessage: "This workspace stays in its empty-state experience until at least one channel contributes searchable videos.",
+            BackfillGuidance: string.Empty);
     }
 }
 

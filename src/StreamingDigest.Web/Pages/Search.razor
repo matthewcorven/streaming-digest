@@ -10,6 +10,25 @@
 <PageTitle>Search</PageTitle>
 
 <div class="page-shell">
+    @if (_showWaitingState)
+    {
+        <section class="hero-card waiting-state">
+            <div>
+                <p class="eyebrow">Search</p>
+                <h2>@_waitingHeadline</h2>
+                <p>@_waitingMessage</p>
+                @if (!string.IsNullOrWhiteSpace(_errorMessage))
+                {
+                    <div class="status-message status-warning">@_errorMessage</div>
+                }
+            </div>
+            <div class="hero-actions">
+                <a class="primary-button" href="/channels">Add a channel</a>
+            </div>
+        </section>
+    }
+    else
+    {
     <section class="hero-card">
         <div>
            <p class="eyebrow">Search</p>
@@ -22,31 +41,6 @@
         </div>
     </section>
 
-    @if (_showWaitingState)
-    {
-        <section class="state-card waiting-state">
-            <div>
-                <p class="eyebrow">Pre-corpus waiting state</p>
-                <h2>@_waitingHeadline</h2>
-                <p>@_waitingMessage</p>
-                @if (!string.IsNullOrWhiteSpace(_backfillGuidance))
-                {
-                    <p class="page-description">@_backfillGuidance</p>
-                }
-                @if (!string.IsNullOrWhiteSpace(_errorMessage))
-                {
-                    <div class="status-message status-warning">@_errorMessage</div>
-                }
-            </div>
-            <div class="hero-actions">
-                <button class="primary-button" type="button" @onclick="TriggerRunIngestionAsync" disabled="@_isWaitingActionBusy">@(_isWaitingActionBusy ? "Working…" : "Run ingestion now")</button>
-                <button class="secondary-button" type="button" @onclick="TriggerBackfillAsync" disabled="@_isWaitingActionBusy">Backfill guidance</button>
-                <a class="secondary-button" href="/channels">Add a channel</a>
-            </div>
-        </section>
-    }
-    else
-    {
     <section class="search-layout">
         <div class="search-main">
            <div class="search-box">
@@ -196,7 +190,6 @@
                                            }
                                        </div>
                                    </section>
-                                   }
                                </div>
 
                                <div class="result-card__expanded-grid">
@@ -244,7 +237,6 @@
                                            <li><strong>Warnings</strong><p>@string.Join(" · ", result.ProcessingWarnings)</p></li>
                                        </ul>
                                    </section>
-                                   }
                                </div>
                            </div>
                        }
@@ -418,10 +410,8 @@
     private bool _isSearching;
     private bool _isLoading = true;
     private bool _showWaitingState;
-    private bool _isWaitingActionBusy;
     private string _waitingHeadline = "Nothing to search yet";
-    private string _waitingMessage = "Run ingestion now to build the first searchable corpus.";
-    private string _backfillGuidance = string.Empty;
+    private string _waitingMessage = "Add a channel to begin building the corpus.";
     private SearchResponse? _searchResponse;
     private readonly List<string> _recentSearches = new();
     private readonly SearchUiSettings _settings = new();
@@ -489,50 +479,20 @@
         if (readiness.HasSearchableCorpus)
         {
             _showWaitingState = false;
-            _backfillGuidance = string.Empty;
             return true;
         }
 
-        SetWaitingState(readiness.WaitingHeadline, readiness.WaitingMessage, readiness.BackfillGuidance);
+        SetWaitingState(readiness.WaitingHeadline, readiness.WaitingMessage);
 
         return false;
     }
 
-    private void SetWaitingState(string headline, string message, string backfillGuidance)
+    private void SetWaitingState(string headline, string message)
     {
         _showWaitingState = true;
         _waitingHeadline = headline;
         _waitingMessage = message;
-        _backfillGuidance = backfillGuidance;
     }
-
-    private async Task TriggerSearchWaitingActionAsync(string endpoint, string actionLabel)
-    {
-        _isWaitingActionBusy = true;
-        _errorMessage = string.Empty;
-
-        try
-        {
-            using var request = await CreateMutatingRequestAsync(HttpMethod.Post, endpoint);
-            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
-            response.EnsureSuccessStatusCode();
-            _waitingMessage = $"{actionLabel} requested. Refresh after the run completes to unlock search.";
-        }
-        catch (Exception ex)
-        {
-            _errorMessage = ex.Message;
-        }
-        finally
-        {
-            _isWaitingActionBusy = false;
-        }
-    }
-
-    private Task TriggerRunIngestionAsync()
-        => TriggerSearchWaitingActionAsync("/api/admin/operations/ingestion/run", "Run ingestion now");
-
-    private Task TriggerBackfillAsync()
-        => TriggerSearchWaitingActionAsync("/api/admin/operations/ingestion/channel-backfill", "Run channel backfill");
 
     private async Task RunSearchAsync()
     {

@@ -1,61 +1,81 @@
 @page "/ingestion"
 @using System.Net.Http.Json
+@using StreamingDigest.Web.Services
+@inject CorpusReadinessService CorpusReadinessService
 @inject SearchUiSessionService SearchUiSessionService
 
 <PageTitle>Ingestion runs</PageTitle>
 
 <div class="ingestion-list-page">
-    <div class="page-heading">
-        <div>
-            <p class="eyebrow">Operations</p>
-            <h1>Ingestion runs</h1>
-        </div>
-        <p class="page-description">Recent ingestion runs, with live status pulled from persisted run and item records.</p>
-    </div>
-
-    <section class="admin-actions-card">
-        <div class="section-heading">
-            <div>
-                <p class="eyebrow">Admin</p>
-                <h2>Contextual operations</h2>
-            </div>
-            <p class="page-description">Trigger ingestion and backfill flows from the current ingestion surface.</p>
-        </div>
-        <div class="action-buttons">
-            <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetRunIngestionEndpoint(), GetRunIngestionLabel()))">Run ingestion now</button>
-            <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetChannelBackfillEndpoint(), GetChannelBackfillLabel()))">Run channel backfill</button>
-        </div>
-        @if (!string.IsNullOrWhiteSpace(_feedbackMessage))
-        {
-            <p class="action-feedback @_feedbackClass">@_feedbackMessage</p>
-        }
-    </section>
-
-    @if (_runs.Count == 0)
+    @if (!_corpusReadiness.HasSearchableCorpus)
     {
         <section class="section-card">
-            <p class="muted">No ingestion runs are recorded yet. Run ingestion now to create the first run record.</p>
+            <div>
+                <p class="eyebrow">Operations</p>
+                <h1>@_corpusReadiness.WaitingHeadline</h1>
+                <p class="page-description">@_corpusReadiness.WaitingMessage</p>
+            </div>
+            <div class="action-buttons">
+                <a class="action-button empty-state-link" href="/channels">Add a channel</a>
+            </div>
         </section>
     }
     else
     {
-        <div class="fixture-grid">
-        @foreach (var run in _runs)
-        {
-            <a class="fixture-card" href="@($"/ingestion/runs/{run.Id}")">
-                <div class="fixture-card-header">
-                    <h2>@run.Title</h2>
-                    <span class="status-pill">@run.StatusText</span>
-                </div>
-                <p>@run.Subtitle</p>
-            </a>
-        }
+        <div class="page-heading">
+            <div>
+                <p class="eyebrow">Operations</p>
+                <h1>Ingestion runs</h1>
+            </div>
+            <p class="page-description">Recent ingestion runs, with live status pulled from persisted run and item records.</p>
         </div>
+
+        <section class="admin-actions-card">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Admin</p>
+                    <h2>Contextual operations</h2>
+                </div>
+                <p class="page-description">Trigger ingestion and backfill flows from the current ingestion surface.</p>
+            </div>
+            <div class="action-buttons">
+                <button class="action-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetRunIngestionEndpoint(), GetRunIngestionLabel()))">Run ingestion now</button>
+                <button class="secondary-button" type="button" disabled="@_isBusy" @onclick="@(() => TriggerActionAsync(GetChannelBackfillEndpoint(), GetChannelBackfillLabel()))">Run channel backfill</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_feedbackMessage))
+            {
+                <p class="action-feedback @_feedbackClass">@_feedbackMessage</p>
+            }
+        </section>
+
+        @if (_runs.Count == 0)
+        {
+            <section class="section-card">
+                <p class="muted">No ingestion runs are recorded yet. Run ingestion now to create the first run record.</p>
+            </section>
+        }
+        else
+        {
+            <div class="fixture-grid">
+            @foreach (var run in _runs)
+            {
+                <a class="fixture-card" href="@($"/ingestion/runs/{run.Id}")">
+                    <div class="fixture-card-header">
+                        <h2>@run.Title</h2>
+                        <span class="status-pill">@run.StatusText</span>
+                    </div>
+                    <p>@run.Subtitle</p>
+                </a>
+            }
+            </div>
+        }
     }
+
 </div>
 
 @code {
     private readonly List<IngestionRunFixtureSummary> _runs = [];
+    private CorpusReadinessState _corpusReadiness = CorpusReadinessEvaluator.NoRuns();
     private bool _isBusy;
     private string? _feedbackMessage;
     private string _feedbackClass = "neutral";
@@ -120,10 +140,13 @@
             {
                 _runs.AddRange(runs);
             }
+
+            _corpusReadiness = await CorpusReadinessService.GetReadinessAsync();
         }
         catch
         {
             _runs.Clear();
+            _corpusReadiness = CorpusReadinessEvaluator.NoRuns();
         }
     }
 
