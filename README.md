@@ -321,11 +321,19 @@ cp .env.example .env
 docker compose up -d
 ```
 
-`compose.yaml` is a checked-in artifact generated from the Aspire AppHost. Regenerate it after AppHost deployment changes with:
+`compose.yaml` is a checked-in artifact generated from the Aspire AppHost rather than the source of truth.
+
+Regenerate it so the committed Compose deployment stays aligned with the current AppHost resource graph and service wiring, including observability resources such as Grafana.
+
+Run the publish script whenever you change AppHost deployment behavior, such as service/resource wiring, exposed endpoints, environment propagation, or other changes that affect Compose output. Do not hand-edit `compose.yaml`; republish it before committing deployment-shape changes.
+
+From the repository root, run:
 
 ```bash
 ./scripts/publish_compose.sh
 ```
+
+The script runs `aspire publish` for `src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj`, then replaces the repository-root `compose.yaml` with the generated `docker-compose.yaml` artifact.
 
 Open the web application:
 
