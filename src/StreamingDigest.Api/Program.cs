@@ -1368,6 +1368,17 @@ app.MapPost("/api/observability/toggle/{enabled:bool}", async (bool enabled, Htt
     return Results.Ok(new { enabled, mode = enabled ? "enabled" : "disabled" });
 });
 
+app.MapMethods("/grafana", ["GET", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
+{
+    if (context.Request.Path.Equals("/grafana/", StringComparison.OrdinalIgnoreCase))
+    {
+        return await ProxyObservabilityRequestAsync(context, httpClientFactory, observabilityRuntime, "grafana", observabilityRuntime.GrafanaUrl, cancellationToken);
+    }
+
+    var target = string.Concat("/grafana/", context.Request.QueryString.Value);
+    return Results.Redirect(target, permanent: false);
+});
+
 app.MapMethods("/grafana/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
     await ProxyObservabilityRequestAsync(context, httpClientFactory, observabilityRuntime, "grafana", observabilityRuntime.GrafanaUrl, cancellationToken));
 app.MapMethods("/prometheus/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"], async (HttpContext context, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
@@ -1920,7 +1931,7 @@ static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, I
     try
     {
         using var client = httpClientFactory.CreateClient();
-        var targetUri = BuildProxyUri(context.Request.Path, upstreamBaseUrl, context.Request.QueryString.Value);
+        var targetUri = BuildProxyUri(context.Request.Path, serviceName, upstreamBaseUrl, context.Request.QueryString.Value);
         using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri);
         var forwardedHost = context.Request.Host.HasValue ? context.Request.Host.Value : null;
 
@@ -1959,11 +1970,46 @@ static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, I
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
         var responseBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-        return Results.Bytes(responseBytes, contentType);
+
+        context.Response.StatusCode = (int)response.StatusCode;
+        CopyProxyResponseHeaders(context.Response, response);
+
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            context.Response.ContentType = contentType;
+        }
+
+        await context.Response.Body.WriteAsync(responseBytes, cancellationToken);
+        return Results.Empty;
     }
     catch (Exception ex)
     {
         return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway);
+    }
+}
+
+static void CopyProxyResponseHeaders(HttpResponse destination, HttpResponseMessage source)
+{
+    foreach (var header in source.Headers)
+    {
+        if (header.Key.Equals("transfer-encoding", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        destination.Headers[header.Key] = header.Value.ToArray();
+    }
+
+    foreach (var header in source.Content.Headers)
+    {
+        if (header.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase)
+            || header.Key.Equals("content-length", StringComparison.OrdinalIgnoreCase)
+            || header.Key.Equals("transfer-encoding", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        destination.Headers[header.Key] = header.Value.ToArray();
     }
 }
 
@@ -2099,14 +2145,16 @@ static async Task<byte[]> ReadRequestBodyAsync(HttpRequest request, Cancellation
     return buffer.ToArray();
 }
 
-static Uri BuildProxyUri(PathString requestPath, string upstreamBaseUrl, string? query)
+static Uri BuildProxyUri(PathString requestPath, string serviceName, string upstreamBaseUrl, string? query)
 {
     var baseUri = new Uri(upstreamBaseUrl.EndsWith('/') ? upstreamBaseUrl : upstreamBaseUrl + "/");
-    var relativePath = requestPath.Value?.Replace("/grafana", string.Empty, StringComparison.OrdinalIgnoreCase)
-        .Replace("/prometheus", string.Empty, StringComparison.OrdinalIgnoreCase)
-        .Replace("/loki", string.Empty, StringComparison.OrdinalIgnoreCase)
-        .Replace("/tempo", string.Empty, StringComparison.OrdinalIgnoreCase)
-        ?? string.Empty;
+    var requestPathValue = requestPath.Value ?? string.Empty;
+    var servicePrefix = $"/{serviceName}";
+    var relativePath = serviceName.Equals("grafana", StringComparison.OrdinalIgnoreCase)
+        ? requestPathValue
+        : requestPathValue.StartsWith(servicePrefix, StringComparison.OrdinalIgnoreCase)
+            ? requestPathValue[servicePrefix.Length..]
+            : requestPathValue;
 
     var sanitizedPath = string.IsNullOrWhiteSpace(relativePath) ? "/" : relativePath;
     var builder = new UriBuilder(baseUri)

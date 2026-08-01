@@ -123,6 +123,8 @@ builder.AddDockerComposeEnvironment("docker-compose")
         {
             grafanaService.AddEnvironmentalVariable("GF_SERVER_ROOT_URL", "%(protocol)s://%(domain)s:%(http_port)s/grafana/");
             grafanaService.AddEnvironmentalVariable("GF_SERVER_SERVE_FROM_SUB_PATH", "true");
+                grafanaService.AddEnvironmentalVariable("GF_AUTH_ANONYMOUS_ENABLED", "true");
+                grafanaService.AddEnvironmentalVariable("GF_AUTH_ANONYMOUS_ORG_ROLE", "Viewer");
         }
 
         SetPublishedPorts(composeFile, "ollama", ["127.0.0.1:11434:11434"]);
@@ -178,6 +180,8 @@ var grafana = builder.AddContainer("grafana", "grafana/grafana")
     .WithEnvironment("GF_SECURITY_ADMIN_PASSWORD", grafanaAdminPassword)
     .WithEnvironment("GF_SERVER_ROOT_URL", "%(protocol)s://%(domain)s:%(http_port)s/grafana/")
     .WithEnvironment("GF_SERVER_SERVE_FROM_SUB_PATH", "true")
+    .WithEnvironment("GF_AUTH_ANONYMOUS_ENABLED", "true")
+    .WithEnvironment("GF_AUTH_ANONYMOUS_ORG_ROLE", "Viewer")
     .WithVolume("streamingdigest-grafana-data", "/var/lib/grafana")
     .WithBindMount("../../compose/observability/grafana/provisioning", "/etc/grafana/provisioning", isReadOnly: true)
     .WithBindMount("../../compose/observability/grafana/dashboards", "/var/lib/grafana/dashboards", isReadOnly: true)
