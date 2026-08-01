@@ -146,6 +146,7 @@ app.MapModelEndpoints(connectionString, jsonOptions);
 app.MapSearchUiEndpoints(jsonOptions);
 app.MapNoteEndpoints();
 
+ApiRequestPipeline.MapReservedNotFoundFallbacks(app);
 app.MapFallbackToFile("index.html");
 app.Run();
 

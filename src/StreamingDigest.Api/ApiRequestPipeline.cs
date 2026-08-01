@@ -1,4 +1,5 @@
 using StreamingDigest.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace StreamingDigest.Api;
 
@@ -78,6 +79,15 @@ internal static class ApiRequestPipeline
             Path = "/",
             MaxAge = TimeSpan.FromHours(8)
         };
+    }
+
+    public static void MapReservedNotFoundFallbacks(WebApplication app)
+    {
+        var methods = new[] { "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD" };
+
+        app.MapMethods("/api/{**catchAll}", methods, () => Results.NotFound());
+        app.MapMethods("/admin/{**catchAll}", methods, () => Results.NotFound());
+        app.MapMethods("/internal/{**catchAll}", methods, () => Results.NotFound());
     }
 
     private static Task RejectDirectSpaDocumentRequests(HttpContext context, Func<Task> next)
@@ -187,18 +197,27 @@ internal static class ApiRequestPipeline
             return false;
         }
 
-        if (ContainsDotSegments(path) && IsReservedApplicationPath(request.Path))
+        var rawTarget = request.HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget ?? path;
+        var rawPath = rawTarget.Split('?', 2)[0];
+        var isReservedPath = IsReservedApplicationPath(request.Path);
+        var isReservedRawPath = IsReservedApplicationPath(rawPath);
+
+        if (IsDirectSpaDocumentPath(path) || (isReservedPath && IsDirectSpaDocumentPath(path)) || (isReservedRawPath && IsDirectSpaDocumentPath(rawPath)))
         {
             return true;
         }
 
-        if (IsReservedApplicationPath(request.Path))
+        if (ContainsDotSegments(rawPath) && isReservedRawPath)
+        {
+            return true;
+        }
+
+        if (isReservedPath)
         {
             return false;
         }
 
-        return path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)
-            || path.Equals("/index.htm", StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static bool IsReservedApplicationPath(PathString path)
@@ -213,11 +232,31 @@ internal static class ApiRequestPipeline
             || path.StartsWithSegments("/tempo");
     }
 
+    private static bool IsReservedApplicationPath(string path)
+    {
+        return path.StartsWith("/api", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/admin", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/internal", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/grafana", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/pgadmin", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/prometheus", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/loki", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/tempo", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool ContainsDotSegments(string path)
     {
         return path.Contains("../", StringComparison.Ordinal)
             || path.Contains("..\\", StringComparison.Ordinal)
             || path.EndsWith("/..", StringComparison.Ordinal)
             || path.EndsWith("\\..", StringComparison.Ordinal);
+    }
+
+    private static bool IsDirectSpaDocumentPath(string path)
+    {
+        return path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/index.htm", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/index.html", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/index.htm", StringComparison.OrdinalIgnoreCase);
     }
 }
