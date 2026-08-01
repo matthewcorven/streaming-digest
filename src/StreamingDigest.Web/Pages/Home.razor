@@ -1,6 +1,7 @@
 @page "/"
 @page "/dashboard"
 @inject DashboardSummaryService DashboardSummaryService
+@inject CorpusReadinessService CorpusReadinessService
 @inject SearchUiSessionService SearchUiSessionService
 @inject NavigationManager NavigationManager
 
@@ -251,23 +252,35 @@
     protected override async Task OnInitializedAsync()
     {
         SearchUiSessionService.RememberSelectedMode("/dashboard");
-        _summary = DashboardSummaryService.GetSummary(Fixture);
+        _summary = string.IsNullOrWhiteSpace(Fixture)
+            ? DashboardSummaryService.GetSummary("empty")
+            : DashboardSummaryService.GetSummary(Fixture);
+
+        if (!string.IsNullOrWhiteSpace(Fixture) || (await CorpusReadinessService.GetReadinessAsync()).HasSearchableCorpus)
+        {
+            _summary = DashboardSummaryService.GetSummary(Fixture);
+        }
+
+        _recentSearches.Clear();
         _recentSearches.AddRange(_summary.SearchLaunchpad.RecentSearches);
         _launchpadQuery = _recentSearches.FirstOrDefault() ?? string.Empty;
 
         try
         {
-            var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
-            if (recentSearches is { Count: > 0 })
+            if (_summary.Corpus.HasSearchableCorpus)
             {
-                _recentSearches.Clear();
-                _recentSearches.AddRange(recentSearches.Take(5));
-                _launchpadQuery = _recentSearches[0];
+                var recentSearches = await SearchUiSessionService.GetAuthenticatedJsonAsync<List<string>>("/api/search-ui/recent");
+                if (recentSearches is { Count: > 0 })
+                {
+                    _recentSearches.Clear();
+                    _recentSearches.AddRange(recentSearches.Take(5));
+                    _launchpadQuery = _recentSearches[0];
+                }
             }
         }
         catch
         {
-            // Fall back to the dashboard fixture data when the live API is unavailable.
+            // Keep the current summary when the live API is unavailable.
         }
     }
 

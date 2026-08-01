@@ -13,5 +13,6 @@ builder.Services.AddScoped<UpgradeMaintenanceSnapshotService>();
 builder.Services.AddSingleton<DashboardSummaryService>();
 builder.Services.AddScoped<AuthenticationService>();
 builder.Services.AddScoped<SearchUiSessionService>();
+builder.Services.AddScoped<CorpusReadinessService>();
 
 await builder.Build().RunAsync();
