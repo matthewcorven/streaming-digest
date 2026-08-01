@@ -14,6 +14,7 @@ using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using StreamingDigest.Api;
 using StreamingDigest.Api.Observability;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
@@ -69,27 +70,6 @@ builder.Services.AddOpenTelemetry()
 
 GlobalJobFilters.Filters.Add(new HangfireObservabilityFilter());
 
-builder.Services.AddOpenApi();
-builder.Services.AddHttpClient();
-builder.Services.AddHttpClient<MatrixNotificationClient>();
-builder.Services.AddSingleton(sp =>
-{
-    var configuration = sp.GetRequiredService<IConfiguration>();
-    return new MatrixNotificationOptions
-    {
-        IsEnabled = configuration.GetValue<bool>("notifications:matrix:enabled"),
-        HomeserverBaseUrl = configuration["notifications:matrix:homeserverUrl"] ?? "https://matrix-client.matrix.org",
-        AccessToken = configuration["notifications:matrix:accessToken"] ?? string.Empty,
-        RoomId = configuration["notifications:matrix:roomId"] ?? string.Empty,
-        BotUserId = configuration["notifications:matrix:botUserId"],
-        OnManualRuns = configuration.GetValue<bool>("notifications:matrix:onManualRuns"),
-        OnScheduledRuns = configuration.GetValue<bool>("notifications:matrix:onScheduledRuns"),
-        OnBackfillRuns = configuration.GetValue<bool>("notifications:matrix:onBackfillRuns"),
-        DashboardBaseUrl = configuration["notifications:matrix:dashboardBaseUrl"] ?? "http://localhost:8080"
-    };
-});
-builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
-
 var connectionString = builder.Configuration.GetConnectionString("streamingdigest")
     ?? builder.Configuration.GetConnectionString("postgres")
     ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
@@ -111,30 +91,12 @@ if (!databaseStatus.Connected)
 {
     startupLogger.LogWarning("Hangfire PostgreSQL connectivity is unavailable; the dashboard will use in-memory storage for this startup.");
 }
-
-builder.Services.AddHangfire(config => config.UseStorage(hangfireStorage));
-builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
-builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
-builder.Services.AddSingleton<BootstrapAdminUserService>();
-builder.Services.AddSingleton<AppAuthService>();
-builder.Services.AddSingleton<AppReadinessStateService>();
-builder.Services.AddSingleton<FirstUserSetupService>();
-builder.Services.AddSingleton<ModelDiscoveryService>();
-builder.Services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
-builder.Services.AddSingleton<SearchUiService>();
-builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
-builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
-builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
-builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
-builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
-builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
-builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
-builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
-builder.Services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
-builder.Services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(applicationConfiguration, builder.Environment.ContentRootPath, sp.GetRequiredService<IAdminOperationStore>(), sp.GetService<IEmbeddingService>(), sp.GetService<ITranscriptIngestionService>(), sp.GetService<ISearchDocumentRegenerationService>()));
-builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
-builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
-builder.Services.AddScoped<IChannelRepository, ChannelRepository>();
+builder.Services.AddStreamingDigestApiServices(
+    builder.Configuration,
+    builder.Environment,
+    applicationConfiguration,
+    connectionString,
+    hangfireStorage);
 
 var app = builder.Build();
 var authService = app.Services.GetRequiredService<AppAuthService>();
