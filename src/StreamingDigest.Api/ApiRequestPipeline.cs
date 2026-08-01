@@ -187,19 +187,37 @@ internal static class ApiRequestPipeline
             return false;
         }
 
-        if (request.Path.StartsWithSegments("/api") ||
-            request.Path.StartsWithSegments("/admin") ||
-            request.Path.StartsWithSegments("/internal") ||
-            request.Path.StartsWithSegments("/grafana") ||
-            request.Path.StartsWithSegments("/pgadmin") ||
-            request.Path.StartsWithSegments("/prometheus") ||
-            request.Path.StartsWithSegments("/loki") ||
-            request.Path.StartsWithSegments("/tempo"))
+        if (ContainsDotSegments(path) && IsReservedApplicationPath(request.Path))
+        {
+            return true;
+        }
+
+        if (IsReservedApplicationPath(request.Path))
         {
             return false;
         }
 
         return path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/index.htm", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsReservedApplicationPath(PathString path)
+    {
+        return path.StartsWithSegments("/api")
+            || path.StartsWithSegments("/admin")
+            || path.StartsWithSegments("/internal")
+            || path.StartsWithSegments("/grafana")
+            || path.StartsWithSegments("/pgadmin")
+            || path.StartsWithSegments("/prometheus")
+            || path.StartsWithSegments("/loki")
+            || path.StartsWithSegments("/tempo");
+    }
+
+    private static bool ContainsDotSegments(string path)
+    {
+        return path.Contains("../", StringComparison.Ordinal)
+            || path.Contains("..\\", StringComparison.Ordinal)
+            || path.EndsWith("/..", StringComparison.Ordinal)
+            || path.EndsWith("\\..", StringComparison.Ordinal);
     }
 }

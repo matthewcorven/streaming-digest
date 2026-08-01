@@ -296,6 +296,7 @@ public sealed class FirstRunSetupE2ETests : IAsyncLifetime
     {
         var sourceWebRoot = Path.Combine(_repoRoot, "src", "StreamingDigest.Web", "wwwroot");
         var builtFrameworkRoot = Path.Combine(_repoRoot, "src", "StreamingDigest.Web", "bin", "Debug", "net10.0", "wwwroot", "_framework");
+        var generatedHtmlRoot = Path.Combine(_repoRoot, "src", "StreamingDigest.Web", "obj", "Debug", "net10.0", "staticwebassets", "htmlassetplaceholders", "build");
         var stylesheetPath = Path.Combine(_repoRoot, "src", "StreamingDigest.Web", "obj", "Debug", "net10.0", "scopedcss", "bundle", "StreamingDigest.Web.styles.css");
         var hotReloadModulePath = Path.Combine(_repoRoot, "src", "StreamingDigest.Web", "obj", "Debug", "net10.0", "hotreload", "Microsoft.DotNet.HotReload.WebAssembly.Browser.lib.module.js");
         var dotnetLoaderPath = Path.Combine(_repoRoot, "src", "StreamingDigest.Web", "obj", "Debug", "net10.0", "dotnet.js");
@@ -320,6 +321,16 @@ public sealed class FirstRunSetupE2ETests : IAsyncLifetime
                 Path.Combine(tempRoot, "_framework", hotReloadAlias),
                 overwrite: true);
         }
+
+        var generatedIndexPath = Directory.GetFiles(generatedHtmlRoot, "*.html")
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(generatedIndexPath))
+        {
+            throw new FileNotFoundException("Could not find the generated Blazor HTML placeholder for the E2E webroot.");
+        }
+
+        File.Copy(generatedIndexPath, Path.Combine(tempRoot, "index.html"), overwrite: true);
 
         var indexPath = Path.Combine(tempRoot, "index.html");
         var indexHtml = File.ReadAllText(indexPath);
