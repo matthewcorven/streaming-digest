@@ -116,6 +116,27 @@ services:
         condition: "service_started"
     networks:
       - "aspire"
+  pgadmin:
+    image: "dpage/pgadmin4:9.6.0"
+    container_name: "streaming-digest-pgadmin"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_DEFAULT_EMAIL}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_DEFAULT_PASSWORD}"
+      PGADMIN_LISTEN_PORT: "5050"
+    ports:
+      - "127.0.0.1:5050:5050"
+    expose:
+      - "5050"
+    volumes:
+      - type: "volume"
+        target: "/var/lib/pgadmin"
+        source: "streamingdigest-pgadmin-data"
+        read_only: false
+    depends_on:
+      postgres:
+        condition: "service_started"
+    networks:
+      - "aspire"
   loki:
     image: "grafana/loki:3.2.0"
     container_name: "streaming-digest-loki"
@@ -202,6 +223,7 @@ services:
       Scraper__BaseUrl: "http://scraper:3000"
       llm__baseUrl: "http://ollama:11434"
       observability:services:grafana:url: "http://grafana:3000"
+      observability:services:pgadmin:url: "http://pgadmin:5050"
       observability:services:prometheus:url: "http://prometheus:9090"
       observability:services:loki:url: "http://loki:3100"
       observability:services:tempo:url: "http://tempo:3200"
@@ -225,6 +247,8 @@ services:
       ollama-bootstrap:
         condition: "service_completed_successfully"
       otel-collector:
+        condition: "service_started"
+      pgadmin:
         condition: "service_started"
     networks:
       - "aspire"
@@ -294,6 +318,8 @@ volumes:
   streamingdigest-prometheus-data:
     driver: "local"
   streamingdigest-grafana-data:
+    driver: "local"
+  streamingdigest-pgadmin-data:
     driver: "local"
   streamingdigest-loki-data:
     driver: "local"

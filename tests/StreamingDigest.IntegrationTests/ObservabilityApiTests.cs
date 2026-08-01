@@ -28,12 +28,13 @@ public sealed class ObservabilityApiTests : IClassFixture<WebApplicationFactory<
         var labels = links.Select(link => link.GetProperty("label").GetString()!).ToArray();
 
         Assert.Equal(
-            ["Hangfire", "Grafana", "Prometheus", "Loki (via Grafana)", "Tempo (via Grafana)"],
+            ["Hangfire", "Grafana", "pgAdmin", "Prometheus", "Loki (via Grafana)", "Tempo (via Grafana)"],
             labels);
         Assert.Equal("/admin/jobs", links[0].GetProperty("url").GetString());
         Assert.Equal("/grafana", links[1].GetProperty("url").GetString());
-        Assert.Equal("/prometheus", links[2].GetProperty("url").GetString());
-        Assert.Equal("/grafana/explore", links[3].GetProperty("url").GetString());
+        Assert.Equal("/pgadmin", links[2].GetProperty("url").GetString());
+        Assert.Equal("/prometheus", links[3].GetProperty("url").GetString());
         Assert.Equal("/grafana/explore", links[4].GetProperty("url").GetString());
+        Assert.Equal("/grafana/explore", links[5].GetProperty("url").GetString());
     }
 }

@@ -11,6 +11,7 @@ public sealed class ObservabilityLinkCatalogTests
         var links = ObservabilityLinkCatalog.Create(
             "/admin/jobs",
             "http://grafana:3000",
+            "http://pgadmin:5050",
             "http://prometheus:9090",
             "http://loki:3100",
             "http://tempo:3200");
@@ -26,6 +27,11 @@ public sealed class ObservabilityLinkCatalogTests
             {
                 Assert.Equal("Grafana", link.Label);
                 Assert.Equal("/grafana", link.Url);
+            },
+            link =>
+            {
+                Assert.Equal("pgAdmin", link.Label);
+                Assert.Equal("/pgadmin", link.Url);
             },
             link =>
             {
@@ -50,6 +56,7 @@ public sealed class ObservabilityLinkCatalogTests
         var links = ObservabilityLinkCatalog.Create(
             "/admin/jobs",
             "",
+            "http://pgadmin:5050",
             "",
             "http://loki:3100",
             "http://tempo:3200");
@@ -60,6 +67,11 @@ public sealed class ObservabilityLinkCatalogTests
             {
                 Assert.Equal("Hangfire", link.Label);
                 Assert.Equal("/admin/jobs", link.Url);
+            },
+            link =>
+            {
+                Assert.Equal("pgAdmin", link.Label);
+                Assert.Equal("/pgadmin", link.Url);
             },
             link =>
             {
@@ -79,6 +91,7 @@ public sealed class ObservabilityLinkCatalogTests
         var links = ObservabilityLinkCatalog.Create(
             hangfireUrl: "",
             grafanaUrl: "http://grafana:3000",
+            pgAdminUrl: null,
             prometheusUrl: null,
             lokiUrl: "",
             tempoUrl: null);

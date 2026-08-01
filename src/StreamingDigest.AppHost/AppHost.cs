@@ -25,6 +25,13 @@ var grafanaAdminPassword = builder.AddParameterFromConfiguration(
     "grafana-admin-password",
     "Parameters:grafana-admin-password",
     secret: true);
+var pgAdminDefaultEmail = builder.AddParameterFromConfiguration(
+    "pgadmin-default-email",
+    "Parameters:pgadmin-default-email");
+var pgAdminDefaultPassword = builder.AddParameterFromConfiguration(
+    "pgadmin-default-password",
+    "Parameters:pgadmin-default-password",
+    secret: true);
 
 builder.AddDockerComposeEnvironment("docker-compose")
     .WithDashboard(false)
@@ -54,6 +61,7 @@ builder.AddDockerComposeEnvironment("docker-compose")
         SetContainerName(composeFile, "otel-collector", "streaming-digest-otel-collector");
         SetContainerName(composeFile, "prometheus", "streaming-digest-prometheus");
         SetContainerName(composeFile, "grafana", "streaming-digest-grafana");
+        SetContainerName(composeFile, "pgadmin", "streaming-digest-pgadmin");
         SetContainerName(composeFile, "loki", "streaming-digest-loki");
         SetContainerName(composeFile, "tempo", "streaming-digest-tempo");
         SetContainerName(composeFile, "scraper", "streaming-digest-scraper");
@@ -131,6 +139,7 @@ builder.AddDockerComposeEnvironment("docker-compose")
         SetPublishedPorts(composeFile, "otel-collector", ["4317:4317", "4318:4318"]);
         SetPublishedPorts(composeFile, "prometheus", ["127.0.0.1:9090:9090"]);
         SetPublishedPorts(composeFile, "grafana", ["127.0.0.1:3000:3000"]);
+        SetPublishedPorts(composeFile, "pgadmin", ["127.0.0.1:5050:5050"]);
         SetPublishedPorts(composeFile, "loki", ["127.0.0.1:3100:3100"]);
         SetPublishedPorts(composeFile, "tempo", ["127.0.0.1:3200:3200"]);
     });
@@ -188,6 +197,15 @@ var grafana = builder.AddContainer("grafana", "grafana/grafana")
     .WithHttpEndpoint(targetPort: 3000, port: 3000)
     .WaitFor(prometheus);
 
+var pgadmin = builder.AddContainer("pgadmin", "dpage/pgadmin4")
+    .WithImageTag("9.6.0")
+    .WithEnvironment("PGADMIN_DEFAULT_EMAIL", pgAdminDefaultEmail)
+    .WithEnvironment("PGADMIN_DEFAULT_PASSWORD", pgAdminDefaultPassword)
+    .WithEnvironment("PGADMIN_LISTEN_PORT", "5050")
+    .WithVolume("streamingdigest-pgadmin-data", "/var/lib/pgadmin")
+    .WithHttpEndpoint(targetPort: 5050, port: 5050)
+    .WaitFor(postgres);
+
 var loki = builder.AddContainer("loki", "grafana/loki")
     .WithImageTag("3.2.0")
     .WithVolume("streamingdigest-loki-data", "/loki")
@@ -216,6 +234,7 @@ builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WaitFor(ollama)
     .WaitForCompletion(ollamaBootstrap)
     .WaitFor(otelCollector)
+    .WaitFor(pgadmin)
     .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
     .WithEnvironment("STREAMINGDIGEST_OBSERVABILITY_ENABLED", "true")
     .WithEnvironment("STREAMINGDIGEST_EMBEDDING_MODEL", defaultEmbeddingModel)
@@ -223,6 +242,7 @@ builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("Scraper__BaseUrl", "http://scraper:3000")
     .WithEnvironment("llm__baseUrl", "http://ollama:11434")
     .WithEnvironment("observability:services:grafana:url", "http://grafana:3000")
+    .WithEnvironment("observability:services:pgadmin:url", "http://pgadmin:5050")
     .WithEnvironment("observability:services:prometheus:url", "http://prometheus:9090")
     .WithEnvironment("observability:services:loki:url", "http://loki:3100")
     .WithEnvironment("observability:services:tempo:url", "http://tempo:3200")
