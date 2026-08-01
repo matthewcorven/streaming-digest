@@ -330,9 +330,12 @@ public sealed class FirstRunSetupE2ETests : IAsyncLifetime
                 && !name.EndsWith(".gz", StringComparison.OrdinalIgnoreCase));
         var dotnetRuntimeScript = Directory.GetFiles(Path.Combine(tempRoot, "_framework"), "dotnet.*.js")
             .Select(Path.GetFileName)
+            .OrderBy(name => name, StringComparer.Ordinal)
             .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)
                 && !string.Equals(name, "dotnet.js", StringComparison.OrdinalIgnoreCase)
-                && !name.EndsWith(".gz", StringComparison.OrdinalIgnoreCase));
+                && !name.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)
+                && !name.StartsWith("dotnet.native.", StringComparison.OrdinalIgnoreCase)
+                && !name.StartsWith("dotnet.runtime.", StringComparison.OrdinalIgnoreCase));
 
         if (string.IsNullOrWhiteSpace(bootScript))
         {

@@ -389,6 +389,16 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.Use(async (context, next) =>
+{
+    if (ShouldRejectDirectSpaDocumentRequest(context.Request))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    await next();
+});
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
 
@@ -1682,7 +1692,7 @@ app.MapDelete("/api/notes/{noteId:guid}", async (Guid noteId, StreamingDigestDbC
 
 app.MapGet("/{*path}", async context =>
 {
-    if (!ShouldServeSpaFallback(context.Request.Path))
+    if (!ShouldServeSpaFallback(context.Request))
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;
@@ -2133,8 +2143,9 @@ static string BuildDisabledPlaceholder(string serviceName)
 """;
 }
 
-static bool ShouldServeSpaFallback(PathString path)
+static bool ShouldServeSpaFallback(HttpRequest request)
 {
+    var path = request.Path;
     if (path.StartsWithSegments("/api") ||
         path.StartsWithSegments("/admin") ||
         path.StartsWithSegments("/internal") ||
@@ -2147,6 +2158,18 @@ static bool ShouldServeSpaFallback(PathString path)
     }
 
     return true;
+}
+
+static bool ShouldRejectDirectSpaDocumentRequest(HttpRequest request)
+{
+    var path = request.Path.Value;
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return false;
+    }
+
+    return path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/index.htm", StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed record CreateChannelRequest(string? SourceUrl, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
