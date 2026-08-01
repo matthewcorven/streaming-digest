@@ -49,7 +49,7 @@ builder.Logging.AddOpenTelemetry(logging =>
     logging.IncludeFormattedMessage = true;
     logging.IncludeScopes = true;
     logging.ParseStateValues = true;
-    logging.AddOtlpExporter(options => ConfigureOtlpExporter(options));
+    logging.AddOtlpExporter(options => ApiStartupRuntime.ConfigureOtlpExporter(options));
 });
 
 builder.Services.AddOpenTelemetry()
@@ -60,43 +60,25 @@ builder.Services.AddOpenTelemetry()
         tracing.AddAspNetCoreInstrumentation();
         tracing.AddHttpClientInstrumentation();
         tracing.AddEntityFrameworkCoreInstrumentation();
-        tracing.AddOtlpExporter(options => ConfigureOtlpExporter(options));
+        tracing.AddOtlpExporter(options => ApiStartupRuntime.ConfigureOtlpExporter(options));
     })
     .WithMetrics(metrics =>
     {
         metrics.AddMeter(CorrelationContext.ActivitySourceName);
-        metrics.AddOtlpExporter(options => ConfigureOtlpExporter(options));
+        metrics.AddOtlpExporter(options => ApiStartupRuntime.ConfigureOtlpExporter(options));
     });
 
 GlobalJobFilters.Filters.Add(new HangfireObservabilityFilter());
 
-var connectionString = builder.Configuration.GetConnectionString("streamingdigest")
-    ?? builder.Configuration.GetConnectionString("postgres")
-    ?? applicationConfiguration.ConnectionStrings.StreamingDigest;
-
-var startupLoggerFactory = LoggerFactory.Create(logging =>
-{
-    logging.ClearProviders();
-    logging.AddSimpleConsole(options =>
-    {
-        options.SingleLine = true;
-        options.TimestampFormat = "HH:mm:ss ";
-    });
-});
-var startupLogger = startupLoggerFactory.CreateLogger("Startup");
-var databaseStatus = await EnsureDatabaseConnectivityAsync(startupLogger, connectionString);
-var hangfireStorage = CreateHangfireStorage(startupLogger, connectionString, databaseStatus.Connected);
-
-if (!databaseStatus.Connected)
-{
-    startupLogger.LogWarning("Hangfire PostgreSQL connectivity is unavailable; the dashboard will use in-memory storage for this startup.");
-}
+var startupState = await ApiStartupRuntime.InitializeInfrastructureAsync(builder, applicationConfiguration);
+var connectionString = startupState.ConnectionString;
+var databaseStatus = startupState.DatabaseStatus;
 builder.Services.AddStreamingDigestApiServices(
     builder.Configuration,
     builder.Environment,
     applicationConfiguration,
     connectionString,
-    hangfireStorage);
+    startupState.HangfireStorage);
 
 var app = builder.Build();
 var authService = app.Services.GetRequiredService<AppAuthService>();
@@ -1672,71 +1654,6 @@ app.MapFallbackToFile("index.html");
 
 app.Run();
 
-static async Task<DatabaseStatus> EnsureDatabaseConnectivityAsync(ILogger logger, string connectionString)
-{
-    using var activity = CorrelationContext.BeginOperation("database.connectivity", ActivityKind.Client, new Dictionary<string, object?>
-    {
-        ["db.system"] = "postgresql",
-        ["db.operation"] = "connect"
-    });
-
-    var connectionStringBuilder = new NpgsqlConnectionStringBuilder(connectionString);
-
-    try
-    {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync();
-
-        await using var command = new NpgsqlCommand("SELECT current_database(), current_setting('server_version')", connection);
-        await using var reader = await command.ExecuteReaderAsync();
-
-        if (!await reader.ReadAsync())
-        {
-            throw new InvalidOperationException("No result returned from PostgreSQL health query");
-        }
-
-        var databaseName = reader.GetString(0);
-        var serverVersion = reader.GetString(1);
-
-        logger.LogInformation("API database connectivity confirmed for {Database} on {Host}:{Port}", databaseName, connectionStringBuilder.Host, connectionStringBuilder.Port);
-
-        return new DatabaseStatus(true, databaseName, serverVersion);
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "API could not connect to PostgreSQL; the API will continue in degraded mode");
-        return new DatabaseStatus(false, connectionStringBuilder.Database ?? "postgres", "unavailable");
-    }
-}
-
-static JobStorage CreateHangfireStorage(ILogger logger, string connectionString, bool databaseConnected)
-{
-    if (!databaseConnected)
-    {
-        return new MemoryStorage();
-    }
-
-    try
-    {
-        return new PostgreSqlStorage(connectionString);
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "Hangfire PostgreSQL storage initialization failed; the dashboard will use in-memory storage for this startup.");
-        return new MemoryStorage();
-    }
-}
-
-static void ConfigureOtlpExporter(OtlpExporterOptions options)
-{
-    var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
-        ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-        ?? "http://localhost:18889";
-
-    options.Protocol = OtlpExportProtocol.Grpc;
-    options.Endpoint = new Uri(endpoint);
-}
-
 static bool ResolveDefaultObservabilityEnabled(IConfiguration configuration, IHostEnvironment environment, bool fallbackEnabled)
 {
     if (bool.TryParse(configuration["observability:enabled"], out var configuredEnabled))
@@ -2206,8 +2123,6 @@ sealed record ModelDiscoveryRequest(string? ModelKind, string? ModelId);
 public sealed record LoginRequest(string Username, string Password);
 public sealed record FirstUserInitializationRequest(string? Username, string? Password);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
-
-public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);
 
 public sealed class ObservabilityRuntimeState
 {
