@@ -389,6 +389,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseRouting();
 app.Use(async (context, next) =>
 {
     if (ShouldRejectDirectSpaDocumentRequest(context.Request))
@@ -1690,25 +1691,7 @@ app.MapDelete("/api/notes/{noteId:guid}", async (Guid noteId, StreamingDigestDbC
     return Results.Ok(new { status = "deleted", entityType = "note", entityId = noteId });
 });
 
-app.MapGet("/{*path}", async context =>
-{
-    if (!ShouldServeSpaFallback(context.Request))
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    var indexFile = app.Environment.WebRootFileProvider.GetFileInfo("index.html");
-    if (!indexFile.Exists)
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    context.Response.ContentType = "text/html; charset=utf-8";
-    await using var stream = indexFile.CreateReadStream();
-    await stream.CopyToAsync(context.Response.Body);
-});
+app.MapFallbackToFile("index.html");
 
 app.Run();
 
@@ -2141,23 +2124,6 @@ static string BuildDisabledPlaceholder(string serviceName)
 </body>
 </html>
 """;
-}
-
-static bool ShouldServeSpaFallback(HttpRequest request)
-{
-    var path = request.Path;
-    if (path.StartsWithSegments("/api") ||
-        path.StartsWithSegments("/admin") ||
-        path.StartsWithSegments("/internal") ||
-        path.StartsWithSegments("/grafana") ||
-        path.StartsWithSegments("/prometheus") ||
-        path.StartsWithSegments("/loki") ||
-        path.StartsWithSegments("/tempo"))
-    {
-        return false;
-    }
-
-    return true;
 }
 
 static bool ShouldRejectDirectSpaDocumentRequest(HttpRequest request)
