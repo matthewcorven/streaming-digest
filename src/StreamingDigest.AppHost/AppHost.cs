@@ -119,6 +119,12 @@ builder.AddDockerComposeEnvironment("docker-compose")
             scraperService.AddVolume(new Volume { Name = "streaming-digest-debug-html", Source = "streaming-digest-debug-html", Target = "/var/lib/streaming-digest/raw-html", Type = "volume", ReadOnly = false });
         }
 
+        if (composeFile.Services.TryGetValue("grafana", out var grafanaService))
+        {
+            grafanaService.AddEnvironmentalVariable("GF_SERVER_ROOT_URL", "%(protocol)s://%(domain)s:%(http_port)s/grafana/");
+            grafanaService.AddEnvironmentalVariable("GF_SERVER_SERVE_FROM_SUB_PATH", "true");
+        }
+
         SetPublishedPorts(composeFile, "ollama", ["127.0.0.1:11434:11434"]);
         SetPublishedPorts(composeFile, "otel-collector", ["4317:4317", "4318:4318"]);
         SetPublishedPorts(composeFile, "prometheus", ["127.0.0.1:9090:9090"]);
@@ -170,6 +176,8 @@ var grafana = builder.AddContainer("grafana", "grafana/grafana")
     .WithImageTag("11.4.0")
     .WithEnvironment("GF_SECURITY_ADMIN_USER", grafanaAdminUser)
     .WithEnvironment("GF_SECURITY_ADMIN_PASSWORD", grafanaAdminPassword)
+    .WithEnvironment("GF_SERVER_ROOT_URL", "%(protocol)s://%(domain)s:%(http_port)s/grafana/")
+    .WithEnvironment("GF_SERVER_SERVE_FROM_SUB_PATH", "true")
     .WithVolume("streamingdigest-grafana-data", "/var/lib/grafana")
     .WithBindMount("../../compose/observability/grafana/provisioning", "/etc/grafana/provisioning", isReadOnly: true)
     .WithBindMount("../../compose/observability/grafana/dashboards", "/var/lib/grafana/dashboards", isReadOnly: true)

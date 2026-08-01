@@ -1922,6 +1922,7 @@ static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, I
         using var client = httpClientFactory.CreateClient();
         var targetUri = BuildProxyUri(context.Request.Path, upstreamBaseUrl, context.Request.QueryString.Value);
         using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri);
+        var forwardedHost = context.Request.Host.HasValue ? context.Request.Host.Value : null;
 
         if (ShouldForwardRequestBody(context.Request))
         {
@@ -1935,6 +1936,15 @@ static async Task<IResult> ProxyObservabilityRequestAsync(HttpContext context, I
                 }
             }
         }
+
+        if (!string.IsNullOrWhiteSpace(forwardedHost))
+        {
+            request.Headers.Host = forwardedHost;
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Host", forwardedHost);
+        }
+
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", context.Request.Scheme);
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/{serviceName}");
 
         foreach (var header in context.Request.Headers)
         {
