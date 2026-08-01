@@ -332,61 +332,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
-app.UseRouting();
-app.Use(async (context, next) =>
-{
-    if (ShouldRejectDirectSpaDocumentRequest(context.Request))
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        return;
-    }
-
-    await next();
-});
-app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
-
-app.Use(async (context, next) =>
-{
-    if (!RequiresAuthentication(context.Request))
-    {
-        await next();
-        return;
-    }
-
-    RequestAuthenticationResult authenticationResult;
-    try
-    {
-        authenticationResult = await authService.TryAuthenticateRequestAsync(connectionString, context.Request);
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogWarning(ex, "Authentication middleware failed while validating the request session.");
-        authenticationResult = new RequestAuthenticationResult(false, null, null, false);
-    }
-
-    if (!authenticationResult.IsAuthenticated)
-    {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        return;
-    }
-
-    if (authenticationResult.RequiresPasswordChange && !ShouldAllowPasswordChangeFlow(context.Request))
-    {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        return;
-    }
-
-    if (RequiresCsrfProtection(context.Request) && !HasValidCsrfToken(context.Request, authenticationResult.CsrfToken))
-    {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        return;
-    }
-
-    context.Items["AuthenticatedUser"] = authenticationResult.User;
-    await next();
-});
+ApiRequestPipeline.Configure(app, authService, connectionString);
 
 app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
 {
@@ -1073,8 +1019,8 @@ app.MapPost("/api/auth/login", async (HttpContext context, AppAuthService authSe
             return Results.Json(new { error = result.ErrorMessage }, statusCode: result.StatusCode);
         }
 
-        context.Response.Cookies.Append("auth-session", result.SessionToken!, CreateSessionCookieOptions(useSecureCookies));
-        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, CreateCsrfCookieOptions(useSecureCookies));
+        context.Response.Cookies.Append("auth-session", result.SessionToken!, ApiRequestPipeline.CreateSessionCookieOptions(useSecureCookies));
+        context.Response.Cookies.Append("csrf-token", result.CsrfToken!, ApiRequestPipeline.CreateCsrfCookieOptions(useSecureCookies));
 
         return Results.Ok(new { username = result.User!.Username, mustChangePassword = result.User.MustChangePassword });
     }
@@ -1126,7 +1072,7 @@ app.MapPost("/api/auth/logout", async (HttpContext context, AppAuthService authS
         await authService.LogoutAsync(connectionString, sessionToken, cancellationToken);
     }
 
-    searchUiService.RemoveState(GetSearchUiStateKey(context));
+    searchUiService.RemoveState(ApiRequestPipeline.GetSearchUiStateKey(context));
 
     context.Response.Cookies.Delete("auth-session", new CookieOptions { Path = "/", HttpOnly = true, Secure = useSecureCookies, SameSite = SameSiteMode.Lax });
     context.Response.Cookies.Delete("csrf-token", new CookieOptions { Path = "/", HttpOnly = false, Secure = useSecureCookies, SameSite = SameSiteMode.Lax });
@@ -1154,7 +1100,7 @@ app.MapGet("/api/auth/csrf", async (HttpContext context, AppAuthService authServ
         csrfToken = authService.CreateCsrfToken();
     }
 
-    context.Response.Cookies.Append("csrf-token", csrfToken, CreateCsrfCookieOptions(useSecureCookies));
+    context.Response.Cookies.Append("csrf-token", csrfToken, ApiRequestPipeline.CreateCsrfCookieOptions(useSecureCookies));
     return Results.Ok(new { token = csrfToken });
 });
 app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthService authService, CancellationToken cancellationToken) =>
@@ -1166,7 +1112,7 @@ app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthServ
     }
 
     var authenticationResult = await authService.TryAuthenticateRequestAsync(connectionString, context.Request, cancellationToken);
-    if (!authenticationResult.IsAuthenticated || !HasValidCsrfToken(context.Request, authenticationResult.CsrfToken))
+    if (!authenticationResult.IsAuthenticated || !ApiRequestPipeline.HasValidCsrfToken(context.Request, authenticationResult.CsrfToken))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -1184,12 +1130,12 @@ app.MapPost("/api/auth/change-password", async (HttpContext context, AppAuthServ
 });
 
 app.MapGet("/api/onboarding/status", async (HttpContext context, AppReadinessStateService readinessStateService, CancellationToken cancellationToken) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(await readinessStateService.GetStatusAsync(connectionString, cancellationToken))
         : Results.Unauthorized());
 app.MapPost("/api/onboarding/steps/{stepKey}/verify", async (string stepKey, HttpContext context, AppReadinessStateService readinessStateService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
@@ -1211,12 +1157,12 @@ app.MapPost("/api/onboarding/steps/{stepKey}/verify", async (string stepKey, Htt
     return Results.Ok(result);
 });
 app.MapPost("/api/onboarding/complete-core-setup", async (HttpContext context, AppReadinessStateService readinessStateService, CancellationToken cancellationToken) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(await readinessStateService.CompleteCoreSetupAsync(connectionString, cancellationToken))
         : Results.Unauthorized());
 
 app.MapGet("/api/settings", (HttpContext context) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(new
         {
             values = new Dictionary<string, object?>
@@ -1235,12 +1181,12 @@ app.MapGet("/api/settings", (HttpContext context) =>
         : Results.Unauthorized());
 app.MapPut("/api/settings", async (HttpContext context, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
 
-    if (!HasCsrfToken(context.Request))
+    if (!ApiRequestPipeline.HasCsrfToken(context.Request))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -1295,7 +1241,7 @@ app.MapGet("/api/observability", () => Results.Ok(new
 }));
 app.MapPost("/api/observability/toggle/{enabled:bool}", async (bool enabled, HttpContext context, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
@@ -1337,7 +1283,7 @@ app.MapMethods("/tempo/{**catchAll}", ["GET", "POST", "PUT", "DELETE", "PATCH", 
     await ProxyObservabilityRequestAsync(context, httpClientFactory, observabilityRuntime, "tempo", observabilityRuntime.TempoUrl, cancellationToken));
 
 app.MapGet("/api/config/runtime", (HttpContext context) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(new
         {
             environment = app.Environment.EnvironmentName,
@@ -1346,7 +1292,7 @@ app.MapGet("/api/config/runtime", (HttpContext context) =>
         })
         : Results.Unauthorized());
 app.MapGet("/api/config/schema", (HttpContext context) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(new
         {
             version = "1.0",
@@ -1358,12 +1304,12 @@ app.MapGet("/api/config/schema", (HttpContext context) =>
         })
         : Results.Unauthorized());
 app.MapPost("/api/config/validate", (HttpContext context) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(new { valid = true, warnings = Array.Empty<string>() })
         : Results.Unauthorized());
 
 app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService modelDiscoveryService) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(new
         {
             models = modelDiscoveryService.GetSupportedModels().Select(model => new
@@ -1378,17 +1324,17 @@ app.MapGet("/api/models/options", (HttpContext context, ModelDiscoveryService mo
         })
         : Results.Unauthorized());
 app.MapGet("/api/search-ui/settings", (HttpContext context, SearchUiService searchUiService) =>
-    IsAuthenticated(context.Request)
+    ApiRequestPipeline.IsAuthenticated(context.Request)
         ? Results.Ok(searchUiService.GetSettings())
         : Results.Unauthorized());
 app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
 
-    if (!HasCsrfToken(context.Request))
+    if (!ApiRequestPipeline.HasCsrfToken(context.Request))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -1403,32 +1349,32 @@ app.MapPost("/api/search-ui/settings", async (HttpContext context, SearchUiServi
     return Results.Ok(searchUiService.GetSettings());
 });
 app.MapGet("/api/search-ui/recent", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
-    IsAuthenticated(context.Request)
-        ? Results.Ok(await searchUiService.GetRecentSearchesAsync(GetSearchUiStateKey(context), cancellationToken))
+    ApiRequestPipeline.IsAuthenticated(context.Request)
+        ? Results.Ok(await searchUiService.GetRecentSearchesAsync(ApiRequestPipeline.GetSearchUiStateKey(context), cancellationToken))
         : Results.Unauthorized());
 app.MapDelete("/api/search-ui/recent", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
 
-    if (!HasCsrfToken(context.Request))
+    if (!ApiRequestPipeline.HasCsrfToken(context.Request))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
-    await searchUiService.ClearRecentSearchesAsync(GetSearchUiStateKey(context), cancellationToken);
+    await searchUiService.ClearRecentSearchesAsync(ApiRequestPipeline.GetSearchUiStateKey(context), cancellationToken);
     return Results.Ok();
 });
 app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
 
-    if (!HasCsrfToken(context.Request))
+    if (!ApiRequestPipeline.HasCsrfToken(context.Request))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -1439,17 +1385,17 @@ app.MapPost("/api/search-ui/search", async (HttpContext context, SearchUiService
         return Results.BadRequest();
     }
 
-    var response = await searchUiService.SearchAsync(request, GetSearchUiStateKey(context), cancellationToken);
+    var response = await searchUiService.SearchAsync(request, ApiRequestPipeline.GetSearchUiStateKey(context), cancellationToken);
     return Results.Ok(response);
 });
 app.MapPost("/api/search-ui/interactions", async (HttpContext context, SearchUiService searchUiService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
 
-    if (!HasCsrfToken(context.Request))
+    if (!ApiRequestPipeline.HasCsrfToken(context.Request))
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
@@ -1465,7 +1411,7 @@ app.MapPost("/api/search-ui/interactions", async (HttpContext context, SearchUiS
 });
 app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
@@ -1499,7 +1445,7 @@ app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoverySe
 });
 app.MapPost("/api/models/verify", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, CancellationToken cancellationToken) =>
 {
-    if (!IsAuthenticated(context.Request))
+    if (!ApiRequestPipeline.IsAuthenticated(context.Request))
     {
         return Results.Unauthorized();
     }
@@ -1905,119 +1851,6 @@ static bool ShouldForwardRequestBody(HttpRequest request)
     return request.ContentLength is > 0 || request.Headers.ContainsKey("Transfer-Encoding");
 }
 
-static bool RequiresAuthentication(HttpRequest request)
-{
-    var path = request.Path.Value ?? string.Empty;
-    if (path.Equals("/api/observability", StringComparison.Ordinal))
-    {
-        return false;
-    }
-
-    if (IsHangfireDashboardPath(path))
-    {
-        return true;
-    }
-
-    return path.StartsWith("/api/internal", StringComparison.Ordinal)
-        || path.StartsWith("/api/onboarding", StringComparison.Ordinal)
-        || path.StartsWith("/api/settings", StringComparison.Ordinal)
-        || path.StartsWith("/api/observability/toggle", StringComparison.Ordinal)
-        || path.StartsWith("/api/config", StringComparison.Ordinal)
-        || path.StartsWith("/api/auth/me", StringComparison.Ordinal)
-        || path.StartsWith("/api/auth/change-password", StringComparison.Ordinal);
-}
-
-static bool RequiresCsrfProtection(HttpRequest request)
-{
-    if (IsHangfireDashboardPath(request.Path.Value ?? string.Empty))
-    {
-        return false;
-    }
-
-    return request.Method is not "GET" and not "HEAD" and not "OPTIONS" and not "TRACE";
-}
-
-static bool IsHangfireDashboardPath(string path)
-{
-    return path.Equals("/admin/jobs", StringComparison.OrdinalIgnoreCase)
-        || path.StartsWith("/admin/jobs/", StringComparison.OrdinalIgnoreCase);
-}
-
-static bool HasValidCsrfToken(HttpRequest request, string? expectedToken)
-{
-    if (string.IsNullOrWhiteSpace(expectedToken))
-    {
-        return false;
-    }
-
-    var requestToken = request.Headers["X-CSRF-Token"].ToString();
-    if (!string.IsNullOrWhiteSpace(requestToken))
-    {
-        return string.Equals(requestToken, expectedToken, StringComparison.Ordinal);
-    }
-
-    return request.Cookies.TryGetValue("csrf-token", out var cookieToken) && string.Equals(cookieToken, expectedToken, StringComparison.Ordinal);
-}
-
-static bool IsAuthenticated(HttpRequest request)
-{
-    return request.Cookies.ContainsKey("auth-session");
-}
-
-static bool HasCsrfToken(HttpRequest request)
-{
-    return request.Headers.ContainsKey("X-CSRF-Token") || request.Cookies.ContainsKey("csrf-token");
-}
-
-static string GetSearchUiStateKey(HttpContext context)
-{
-    if (!string.IsNullOrWhiteSpace(context.Request.Cookies["auth-session"]))
-    {
-        return $"session:{context.Request.Cookies["auth-session"]}";
-    }
-
-    var authenticatedUser = context.Items["AuthenticatedUser"] as AuthenticatedUser;
-    if (!string.IsNullOrWhiteSpace(authenticatedUser?.Username))
-    {
-        return $"user:{authenticatedUser.Username}";
-    }
-
-    return "anonymous";
-}
-
-static bool ShouldAllowPasswordChangeFlow(HttpRequest request)
-{
-    var path = request.Path.Value ?? string.Empty;
-    return path.StartsWith("/api/auth/change-password", StringComparison.Ordinal)
-        || path.StartsWith("/api/auth/me", StringComparison.Ordinal)
-        || path.StartsWith("/api/auth/csrf", StringComparison.Ordinal)
-        || path.StartsWith("/api/auth/logout", StringComparison.Ordinal);
-}
-
-static CookieOptions CreateSessionCookieOptions(bool useSecureCookies)
-{
-    return new CookieOptions
-    {
-        HttpOnly = true,
-        Secure = useSecureCookies,
-        SameSite = SameSiteMode.Lax,
-        Path = "/",
-        MaxAge = TimeSpan.FromHours(8)
-    };
-}
-
-static CookieOptions CreateCsrfCookieOptions(bool useSecureCookies)
-{
-    return new CookieOptions
-    {
-        HttpOnly = false,
-        Secure = useSecureCookies,
-        SameSite = SameSiteMode.Lax,
-        Path = "/",
-        MaxAge = TimeSpan.FromHours(8)
-    };
-}
-
 static async Task<byte[]> ReadRequestBodyAsync(HttpRequest request, CancellationToken cancellationToken)
 {
     if (!request.Body.CanSeek)
@@ -2069,30 +1902,6 @@ static string BuildDisabledPlaceholder(string serviceName)
 </body>
 </html>
 """;
-}
-
-static bool ShouldRejectDirectSpaDocumentRequest(HttpRequest request)
-{
-    var path = request.Path.Value;
-    if (string.IsNullOrWhiteSpace(path))
-    {
-        return false;
-    }
-
-    if (request.Path.StartsWithSegments("/api") ||
-        request.Path.StartsWithSegments("/admin") ||
-        request.Path.StartsWithSegments("/internal") ||
-        request.Path.StartsWithSegments("/grafana") ||
-        request.Path.StartsWithSegments("/pgadmin") ||
-        request.Path.StartsWithSegments("/prometheus") ||
-        request.Path.StartsWithSegments("/loki") ||
-        request.Path.StartsWithSegments("/tempo"))
-    {
-        return false;
-    }
-
-    return path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)
-        || path.Equals("/index.htm", StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed record CreateChannelRequest(string? SourceUrl, int? DefaultMaxAgeDays, int? DefaultBackfillMaxVideos);
