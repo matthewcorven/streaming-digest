@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using OllamaSharp;
 
 namespace StreamingDigest.Application;
@@ -63,6 +64,32 @@ public static class MeaiServiceCollectionExtensions
                 .UseOpenTelemetry(sourceName: "Experimental.Microsoft.Extensions.AI")
                 .UseLogging()
                 .Build();
+        });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a wrapper around Ollama HTTP chat API for use in application services like transcript chunking
+    /// and link classification. Provides graceful error handling and JSON response parsing.
+    /// </summary>
+    public static IServiceCollection AddMeaiChatClientWrapper(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        services.AddSingleton(sp =>
+        {
+            var endpoint = ResolveLlmEndpoint(configuration);
+            var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            if (!string.IsNullOrWhiteSpace(endpoint))
+            {
+                httpClient.BaseAddress = new Uri(endpoint);
+            }
+            var logger = sp.GetService<ILogger<MeaiChatClientWrapper>>();
+            return new MeaiChatClientWrapper(httpClient, logger);
         });
 
         return services;

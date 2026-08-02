@@ -131,6 +131,7 @@ builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
 builder.Services.AddMeaiChatClient(builder.Configuration);
+builder.Services.AddMeaiChatClientWrapper(builder.Configuration);
 builder.Services.AddSingleton<IEmbeddingService>(sp => new MeaiEmbeddingServiceAdapter(
     sp.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>(),
     builder.Configuration,
@@ -142,32 +143,13 @@ builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
 builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
 builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
 builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
-builder.Services.AddHttpClient<ILinkClassificationService, LinkClassificationService>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(5);
-    var llmBaseUrl = builder.Configuration["llm:baseUrl"]
-        ?? Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
-        ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
-        ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
-    if (!string.IsNullOrWhiteSpace(llmBaseUrl))
-    {
-        client.BaseAddress = new Uri(llmBaseUrl);
-    }
-});
-builder.Services.AddHttpClient<DeterministicTranscriptChunkingService>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(5);
-    var baseUrl = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
-        ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
-        ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
-    if (!string.IsNullOrWhiteSpace(baseUrl))
-    {
-        client.BaseAddress = new Uri(baseUrl);
-    }
-});
+builder.Services.AddScoped<ILinkClassificationService, LinkClassificationService>(sp =>
+    new LinkClassificationService(
+        sp.GetService<MeaiChatClientWrapper>(),
+        sp.GetRequiredService<ILogger<LinkClassificationService>>()));
 builder.Services.AddScoped(sp => ActivatorUtilities.CreateInstance<DeterministicTranscriptChunkingService>(
     sp,
-    sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(DeterministicTranscriptChunkingService))));
+    sp.GetService<MeaiChatClientWrapper>()));
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {

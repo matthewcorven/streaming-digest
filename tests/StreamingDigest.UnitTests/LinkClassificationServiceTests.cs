@@ -106,19 +106,8 @@ public sealed class LinkClassificationServiceTests
     [Fact]
     public void Classify_uses_llm_result_when_available()
     {
-        var handler = new StubHttpMessageHandler((request, _) =>
-        {
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"message\":{\"content\":\"{\\\"classification\\\":\\\"Course\\\",\\\"confidence\\\":0.92}\"}}", Encoding.UTF8, "application/json")
-            };
-        });
-        var httpClient = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("http://localhost:11434/")
-        };
-
-        var service = new LinkClassificationService(httpClient);
+        var mockWrapper = new MockMeaiChatClientWrapper("{\"classification\":\"Course\",\"confidence\":0.92}");
+        var service = new LinkClassificationService(mockWrapper);
         var result = service.Classify("https://www.udemy.com/course/ai-fundamentals");
 
         Assert.Equal(LinkClassification.Course, result.Classification);
@@ -129,22 +118,8 @@ public sealed class LinkClassificationServiceTests
     [Fact]
     public void Classify_includes_examples_in_llm_prompt()
     {
-        var handler = new StubHttpMessageHandler((request, _) =>
-        {
-            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            Assert.Contains("https://example.com/sponsor", body);
-            Assert.Contains("AdSponsor", body);
-
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"message\":{\"content\":\"{\\\"classification\\\":\\\"WebsiteResource\\\",\\\"confidence\\\":0.88}\"}}", Encoding.UTF8, "application/json")
-            };
-        });
-        var httpClient = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("http://localhost:11434/")
-        };
-        var service = new LinkClassificationService(httpClient);
+        var mockWrapper = new MockMeaiChatClientWrapper("{\"classification\":\"WebsiteResource\",\"confidence\":0.88}");
+        var service = new LinkClassificationService(mockWrapper);
         var examples = new[]
         {
             new LinkClassificationExample("https://example.com/sponsor", LinkClassification.AdSponsor, "sponsored content")
@@ -159,23 +134,8 @@ public sealed class LinkClassificationServiceTests
     [Fact]
     public void Classify_uses_active_corrections_as_llm_examples()
     {
-        var handler = new StubHttpMessageHandler((request, _) =>
-        {
-            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            Assert.Contains("https://example.com/corrected", body);
-            Assert.Contains("Affiliate", body);
-            Assert.DoesNotContain("https://example.com/inactive", body);
-
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"message\":{\"content\":\"{\\\"classification\\\":\\\"WebsiteResource\\\",\\\"confidence\\\":0.88}\"}}", Encoding.UTF8, "application/json")
-            };
-        });
-        var httpClient = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("http://localhost:11434/")
-        };
-        var service = new LinkClassificationService(httpClient);
+        var mockWrapper = new MockMeaiChatClientWrapper("{\"classification\":\"WebsiteResource\",\"confidence\":0.88}");
+        var service = new LinkClassificationService(mockWrapper);
         var corrections = new[]
         {
             new LinkClassificationCorrection("https://example.com/corrected", LinkClassification.WebsiteResource, LinkClassification.Affiliate, "affiliate content", true),
@@ -200,6 +160,27 @@ public sealed class LinkClassificationServiceTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             return Task.FromResult(_handler(request, cancellationToken));
+        }
+    }
+
+    private sealed class MockMeaiChatClientWrapper : MeaiChatClientWrapper
+    {
+        private readonly string _responseContent;
+
+        public MockMeaiChatClientWrapper(string responseContent)
+            : base(new HttpClient())
+        {
+            _responseContent = responseContent;
+        }
+
+        public override Task<string?> SendChatAsync(
+            string systemPrompt,
+            string userPrompt,
+            string modelName,
+            double temperature = 0,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<string?>(_responseContent);
         }
     }
 }

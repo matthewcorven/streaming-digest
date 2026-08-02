@@ -40,29 +40,20 @@ public sealed class LinkClassificationService : ILinkClassificationService
 
     private static readonly IRepositoryHostDetectionService RepositoryHostDetectionService = new RepositoryHostDetectionService();
 
-    private readonly HttpClient _httpClient;
+    private readonly MeaiChatClientWrapper? _chatClientWrapper;
     private readonly ILogger<LinkClassificationService>? _logger;
     private readonly bool _llmEnabled;
 
     public LinkClassificationService()
-        : this(new HttpClient(), null)
+        : this(null, null)
     {
     }
 
-    public LinkClassificationService(HttpClient httpClient, ILogger<LinkClassificationService>? logger = null)
+    public LinkClassificationService(MeaiChatClientWrapper? chatClientWrapper, ILogger<LinkClassificationService>? logger = null)
     {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _chatClientWrapper = chatClientWrapper;
         _logger = logger;
         _llmEnabled = ResolveLlmEnabled();
-
-        if (_httpClient.BaseAddress is null)
-        {
-            var configuredBaseUrl = ResolveBaseUrl();
-            if (!string.IsNullOrWhiteSpace(configuredBaseUrl))
-            {
-                _httpClient.BaseAddress = new Uri(configuredBaseUrl);
-            }
-        }
     }
 
     public LinkClassificationResult Classify(string? url) => Classify(url, (IReadOnlyList<LinkClassificationExample>?)null);
@@ -81,7 +72,7 @@ public sealed class LinkClassificationService : ILinkClassificationService
 
         var uri = normalized!;
         var ruleResult = ApplyRuleBasedClassification(uri);
-        if (!_llmEnabled || _httpClient.BaseAddress is null)
+        if (!_llmEnabled)
         {
             return ruleResult;
         }
@@ -98,29 +89,35 @@ public sealed class LinkClassificationService : ILinkClassificationService
 
     private LinkClassificationResult? TryClassifyWithLocalLlm(string? url, Uri uri, IReadOnlyList<LinkClassificationExample>? examples)
     {
+        if (_chatClientWrapper is null)
+        {
+            return null;
+        }
+
         try
         {
-            var payload = new
-            {
-                model = ResolveModelName(),
-                stream = false,
-                format = "json",
-                options = new { temperature = 0.0 },
-                messages = new object[]
-                {
-                    new { role = "system", content = BuildSystemPrompt() },
-                    new { role = "user", content = BuildUserPrompt(url, uri, examples) }
-                }
-            };
+            var systemPrompt = BuildSystemPrompt();
+            var userPrompt = BuildUserPrompt(url, uri, examples);
+            var modelName = ResolveModelName();
 
-            using var response = _httpClient.PostAsJsonAsync("api/chat", payload).GetAwaiter().GetResult();
-            if (!response.IsSuccessStatusCode)
+            if (string.IsNullOrWhiteSpace(modelName))
             {
                 return null;
             }
 
-            var content = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (!TryParseLlmClassification(content, out var classification, out var confidence))
+            var responseText = _chatClientWrapper.SendChatAsync(
+                systemPrompt,
+                userPrompt,
+                modelName,
+                temperature: 0.0,
+                cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+
+            if (string.IsNullOrWhiteSpace(responseText))
+            {
+                return null;
+            }
+
+            if (!TryParseLlmClassification(responseText, out var classification, out var confidence))
             {
                 return null;
             }
@@ -473,15 +470,7 @@ public sealed class LinkClassificationService : ILinkClassificationService
 
     private bool ResolveLlmEnabled()
     {
-        var hasConfiguredBaseUrl = _httpClient.BaseAddress is not null || !string.IsNullOrWhiteSpace(ResolveBaseUrl());
-        return hasConfiguredBaseUrl && !string.IsNullOrWhiteSpace(ResolveModelName());
-    }
-
-    private static string? ResolveBaseUrl()
-    {
-        return Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
-            ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
-            ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
+        return _chatClientWrapper is not null && !string.IsNullOrWhiteSpace(ResolveModelName());
     }
 
     private static string? ResolveModelName()
