@@ -174,6 +174,8 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
 builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
+builder.Services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
+builder.Services.AddScoped<IIngestionItemRepository, IngestionItemRepository>();
 builder.Services.AddScoped<IScrapeFailureRecorder, ScrapeFailureRecorder>();
 builder.Services.AddHttpClient<ScraperClient>(client =>
 {
@@ -183,6 +185,33 @@ builder.Services.AddHttpClient<ScraperClient>(client =>
     }
 
     client.Timeout = TimeSpan.FromSeconds(10);
+});
+
+// ── Metadata Adapters for Video Ingestion ──────────────────────────────────────────
+// YtDlpMetadataAdapter: Stateless, always available; used as primary or fallback
+builder.Services.AddSingleton<YtDlpMetadataAdapter>();
+
+// YouTubeApiMetadataAdapter: Requires HttpClient and API key from config
+builder.Services.AddSingleton<YouTubeApiMetadataAdapter>(sp =>
+{
+    var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+    var httpClient = httpClientFactory.CreateClient(nameof(YouTubeApiMetadataAdapter));
+    var appConfig = sp.GetRequiredService<ApplicationConfiguration>();
+    var apiKey = appConfig.Ingestion.YouTubeApiKey;
+    
+    return new YouTubeApiMetadataAdapter(httpClient, apiKey);
+});
+
+// Metadata adapter selector: Chooses between YouTube API and YtDlp based on config + availability
+builder.Services.AddSingleton<IMetadataAdapterSelector>(sp =>
+{
+    var ytDlpAdapter = sp.GetRequiredService<YtDlpMetadataAdapter>();
+    var youtubeApiAdapter = sp.GetRequiredService<YouTubeApiMetadataAdapter>();
+    var appConfig = sp.GetRequiredService<ApplicationConfiguration>();
+    var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<MetadataAdapterSelector>();
+    
+    // YouTube API adapter is optional; if API key is missing, it will be marked as unconfigured
+    return new MetadataAdapterSelector(ytDlpAdapter, youtubeApiAdapter, appConfig, logger);
 });
 
 var host = builder.Build();

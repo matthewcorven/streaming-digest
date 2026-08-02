@@ -82,6 +82,8 @@ internal static class ApiServiceCollectionExtensions
         services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
         services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
         services.AddScoped<IChannelRepository, ChannelRepository>();
+        services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
+        services.AddScoped<IIngestionItemRepository, IngestionItemRepository>();
 
         return services;
     }

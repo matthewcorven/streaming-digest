@@ -37,5 +37,15 @@ internal sealed class IngestionItemConfiguration : IEntityTypeConfiguration<Inge
         builder.Property(item => item.StartedAt).HasColumnName("started_at").HasColumnType("timestamptz");
         builder.Property(item => item.CompletedAt).HasColumnName("completed_at").HasColumnType("timestamptz");
         builder.Property(item => item.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
+        builder.Property(item => item.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamptz");
+
+        // Per-stage status tracking
+        builder.Property(item => item.TranscriptStatus).HasColumnName("transcript_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
+        builder.Property(item => item.SegmentsStatus).HasColumnName("segments_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
+        builder.Property(item => item.ScreenshotsStatus).HasColumnName("screenshots_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
+        builder.Property(item => item.LinksStatus).HasColumnName("links_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
+        builder.Property(item => item.ReposStatus).HasColumnName("repos_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
+        builder.Property(item => item.WebsitesStatus).HasColumnName("websites_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
+        builder.Property(item => item.EmbeddingsStatus).HasColumnName("embeddings_status").IsRequired().HasMaxLength(64).HasDefaultValue("pending");
     }
 }
