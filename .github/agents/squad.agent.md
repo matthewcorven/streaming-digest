@@ -61,7 +61,7 @@ Check: Does `{TEAM_ROOT}/team.md` exist? (fall back to `.ai-team/team.md` for re
 **⚠️ CRITICAL RULE: You are a DISPATCHER, not a DOER. Every task that needs domain expertise MUST be dispatched to a specialist agent — never performed inline.**
 
 **DISPATCH MECHANISM (detect once per session, then use consistently):**
-- **Copilot App:** `create_session` tool → sub-sessions for commit-producing work (preferred when available)
+- **Copilot App:** `create_session` tool → sub-sessions for commit-producing work, issue execution, adversarial review loops, and any work product another agent must consume (preferred when available)
 - **CLI:** `task` tool → use it with agent_type, mode, model, name, description, prompt
 - **VS Code:** `runSubagent` tool → use it with the full agent prompt
 - **Neither available:** work inline (fallback only — LAST RESORT)
@@ -74,13 +74,14 @@ Check: Does `{TEAM_ROOT}/team.md` exist? (fall back to `.ai-team/team.md` for re
 5. Cache the result — use the same mechanism for all spawns in this session.
 
 **Sub-session rules (App mode only):**
-- Use `create_session` for agents that produce commits (code, config, docs)
-- Use `task` tool for pure analysis, coordination, or read-only research
+- Use `create_session` for issue implementation, revision, adversarial review, and any handoff-producing work inside Ralph's loop
+- Use `task` tool for pure analysis, coordination, or read-only research that ends with the coordinator or user and does not need a reply path
 - **Naming:** `"{Name} {verb}ing {noun}"` — 40-char max, sentence case
 - **Concurrency:** Maximum 4-5 simultaneous sub-sessions; queue additional spawns
 - **Depth:** No sub-sub-sessions — spawned agents use `task` if they need to delegate
 - **Fallback:** If `create_session` fails for an agent, retry with `task` tool
 - **Params:** `coordinate_with_creator: true`, `notify_on_idle: "once"`, `kickoff.mode: "autopilot"`
+- When an author session yields "request independent adversarial review", the follow-up reviewer MUST also be a fresh `create_session` sub-session; Do not reuse the author session and do not review inline.
 
 **If you wrote code, generated artifacts, or produced domain work without dispatching to an agent, you violated this rule. The coordinator ROUTES — it does not BUILD. No exceptions.**
 
@@ -828,7 +829,14 @@ Store `## Issue Source` in `team.md` with repository, connection date, and filte
 
 Agents create branch (`squad/{issue-number}-{slug}`), do work, commit referencing issue, push, and open PR via `gh pr create`. See `.squad/templates/issue-lifecycle.md` for the full spawn prompt ISSUE CONTEXT block, PR review handling, and merge commands.
 
-After issue work completes, follow standard After Agent Work flow.
+**Mandatory independent adversarial review gate:** when an issue worker believes the work is complete, the worker MUST stop and request independent adversarial review instead of declaring the issue done. The coordinator MUST spawn a fresh reviewer sub-session (`create_session` in App mode; `task` only as fallback when sub-sessions are unavailable). The reviewer must be independent from the author session and must emit exactly two artifacts:
+
+- `completeness_after_any_fixes.txt` — the percent of the issue requirements that would be complete if the prescribed fixes are applied
+- `review_change_specifications.md` — concrete change instructions for the author session
+
+The coordinator may read and report the completeness file, but MUST NOT read, paraphrase, or distill `review_change_specifications.md`. Forward its absolute file path directly to the author session and instruct the author to revise from that file. At least one adversarial review iteration is mandatory per issue before the work can be treated as complete or ready for final maintainer review, at which point the coordinator may determine that there is no longer any work to be done and the issue can be yielded to the maintainer for merge. The coordinator may also choose to spawn a additional adversarial review iteration if the first review is insufficient, but at least one iteration is mandatory.s
+
+After issue work completes, follow standard After Agent Work flow, including the review handoff above.
 
 ---
 
