@@ -16,28 +16,30 @@ public sealed class IngestionItemRepository(StreamingDigestDbContext context) : 
 
     public async Task<List<IngestionItem>> GetByRunIdWithStageStatusAsync(Guid runId, string stageName, string status, CancellationToken cancellationToken = default)
     {
+        var normalizedStatus = StageStatusConstants.Normalize(status);
+        
         return stageName.ToLower() switch
         {
             "transcript" => await context.IngestionItems
-                .Where(item => item.IngestionRunId == runId && item.TranscriptStatus == status)
+                .Where(item => item.IngestionRunId == runId && item.TranscriptStatus == normalizedStatus)
                 .ToListAsync(cancellationToken),
             "segments" => await context.IngestionItems
-                .Where(item => item.IngestionRunId == runId && item.SegmentsStatus == status)
+                .Where(item => item.IngestionRunId == runId && item.SegmentsStatus == normalizedStatus)
                 .ToListAsync(cancellationToken),
             "screenshots" => await context.IngestionItems
-                .Where(item => item.IngestionRunId == runId && item.ScreenshotsStatus == status)
+                .Where(item => item.IngestionRunId == runId && item.ScreenshotsStatus == normalizedStatus)
                 .ToListAsync(cancellationToken),
             "links" => await context.IngestionItems
-                .Where(item => item.IngestionRunId == runId && item.LinksStatus == status)
+                .Where(item => item.IngestionRunId == runId && item.LinksStatus == normalizedStatus)
                 .ToListAsync(cancellationToken),
             "repos" => await context.IngestionItems
-                .Where(item => item.IngestionRunId == runId && item.ReposStatus == status)
+                .Where(item => item.IngestionRunId == runId && item.ReposStatus == normalizedStatus)
                 .ToListAsync(cancellationToken),
             "websites" => await context.IngestionItems
-                .Where(item => item.IngestionRunId == runId && item.WebsitesStatus == status)
+                .Where(item => item.IngestionRunId == runId && item.WebsitesStatus == normalizedStatus)
                 .ToListAsync(cancellationToken),
             "embeddings" => await context.IngestionItems
-                .Where(item => item.IngestionRunId == runId && item.EmbeddingsStatus == status)
+                .Where(item => item.IngestionRunId == runId && item.EmbeddingsStatus == normalizedStatus)
                 .ToListAsync(cancellationToken),
             _ => []
         };
@@ -64,48 +66,55 @@ public sealed class IngestionItemRepository(StreamingDigestDbContext context) : 
 
     public async Task UpdateStatusAsync(Guid itemId, string status, CancellationToken cancellationToken = default)
     {
+        var normalizedStatus = StageStatusConstants.Normalize(status);
+        
         var item = await GetByIdAsync(itemId, cancellationToken);
         if (item is null)
         {
             return;
         }
 
-        item.Status = status;
+        item.Status = normalizedStatus;
         item.UpdatedAt = DateTimeOffset.UtcNow;
         await UpdateAsync(item, cancellationToken);
     }
 
     public async Task UpdateStageStatusAsync(Guid itemId, string stageName, string status, CancellationToken cancellationToken = default)
     {
+        var normalizedStageName = stageName.ToLowerInvariant();
+        var normalizedStatus = StageStatusConstants.Normalize(status);
+        
         var item = await GetByIdAsync(itemId, cancellationToken);
         if (item is null)
         {
             return;
         }
 
-        switch (stageName.ToLower())
+        switch (normalizedStageName)
         {
             case "transcript":
-                item.TranscriptStatus = status;
+                item.TranscriptStatus = normalizedStatus;
                 break;
             case "segments":
-                item.SegmentsStatus = status;
+                item.SegmentsStatus = normalizedStatus;
                 break;
             case "screenshots":
-                item.ScreenshotsStatus = status;
+                item.ScreenshotsStatus = normalizedStatus;
                 break;
             case "links":
-                item.LinksStatus = status;
+                item.LinksStatus = normalizedStatus;
                 break;
             case "repos":
-                item.ReposStatus = status;
+                item.ReposStatus = normalizedStatus;
                 break;
             case "websites":
-                item.WebsitesStatus = status;
+                item.WebsitesStatus = normalizedStatus;
                 break;
             case "embeddings":
-                item.EmbeddingsStatus = status;
+                item.EmbeddingsStatus = normalizedStatus;
                 break;
+            default:
+                throw new ArgumentException($"Unknown stage name: '{stageName}'", nameof(stageName));
         }
 
         item.UpdatedAt = DateTimeOffset.UtcNow;
@@ -114,15 +123,79 @@ public sealed class IngestionItemRepository(StreamingDigestDbContext context) : 
 
     public async Task BulkUpdateStageStatusAsync(Guid runId, string stageName, string fromStatus, string toStatus, CancellationToken cancellationToken = default)
     {
-        var items = await GetByRunIdWithStageStatusAsync(runId, stageName, fromStatus, cancellationToken);
-        if (items.Count == 0)
-        {
-            return;
-        }
+        var normalizedStageName = stageName.ToLowerInvariant();
+        var normalizedFromStatus = StageStatusConstants.Normalize(fromStatus);
+        var normalizedToStatus = StageStatusConstants.Normalize(toStatus);
 
-        foreach (var item in items)
+        if (normalizedStageName == "transcript")
         {
-            await UpdateStageStatusAsync(item.Id, stageName, toStatus, cancellationToken);
+            await context.IngestionItems
+                .Where(item => item.IngestionRunId == runId && item.TranscriptStatus == normalizedFromStatus)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.TranscriptStatus, normalizedToStatus)
+                    .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow),
+                cancellationToken);
         }
+        else if (normalizedStageName == "segments")
+        {
+            await context.IngestionItems
+                .Where(item => item.IngestionRunId == runId && item.SegmentsStatus == normalizedFromStatus)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.SegmentsStatus, normalizedToStatus)
+                    .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        else if (normalizedStageName == "screenshots")
+        {
+            await context.IngestionItems
+                .Where(item => item.IngestionRunId == runId && item.ScreenshotsStatus == normalizedFromStatus)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.ScreenshotsStatus, normalizedToStatus)
+                    .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        else if (normalizedStageName == "links")
+        {
+            await context.IngestionItems
+                .Where(item => item.IngestionRunId == runId && item.LinksStatus == normalizedFromStatus)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.LinksStatus, normalizedToStatus)
+                    .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        else if (normalizedStageName == "repos")
+        {
+            await context.IngestionItems
+                .Where(item => item.IngestionRunId == runId && item.ReposStatus == normalizedFromStatus)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.ReposStatus, normalizedToStatus)
+                    .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        else if (normalizedStageName == "websites")
+        {
+            await context.IngestionItems
+                .Where(item => item.IngestionRunId == runId && item.WebsitesStatus == normalizedFromStatus)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.WebsitesStatus, normalizedToStatus)
+                    .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        else if (normalizedStageName == "embeddings")
+        {
+            await context.IngestionItems
+                .Where(item => item.IngestionRunId == runId && item.EmbeddingsStatus == normalizedFromStatus)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.EmbeddingsStatus, normalizedToStatus)
+                    .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        else
+        {
+            throw new ArgumentException($"Unknown stage name: '{stageName}'", nameof(stageName));
+        }
+        
+        // Clear change tracker to ensure fresh fetch on next query
+        context.ChangeTracker.Clear();
     }
 }

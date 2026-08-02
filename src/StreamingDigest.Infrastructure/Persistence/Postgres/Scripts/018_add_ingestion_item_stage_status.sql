@@ -13,33 +13,27 @@ ADD COLUMN IF NOT EXISTS embeddings_status text NOT NULL DEFAULT 'pending',
 ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
 -- Create indexes for querying items by stage status (common queries in orchestrator and admin ops)
+-- Indexes include all status values (pending, completed, failed) to optimize queries on any status.
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_transcript_status
-ON public.ingestion_items(ingestion_run_id, transcript_status)
-WHERE transcript_status != 'completed';
+ON public.ingestion_items(ingestion_run_id, transcript_status);
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_segments_status
-ON public.ingestion_items(ingestion_run_id, segments_status)
-WHERE segments_status != 'completed';
+ON public.ingestion_items(ingestion_run_id, segments_status);
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_screenshots_status
-ON public.ingestion_items(ingestion_run_id, screenshots_status)
-WHERE screenshots_status != 'completed';
+ON public.ingestion_items(ingestion_run_id, screenshots_status);
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_links_status
-ON public.ingestion_items(ingestion_run_id, links_status)
-WHERE links_status != 'completed';
+ON public.ingestion_items(ingestion_run_id, links_status);
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_repos_status
-ON public.ingestion_items(ingestion_run_id, repos_status)
-WHERE repos_status != 'completed';
+ON public.ingestion_items(ingestion_run_id, repos_status);
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_websites_status
-ON public.ingestion_items(ingestion_run_id, websites_status)
-WHERE websites_status != 'completed';
+ON public.ingestion_items(ingestion_run_id, websites_status);
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_embeddings_status
-ON public.ingestion_items(ingestion_run_id, embeddings_status)
-WHERE embeddings_status != 'completed';
+ON public.ingestion_items(ingestion_run_id, embeddings_status);
 
 -- Index for querying by run_id and any failed status (used for retry targeting)
 CREATE INDEX IF NOT EXISTS idx_ingestion_items_run_failed_stages
