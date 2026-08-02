@@ -292,8 +292,15 @@ public sealed class DeterministicTranscriptChunkingServiceTests
           ]
         }
         """);
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
-        var refinementService = new DeterministicTranscriptChunkingService(httpClient);
+        var mockWrapper = new MockMeaiChatClientWrapper("""
+        {
+         "segments": [
+           { "title": "Opening", "startSeconds": 0, "endSeconds": 90 },
+           { "title": "Wrap-up", "startSeconds": 90, "endSeconds": 180 }
+         ]
+        }
+        """);
+        var refinementService = new DeterministicTranscriptChunkingService(mockWrapper);
 
         var result = refinementService.CreateFromTranscriptCues(video, cues, windowSeconds: 120)!;
 
@@ -312,9 +319,8 @@ public sealed class DeterministicTranscriptChunkingServiceTests
     {
         var video = VideoWith(durationSeconds: 180);
         var cues = new[] { Cue(1, 0, 60), Cue(2, 60, 120), Cue(3, 120, 180) };
-        var handler = new StubHttpMessageHandler("not-json");
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
-        var refinementService = new DeterministicTranscriptChunkingService(httpClient);
+        var mockWrapper = new MockMeaiChatClientWrapper("not-json");
+        var refinementService = new DeterministicTranscriptChunkingService(mockWrapper);
 
         var result = refinementService.CreateFromTranscriptCues(video, cues, windowSeconds: 120)!;
 
@@ -376,6 +382,27 @@ public sealed class DeterministicTranscriptChunkingServiceTests
             {
                 Content = new StringContent(responseBody)
             });
+        }
+    }
+
+    private sealed class MockMeaiChatClientWrapper : MeaiChatClientWrapper
+    {
+        private readonly string _responseContent;
+
+        public MockMeaiChatClientWrapper(string responseContent)
+            : base(new HttpClient())
+        {
+            _responseContent = responseContent;
+        }
+
+        public override Task<string?> SendChatAsync(
+            string systemPrompt,
+            string userPrompt,
+            string modelName,
+            double temperature = 0,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<string?>(_responseContent);
         }
     }
 }

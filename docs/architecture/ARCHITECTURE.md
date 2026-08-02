@@ -69,15 +69,15 @@ Required extensions:
 
 Responsibilities:
 
-- Local embedding model endpoint.
-- Local LLM endpoint.
+- Local embedding model endpoint (`/api/embeddings`)
+- Local LLM endpoint (`/api/chat`)
 
-Accessed via Microsoft Semantic Kernel adapters.
+Accessed via **Microsoft.Extensions.AI (MEAI)** clients powered by **OllamaSharp 4**, with OpenTelemetry instrumentation for tracing and metrics.
 
 Default recommendation:
 
-- Embeddings: prefer `bge-m3` if available, otherwise document `nomic-embed-text`.
-- LLM: configurable small local instruction model with sufficient context and JSON reliability.
+- Embeddings: prefer `bge-m3` if available, otherwise `nomic-embed-text` (384-1024 dims depending on model)
+- LLM: configurable small local instruction model with sufficient context (>4K tokens) and JSON response reliability
 
 ### 2.5 Audio-to-text service: `streaming-digest-whisper`
 
@@ -334,15 +334,46 @@ Use a hybrid data access strategy:
 - Raw SQL/Dapper for search, pgvector queries, and tuned ingestion bulk operations.
 - EF migrations plus raw SQL migrations for indexes, pgvector, full-text, and trigram support.
 
-### 5.5 Microsoft Semantic Kernel
+### 5.5 Microsoft.Extensions.AI + OllamaSharp
 
-Use Semantic Kernel for:
+Model inference standardization is in progress with a phased migration strategy:
 
-- Embedding provider abstraction.
-- Local LLM abstraction.
-- Audio-to-text abstraction where compatible.
+#### Current State
 
-Adapters should hide concrete Ollama/whisper implementation details from application services.
+- **Embeddings:** Currently using `OllamaEmbeddingService` with raw HTTP calls for backward compatibility.
+  - **Migration blocked:** OllamaSharp 4.0.1 has a compatibility issue with Microsoft.Extensions.AI 10.5.0 (OllamaSharp's `IChatClient` implementation references `Metadata` property that doesn't exist in MEAI 10.5.0), causing `MissingMethodException` at service instantiation.
+  - **Completed work:** `MeaiEmbeddingServiceAdapter` is implemented and ready to use once compatibility is resolved (see `src/StreamingDigest.Application/MeaiEmbeddingServiceAdapter.cs`).
+  - **Technical details:** See `MeaiServiceCollectionExtensions.cs` for DI registration (currently commented out) and `MeaiEmbeddingServiceAdapter.cs` for the bridge pattern.
+
+- **Chat/LLM:** ✅ Migrated to `MeaiChatClientWrapper` for raw HTTP calls to Ollama `/api/chat` endpoint.
+  - Services (DeterministicTranscriptChunkingService, LinkClassificationService) consume via `MeaiChatClientWrapper` directly.
+  - Uses OpenTelemetry + logging middleware for observability.
+  - Falls back to deterministic/heuristic behavior when chat calls fail.
+
+#### Re-Migration Criterion
+
+Enable MEAI embedding migration (S1/S2/S3/S7) when **any one** of the following conditions is met:
+
+1. **OllamaSharp ≥ 4.1** is released with the `Metadata` property compatibility fix, OR
+2. **Wrapper adapter strategy** is implemented: Create an adapter that wraps OllamaSharp's `IChatClient` to expose a compatible MEAI interface, OR
+3. **Alternative MEAI provider** emerges (not OllamaSharp) that supports embeddings without compatibility issues.
+
+**Action:** Check OllamaSharp GitHub releases and MEAI compatibility status quarterly. File issue against OllamaSharp if needed.
+
+#### Escalation Trigger
+
+If additional MEAI friction surfaces (e.g., new dependency incompatibilities, new seams requiring workarounds), escalate to architecture review rather than adding more raw HTTP workarounds. This prevents the pattern from expanding beyond the current single-seam debt.
+
+#### Long-term Vision
+
+Standardize on Microsoft.Extensions.AI for both embeddings and chat once the re-migration criterion is met. Semantic Kernel will be reserved for high-value scenarios (complex prompting, structured output, function-calling) that justify the abstraction overhead.
+
+**Migration seams:**
+- S1/S2/S3/S7: Embedding → `OllamaEmbeddingService` (target: `IEmbeddingGenerator` once re-migration criterion met)
+- S4/S5: Chat/LLM → `MeaiChatClientWrapper` (raw HTTP to `/api/chat`) — ✅ complete
+- S6: Audio-to-text → Local Whisper (unchanged for MVP)
+
+Services fall back gracefully to deterministic/heuristic behavior when clients are unavailable or return errors.
 
 ### 5.6 Crawlee/Playwright
 

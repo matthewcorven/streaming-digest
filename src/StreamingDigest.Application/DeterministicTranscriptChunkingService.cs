@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -23,26 +22,20 @@ public sealed class DeterministicTranscriptChunkingService
     /// <summary>Default time-window width in seconds (2 minutes).</summary>
     public const int DefaultWindowSeconds = 120;
 
-    private readonly HttpClient _httpClient;
+    private readonly MeaiChatClientWrapper? _chatClientWrapper;
     private readonly ILogger<DeterministicTranscriptChunkingService>? _logger;
 
     public DeterministicTranscriptChunkingService()
-        : this(new HttpClient { Timeout = TimeSpan.FromSeconds(5) }, null)
+        : this(null, null)
     {
     }
 
     public DeterministicTranscriptChunkingService(
-        HttpClient httpClient,
+        MeaiChatClientWrapper? chatClientWrapper = null,
         ILogger<DeterministicTranscriptChunkingService>? logger = null)
     {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _chatClientWrapper = chatClientWrapper;
         _logger = logger;
-
-        var configuredBaseAddress = ResolveConfiguredBaseAddress();
-        if (_httpClient.BaseAddress is null && configuredBaseAddress is not null)
-        {
-            _httpClient.BaseAddress = configuredBaseAddress;
-        }
     }
 
     /// <summary>
@@ -185,42 +178,30 @@ public sealed class DeterministicTranscriptChunkingService
         IReadOnlyList<TranscriptCue> cues,
         SegmentGeneration generation)
     {
-        if (generation.Segments.Count == 0 || !SemanticRefinementEnabled)
+        if (generation.Segments.Count == 0 || _chatClientWrapper is null)
         {
             return;
         }
 
         try
         {
-            var requestPayload = new
-            {
-                model = ResolveModelName(),
-                stream = false,
-                format = "json",
-                options = new { temperature = 0.0 },
-                messages = new object[]
-                {
-                    new
-                    {
-                        role = "system",
-                        content = "You refine transcript segments into semantically coherent chunks. Return JSON with a top-level 'segments' array. Each item must include 'title', 'startSeconds', and 'endSeconds'. Keep the same number of segments as the input segments."
-                    },
-                    new
-                    {
-                        role = "user",
-                        content = BuildRefinementPrompt(video, cues, generation)
-                    }
-                }
-            };
+            var systemPrompt = "You refine transcript segments into semantically coherent chunks. Return JSON with a top-level 'segments' array. Each item must include 'title', 'startSeconds', and 'endSeconds'. Keep the same number of segments as the input segments.";
+            var userPrompt = BuildRefinementPrompt(video, cues, generation);
+            var modelName = ResolveModelName();
 
-            using var response = _httpClient.PostAsJsonAsync("api/chat", requestPayload).GetAwaiter().GetResult();
-            if (!response.IsSuccessStatusCode)
+            var responseText = _chatClientWrapper.SendChatAsync(
+                systemPrompt,
+                userPrompt,
+                modelName,
+                temperature: 0.0,
+                cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
+
+            if (string.IsNullOrWhiteSpace(responseText))
             {
                 return;
             }
 
-            var responseBody = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (!TryParseRefinementResponse(responseBody, out var refinedSegments))
+            if (!TryParseRefinementResponse(responseText, out var refinedSegments))
             {
                 return;
             }
@@ -230,7 +211,7 @@ public sealed class DeterministicTranscriptChunkingService
                 return;
             }
 
-            generation.LlmModel = ResolveModelName();
+            generation.LlmModel = modelName;
             generation.LlmPromptVersion = "segment-refinement-v1";
 
             var refinedSegmentModels = new List<Segment>();
@@ -294,30 +275,6 @@ public sealed class DeterministicTranscriptChunkingService
         {
             _logger?.LogWarning(ex, "Semantic refinement failed for transcript chunking generation {GenerationId}.", generation.Id);
         }
-    }
-
-    private bool SemanticRefinementEnabled => _httpClient.BaseAddress is not null;
-
-    private static Uri? ResolveConfiguredBaseAddress()
-    {
-        var configuredBaseUrl = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_BASE_URL")
-            ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
-            ?? Environment.GetEnvironmentVariable("OLLAMA_HOST");
-        if (string.IsNullOrWhiteSpace(configuredBaseUrl))
-        {
-            return null;
-        }
-
-        return Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configuredBaseAddress)
-            ? configuredBaseAddress
-            : null;
-    }
-
-    private static string ResolveModelName()
-    {
-        var configuredModel = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_MODEL")
-            ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL");
-        return string.IsNullOrWhiteSpace(configuredModel) ? "local-llm" : configuredModel;
     }
 
     private static string BuildRefinementPrompt(
@@ -492,6 +449,13 @@ public sealed class DeterministicTranscriptChunkingService
             JsonValueKind.String when decimal.TryParse(property.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedValue) => parsedValue,
             _ => null
         };
+    }
+
+    private static string ResolveModelName()
+    {
+        var configuredModel = Environment.GetEnvironmentVariable("STREAMINGDIGEST_LLM_MODEL")
+            ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL");
+        return string.IsNullOrWhiteSpace(configuredModel) ? "local-llm" : configuredModel;
     }
 
     private sealed class SegmentRefinement

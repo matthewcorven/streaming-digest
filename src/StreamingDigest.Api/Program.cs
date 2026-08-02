@@ -40,6 +40,7 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing =>
     {
         tracing.AddSource(CorrelationContext.ActivitySourceName);
+        tracing.AddSource("Experimental.Microsoft.Extensions.AI");
         tracing.AddAspNetCoreInstrumentation();
         tracing.AddHttpClientInstrumentation();
         tracing.AddEntityFrameworkCoreInstrumentation();
@@ -48,6 +49,7 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
         metrics.AddMeter(CorrelationContext.ActivitySourceName);
+        metrics.AddMeter("Experimental.Microsoft.Extensions.AI");
         metrics.AddOtlpExporter(options => ApiStartupRuntime.ConfigureOtlpExporter(options));
     });
 

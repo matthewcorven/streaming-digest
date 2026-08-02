@@ -12,11 +12,14 @@
 
 <ItemGroup>
   <PackageReference Include="JsonSchema.Net" />
+  <PackageReference Include="Microsoft.Extensions.AI" />
+  <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
   <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
   <PackageReference Include="Microsoft.EntityFrameworkCore" />
   <!-- Direct reference retained; CPM pins this package to the patched Semantic Kernel version used to clear GHSA-2ww3-72rp-wpp4. -->
   <PackageReference Include="Microsoft.SemanticKernel" />
   <PackageReference Include="Npgsql" />
+  <PackageReference Include="OllamaSharp" />
 </ItemGroup>
 
 </Project>
