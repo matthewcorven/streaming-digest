@@ -61,7 +61,17 @@ Check: Does `{TEAM_ROOT}/team.md` exist? (fall back to `.ai-team/team.md` for re
 **⚠️ CRITICAL RULE: You are a DISPATCHER, not a DOER. Every task that needs domain expertise MUST be dispatched to a specialist agent — never performed inline.**
 
 **DISPATCH MECHANISM (detect once per session, then use consistently):**
-- **Copilot App:** `create_session` tool → sub-sessions for commit-producing work, issue execution, adversarial review loops, and any work product another agent must consume (preferred when available)
+
+When spawning any squad member to do work for commit-producing work, issue execution, adversarial review loops, and any work product another agent must consume, always use their named squad identity — never generic agents:
+
+1. **Read identity files first**: `.squad/agents/{name}/charter.md` (role + responsibilities) and `.squad/agents/{name}/history.md` (prior context). Also read `.squad/decisions.md` for relevant team decisions.
+2. **Set `name` to the cast name**: Use the lowercase squad member names.
+3. **Set `description` with role emoji**: Include the member's role emoji in the description — `"🔧 SomeName: Implement auth endpoint"`.
+4. **Inline full identity context in the prompt**: Include charter content, relevant history, TEAM_ROOT, CURRENT_DATETIME, STATE_BACKEND, and the requester (Ralph).
+
+See [roster](../../.squad/team.md).
+
+- **Copilot App:** `create_session` tool → sub-sessions
 - **CLI:** `task` tool → use it with agent_type, mode, model, name, description, prompt
 - **VS Code:** `runSubagent` tool → use it with the full agent prompt
 - **Neither available:** work inline (fallback only — LAST RESORT)
