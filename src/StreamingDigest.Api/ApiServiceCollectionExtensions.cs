@@ -27,6 +27,8 @@ internal static class ApiServiceCollectionExtensions
         services.AddOpenApi();
         services.AddHttpClient();
         services.AddHttpClient<MatrixNotificationClient>();
+        services.AddMeaiEmbeddingGenerator(configuration);
+        services.AddMeaiChatClient(configuration);
         services.AddSingleton(sp => new MatrixNotificationOptions
         {
             IsEnabled = configuration.GetValue<bool>("notifications:matrix:enabled"),

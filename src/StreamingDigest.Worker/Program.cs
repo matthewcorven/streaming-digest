@@ -53,6 +53,7 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing =>
     {
         tracing.AddSource(CorrelationContext.ActivitySourceName);
+        tracing.AddSource("Experimental.Microsoft.Extensions.AI");
         tracing.AddAspNetCoreInstrumentation();
         tracing.AddHttpClientInstrumentation();
         tracing.AddEntityFrameworkCoreInstrumentation();
@@ -61,6 +62,7 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
         metrics.AddMeter(CorrelationContext.ActivitySourceName);
+        metrics.AddMeter("Experimental.Microsoft.Extensions.AI");
         metrics.AddOtlpExporter(options => ConfigureOtlpExporter(options));
     });
 
@@ -127,6 +129,8 @@ builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredServic
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
+builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
+builder.Services.AddMeaiChatClient(builder.Configuration);
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
