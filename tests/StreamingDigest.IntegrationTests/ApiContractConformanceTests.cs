@@ -150,6 +150,42 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ModelDiscoveryEndpoints_ReturnProviderAwareMetadata()
+    {
+        using var client = CreateClient();
+        using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        Assert.True(loginResponse.IsSuccessStatusCode);
+
+        var optionsResponse = await client.GetFromJsonAsync<ModelOptionsResponse>("/api/models/options");
+        Assert.NotNull(optionsResponse);
+        Assert.NotNull(optionsResponse.Models);
+
+        var bgeModel = optionsResponse.Models.FirstOrDefault(m => m.Id == "bge-m3");
+        Assert.NotNull(bgeModel);
+        Assert.Equal("ollama", bgeModel.Provider);
+        Assert.Equal("embedding", bgeModel.RuntimeRole);
+        Assert.True(bgeModel.Downloadable);
+
+        var textEmbedding3Small = optionsResponse.Models.FirstOrDefault(m => m.Id == "text-embedding-3-small");
+        Assert.NotNull(textEmbedding3Small);
+        Assert.Equal("openai", textEmbedding3Small.Provider);
+        Assert.Equal("embedding", textEmbedding3Small.RuntimeRole);
+        Assert.False(textEmbedding3Small.Downloadable);
+
+        var whisper = optionsResponse.Models.FirstOrDefault(m => m.Id == "whisper");
+        Assert.NotNull(whisper);
+        Assert.Equal("whisper", whisper.Provider);
+        Assert.Equal("audio", whisper.RuntimeRole);
+        Assert.False(whisper.Downloadable);
+
+        var llama = optionsResponse.Models.FirstOrDefault(m => m.Id == "llama3.1:8b");
+        Assert.NotNull(llama);
+        Assert.Equal("ollama", llama.Provider);
+        Assert.Equal("llm", llama.RuntimeRole);
+        Assert.True(llama.Downloadable);
+    }
+
+    [Fact]
     public async Task ModelVerificationEndpoint_ReturnsVerifiedState()
     {
         using var client = CreateClient();
@@ -449,6 +485,9 @@ public sealed class ModelOption
 {
     public string? Id { get; set; }
     public string? Family { get; set; }
+    public string? Provider { get; set; }
+    public string? RuntimeRole { get; set; }
+    public bool Downloadable { get; set; }
     public string? Status { get; set; }
     public string? Label { get; set; }
 }
