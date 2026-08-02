@@ -24,6 +24,8 @@ public sealed class ApplicationConfiguration
     public ConnectionStringsSettings ConnectionStrings { get; init; } = new();
 
     public LoggingSettings Logging { get; init; } = new();
+
+    public IngestionSettings Ingestion { get; init; } = new();
 }
 
 public sealed class AppSettings
@@ -115,6 +117,37 @@ public sealed class BackupSettings
 
     public bool IncludeSecrets { get; init; } = true;
 }
+
+public sealed class IngestionSettings
+{
+    /// <summary>
+    /// Preferred metadata adapter: "ytdlp" or "youtube_api".
+    /// If set to "youtube_api" and API key is missing, falls back to "ytdlp".
+    /// Defaults to "youtube_api" if available, otherwise "ytdlp".
+    /// </summary>
+    public string PreferredMetadataSource { get; init; } = "youtube_api";
+
+    /// <summary>
+    /// YouTube Data API v3 key. If empty, YouTube API adapter is unavailable.
+    /// </summary>
+    public string? YouTubeApiKey { get; init; }
+
+    /// <summary>
+    /// Minimum video duration in seconds to be considered long-form.
+    /// Videos shorter than this are filtered out during ingestion.
+    /// Default: 61 seconds (to exclude shorts and clips).
+    /// </summary>
+    public int MinDurationSeconds { get; init; } = 61;
+
+    /// <summary>
+    /// Default max age in days for video discovery.
+    /// Videos older than (now - defaultMaxAgeDays) are excluded.
+    /// Can be overridden per channel via channels.default_max_age_days.
+    /// Default: 30 days.
+    /// </summary>
+    public int DefaultMaxAgeDays { get; init; } = 30;
+}
+
 
 public static class ApplicationConfigurationLoader
 {
