@@ -45,11 +45,12 @@ public sealed class MetadataAdapterSelector : IMetadataAdapterSelector
 
     public MetadataAdapterSelector(
         YtDlpMetadataAdapter ytDlpAdapter,
-        YouTubeApiMetadataAdapter? youtubeApiAdapter,
+        YouTubeApiMetadataAdapter youtubeApiAdapter,
         ApplicationConfiguration config,
         ILogger<MetadataAdapterSelector> logger)
     {
         ArgumentNullException.ThrowIfNull(ytDlpAdapter);
+        ArgumentNullException.ThrowIfNull(youtubeApiAdapter);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -62,16 +63,16 @@ public sealed class MetadataAdapterSelector : IMetadataAdapterSelector
         _logger.LogInformation(
             "Metadata adapter selector initialized: active={ActiveSource}, youtubeApiAvailable={YoutubeApiAvailable}",
             _activeSource,
-            youtubeApiAdapter?.IsConfigured ?? false);
+            youtubeApiAdapter.IsConfigured);
     }
 
-    private string ResolveActiveSource(ApplicationConfiguration config, YouTubeApiMetadataAdapter? youtubeApiAdapter)
+    private string ResolveActiveSource(ApplicationConfiguration config, YouTubeApiMetadataAdapter youtubeApiAdapter)
     {
-        var preferred = config.Ingestion.PreferredMetadataSource ?? "youtube_api";
+        var preferred = config.Ingestion.PreferredMetadataSource;
 
         if (string.Equals(preferred, "youtube_api", StringComparison.OrdinalIgnoreCase))
         {
-            if (youtubeApiAdapter?.IsConfigured ?? false)
+            if (youtubeApiAdapter.IsConfigured)
             {
                 _logger.LogDebug("Using YouTube API adapter (preferred source available with API key)");
                 return "youtube_api";

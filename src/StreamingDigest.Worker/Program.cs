@@ -199,7 +199,7 @@ builder.Services.AddSingleton<YtDlpMetadataAdapter>();
 builder.Services.AddSingleton<YouTubeApiMetadataAdapter>(sp =>
 {
     var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
-    var httpClient = httpClientFactory.CreateClient();
+    var httpClient = httpClientFactory.CreateClient(nameof(YouTubeApiMetadataAdapter));
     var appConfig = sp.GetRequiredService<ApplicationConfiguration>();
     var apiKey = appConfig.Ingestion.YouTubeApiKey;
     
