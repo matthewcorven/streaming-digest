@@ -53,8 +53,22 @@ python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --m
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)
 - Spawn agents as needed, collect results
+- In Copilot App mode, Ralph should keep issue implementation, adversarial review, and revision follow-ups in **sub-sessions** via `create_session` so each worker has a stable reply path
 - **⚡ CRITICAL: After results are collected, DO NOT stop. DO NOT wait for user input. IMMEDIATELY go back to Step 1 and scan again.** This is a loop — Ralph keeps cycling until the board is clear or the user says "idle". Each cycle is one "round".
 - If multiple items exist in the same category, process them in parallel (spawn multiple agents)
+
+### Ralph handoff discipline inside the loop
+
+When an implementation session reports that it believes work is complete:
+
+1. Treat that as **requesting independent adversarial review**, not as final completion.
+2. Spawn a **fresh reviewer sub-session** (not the same session, not inline review).
+3. Require the reviewer to produce exactly:
+   - `completeness_after_any_fixes.txt`
+   - `review_change_specifications.md`
+4. Ralph may read/report the completeness file.
+5. Ralph must **not** read, rewrite, or summarize `review_change_specifications.md`; it forwards the absolute file path directly to the requesting implementation session.
+6. Minimum one adversarial review pass is mandatory per issue. If fixes are requested, Ralph re-wakes the implementation session, then routes the revised work back through review again.
 
 **Step 4 — Periodic check-in** (every 3-5 rounds):
 

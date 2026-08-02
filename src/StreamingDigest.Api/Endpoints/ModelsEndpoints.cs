@@ -15,6 +15,9 @@ internal static class ModelsEndpoints
                     {
                         id = model.Id,
                         family = model.Family,
+                        provider = model.Provider.ToString().ToLowerInvariant(),
+                        runtimeRole = model.RuntimeRole.ToString().ToLowerInvariant(),
+                        downloadable = model.Downloadable,
                         status = model.Status,
                         label = model.Label,
                         installCommand = model.InstallCommand,

@@ -1,14 +1,16 @@
+using StreamingDigest.Domain;
+
 namespace StreamingDigest.Infrastructure.Persistence;
 
 public sealed class ModelDiscoveryService
 {
     private static readonly IReadOnlyList<ModelOptionDefinition> SupportedModels =
     [
-        new("bge-m3", "embedding", "available", "BAAI bge-m3", "ollama pull bge-m3", "/mnt/models/embedding"),
-        new("text-embedding-3-small", "embedding", "available", "OpenAI text-embedding-3-small", "ollama pull text-embedding-3-small", "/mnt/models/embedding"),
-        new("llama3.1:8b", "llm", "available", "Llama 3.1 8B", "ollama pull llama3.1:8b", "/mnt/models/llm"),
-        new("qwen2.5:7b", "llm", "available", "Qwen 2.5 7B", "ollama pull qwen2.5:7b", "/mnt/models/llm"),
-        new("whisper", "audio", "available", "Whisper Base", "ollama pull whisper", "/mnt/models/audio")
+        new("bge-m3", "embedding", "available", "BAAI bge-m3", ModelProvider.Ollama, RuntimeRole.Embedding, true, "ollama pull bge-m3", "/mnt/models/embedding"),
+        new("text-embedding-3-small", "embedding", "available", "OpenAI text-embedding-3-small", ModelProvider.OpenAI, RuntimeRole.Embedding, false, null, null),
+        new("llama3.1:8b", "llm", "available", "Llama 3.1 8B", ModelProvider.Ollama, RuntimeRole.LLM, true, "ollama pull llama3.1:8b", "/mnt/models/llm"),
+        new("qwen2.5:7b", "llm", "available", "Qwen 2.5 7B", ModelProvider.Ollama, RuntimeRole.LLM, true, "ollama pull qwen2.5:7b", "/mnt/models/llm"),
+        new("whisper", "audio", "available", "Whisper Base", ModelProvider.Whisper, RuntimeRole.Audio, false, null, null)
     ];
 
     private readonly AppReadinessStateService _readinessStateService;
@@ -84,7 +86,7 @@ public sealed class ModelDiscoveryService
                     null,
                     new Dictionary<string, object?>
                     {
-                        ["provider"] = "ollama",
+                        ["provider"] = model.Provider.ToString().ToLowerInvariant(),
                         ["modelId"] = model.Id,
                         ["modelKind"] = model.Family,
                         ["modelLabel"] = model.Label,
@@ -109,7 +111,16 @@ public sealed class ModelDiscoveryService
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
-public sealed record ModelOptionDefinition(string Id, string Family, string Status, string Label, string? InstallCommand = null, string? MountPath = null);
+public sealed record ModelOptionDefinition(
+    string Id,
+    string Family,
+    string Status,
+    string Label,
+    ModelProvider Provider,
+    RuntimeRole RuntimeRole,
+    bool Downloadable,
+    string? InstallCommand = null,
+    string? MountPath = null);
 
 public sealed record ModelDownloadResult(string Status, string ModelKind, string ModelId, Guid OperationId, string StatusUrl);
 

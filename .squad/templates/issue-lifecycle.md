@@ -215,6 +215,23 @@ Working as {member} ({role})
 ⚠️ This task was flagged as "needs review" — please have a squad member review before merging.
 ```
 
+### 4a. Independent Adversarial Review Gate
+
+**Trigger:** The implementation agent believes the issue is complete enough for independent challenge.
+
+**Actions:**
+1. The implementation agent does **not** declare the issue done. It stops and reports: branch, latest commit, PR number/URL, and that it is **requesting independent adversarial review**.
+2. The coordinator spawns a **fresh reviewer sub-session** (`create_session` in Copilot App mode; `task` only as a fallback when sub-sessions are unavailable).
+3. The reviewer performs at least one adversarial pass and writes **exactly two artifacts**:
+   - `completeness_after_any_fixes.txt` — the percent of the issue requirements that would be complete if the prescribed changes are applied
+   - `review_change_specifications.md` — concrete requested changes for the implementation session
+4. The coordinator may read and report the completeness file.
+5. The coordinator must **not** read, distill, or paraphrase `review_change_specifications.md`. Instead, it forwards the absolute file path directly to the implementation session as the source of truth for requested fixes.
+6. The implementation session reads that file, revises the same branch/PR, pushes updates, and re-requests adversarial review when ready.
+7. This review loop is mandatory at least once per issue before the work can be treated as complete or ready for final maintainer review.
+
+**Interaction with reviewer lockout:** this adversarial review loop is a normal revision gate. Only apply the stricter reviewer lockout/reassignment protocol when a reviewer explicitly rejects the artifact and calls for reassignment.
+
 ### 5. PR Review & Updates
 
 **Review states:**
@@ -227,6 +244,7 @@ Working as {member} ({role})
 2. Commits fixes to the same branch
 3. Pushes updates
 4. Requests re-review
+5. If the feedback came from the adversarial review gate, the implementation agent reads the forwarded `review_change_specifications.md` file path rather than relying on coordinator paraphrase
 
 **Update workflow:**
 ```bash
@@ -318,6 +336,8 @@ When spawning an agent to work on an issue, include this context block:
    gh pr create --title "{title}" --body "Closes #{number}\n\n{description}" --head squad/{issue-number}-{slug} --base {base-branch}
    ```
 4. Report PR URL to coordinator
+5. Stop and request **independent adversarial review** instead of declaring the issue done
+6. If the coordinator sends back a `review_change_specifications.md` file path, read that file directly, apply the requested changes, push updates, and re-request review
 ```
 
 ## Ralph's Role in Issue Lifecycle
@@ -325,10 +345,11 @@ When spawning an agent to work on an issue, include this context block:
 Ralph (the work monitor) continuously checks issue and PR state:
 
 1. **Triage:** Detects untriaged issues, assigns `squad:{member}` labels
-2. **Spawn:** Launches agents for assigned issues
-3. **Monitor:** Tracks PR state transitions (needsReview → changesRequested → readyToMerge)
-4. **Merge:** Automatically merges approved PRs
-5. **Cleanup:** Marks issues as done when PRs merge
+2. **Spawn:** Launches implementation agents for assigned issues as sub-sessions when the platform supports them
+3. **Review gate:** When an implementation session requests review, Ralph launches a fresh reviewer sub-session, reads only the completeness artifact, and forwards the raw `review_change_specifications.md` path back to the implementation session
+4. **Monitor:** Tracks PR state transitions (needsReview → changesRequested → readyToMerge)
+5. **Merge:** Automatically merges approved PRs
+6. **Cleanup:** Marks issues as done when PRs merge
 
 **Ralph's work-check cycle:**
 ```

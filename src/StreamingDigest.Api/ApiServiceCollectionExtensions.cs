@@ -1,9 +1,12 @@
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
 using StreamingDigest.Infrastructure.AudioToText;
@@ -27,6 +30,12 @@ internal static class ApiServiceCollectionExtensions
         services.AddOpenApi();
         services.AddHttpClient();
         services.AddHttpClient<MatrixNotificationClient>();
+        // Note: MEAI embedding generator registration disabled due to OllamaSharp 4.0.1 / MEAI 10.5.0 compatibility issues.
+        // services.AddMeaiEmbeddingGenerator(configuration);
+        // Note: AddMeaiChatClient is commented out because OllamaSharp's IChatClient implementation has compatibility issues with MEAI 10.5.0.
+        // Instead, we use MeaiChatClientWrapper which does raw HTTP calls directly.
+        // services.AddMeaiChatClient(configuration);
+        services.AddMeaiChatClientWrapper(configuration);
         services.AddSingleton(sp => new MatrixNotificationOptions
         {
             IsEnabled = configuration.GetValue<bool>("notifications:matrix:enabled"),
@@ -46,12 +55,16 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<BootstrapAdminUserService>();
         services.AddSingleton<AppAuthService>();
         services.AddSingleton<AppReadinessStateService>();
+        services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
+        services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
         services.AddSingleton<FirstUserSetupService>();
         services.AddSingleton<ModelDiscoveryService>();
         services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
         services.AddSingleton<SearchUiService>();
         services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
-        services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
+        // Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
+        // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
+        services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), configuration));
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);

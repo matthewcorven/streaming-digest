@@ -20,8 +20,8 @@
 When `create_session` is available, spawn commit-producing agents as **sub-sessions** instead of tasks. Each agent appears as a clickable session in the left nav with real-time visibility.
 
 **When to use sub-sessions vs task:**
-- **Sub-session** (`create_session`): Agent produces commits, needs worktree isolation, or benefits from persistent session visibility
-- **Task** (`task` tool): Pure analysis, coordination, read-only research, or quick one-shot work
+- **Sub-session** (`create_session`): Agent produces commits, needs worktree isolation, participates in Ralph's issue/review/revision loop, or benefits from persistent session visibility and a stable reply path
+- **Task** (`task` tool): Pure analysis, coordination, read-only research, or quick one-shot work whose output does not need to be handed back to another agent session
 
 **Sub-session parameters:**
 - **`name`**: `"{Name} {verb}ing {noun}"` — 40-char max, sentence case (e.g., "EECOM refactoring auth", "Flight reviewing arch")
@@ -35,6 +35,7 @@ When `create_session` is available, spawn commit-producing agents as **sub-sessi
 - **Max depth:** 1 — no sub-sub-sessions. If an agent needs to delegate, it uses `task` tool.
 - **Concurrency cap:** Maximum 4-5 simultaneous sub-sessions. Queue additional spawns.
 - **Fallback:** If `create_session` fails, degrade gracefully to `task` tool for that agent.
+- **Ralph loop:** In Copilot App mode, issue implementation, adversarial review, and revision follow-ups should stay in sub-sessions so Ralph can forward artifacts and re-wake the correct worker.
 
 **Sub-session template:**
 ```

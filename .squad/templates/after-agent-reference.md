@@ -20,9 +20,19 @@ After each batch of agent work:
    - Files found → `"⚠️ {Name} completed (files verified) but response lost."` Treat as DONE.
    - No files → `"❌ {Name} failed — no work product."` Consider re-spawn.
 
-3. **Show compact results:** `{emoji} {Name} — {1-line summary of what they did}`
+3. **Review-gate detection** — if an issue-work agent reports completion, "ready", or a request for independent review, treat that as a handoff state, not final completion:
+   - Spawn a **fresh independent reviewer**. In Copilot App mode, use a new `create_session` sub-session; use `task` only when sub-sessions are unavailable.
+   - Reviewer outputs **exactly two files** and reports their absolute paths:
+     - `completeness_after_any_fixes.txt`
+     - `review_change_specifications.md`
+   - Coordinator may read/report the completeness file.
+   - Coordinator MUST NOT read, paraphrase, or distill `review_change_specifications.md`; forward the file path directly to the author session through the platform's session/agent messaging channel.
+   - Minimum bar: **one adversarial review pass per issue**. If fixes are requested, re-wake the author session, let it revise, then route back through review again.
+   - This loop is a revision workflow, not an automatic reviewer-lockout event. Apply strict reviewer-protocol lockout only if a reviewer explicitly rejects and invokes that protocol.
 
-4. **Spawn Scribe** (background, never wait). Only if agents ran or inbox has files:
+4. **Show compact results:** `{emoji} {Name} — {1-line summary of what they did}`
+
+5. **Spawn Scribe** (background, never wait). Only if agents ran or inbox has files:
 
 ```
 agent_type: "general-purpose"
@@ -59,6 +69,6 @@ prompt: |
   Never speak to user. ⚠️ End with plain text summary after all tool calls.
 ```
 
-5. **Immediately assess:** Does anything trigger follow-up work? Launch it NOW.
+6. **Immediately assess:** Does anything trigger follow-up work? Launch it NOW.
 
-6. **Ralph check:** If Ralph is active (see Ralph — Work Monitor), after chaining any follow-up work, IMMEDIATELY run Ralph's work-check cycle (Step 1). Do NOT stop. Do NOT wait for user input. Ralph keeps the pipeline moving until the board is clear.
+7. **Ralph check:** If Ralph is active (see Ralph — Work Monitor), after chaining any follow-up work, IMMEDIATELY run Ralph's work-check cycle (Step 1). Do NOT stop. Do NOT wait for user input. Ralph keeps the pipeline moving until the board is clear.
