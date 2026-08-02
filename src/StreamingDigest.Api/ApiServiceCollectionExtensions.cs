@@ -1,5 +1,7 @@
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.AudioToText;
@@ -53,7 +55,10 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
         services.AddSingleton<SearchUiService>();
         services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
-        services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
+        services.AddSingleton<IEmbeddingService>(sp => new MeaiEmbeddingServiceAdapter(
+            sp.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>(),
+            configuration,
+            sp.GetService<ILogger<MeaiEmbeddingServiceAdapter>>()));
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);

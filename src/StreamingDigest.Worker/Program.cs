@@ -3,6 +3,7 @@ using Hangfire;
 using Hangfire.MemoryStorage;
 using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Logs;
@@ -128,9 +129,12 @@ builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNp
 builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
-builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
 builder.Services.AddMeaiChatClient(builder.Configuration);
+builder.Services.AddSingleton<IEmbeddingService>(sp => new MeaiEmbeddingServiceAdapter(
+    sp.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>(),
+    builder.Configuration,
+    sp.GetService<ILogger<MeaiEmbeddingServiceAdapter>>()));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
