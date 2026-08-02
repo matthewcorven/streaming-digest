@@ -15,6 +15,7 @@
   <!-- Direct reference retained so CPM can pin the patched Microsoft.OpenApi 2.x compatibility line used by API-facing test projects. -->
   <PackageReference Include="Microsoft.OpenApi" />
   <PackageReference Include="Microsoft.NET.Test.Sdk" />
+  <PackageReference Include="Moq" />
   <!-- Direct reference retained so CPM can override the vulnerable transitive native SQLite package in test-only dependencies. -->
   <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
   <PackageReference Include="xunit" />

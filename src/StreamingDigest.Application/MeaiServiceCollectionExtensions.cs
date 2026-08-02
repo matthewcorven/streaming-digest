@@ -27,16 +27,13 @@ public static class MeaiServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.AddSingleton(sp =>
+        services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
         {
             var endpoint = ResolveEmbeddingEndpoint(configuration);
             var model = ResolveEmbeddingModel(configuration);
 
             var client = new OllamaApiClient(new Uri(endpoint), model);
-            return client.AsBuilder()
-                .UseOpenTelemetry(sourceName: "Experimental.Microsoft.Extensions.AI")
-                .UseLogging()
-                .Build();
+            return (IEmbeddingGenerator<string, Embedding<float>>)client;
         });
 
         return services;
@@ -53,17 +50,13 @@ public static class MeaiServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.AddSingleton(sp =>
+        services.AddSingleton<IChatClient>(sp =>
         {
             var endpoint = ResolveLlmEndpoint(configuration);
             var model = ResolveLlmModel(configuration);
 
             var client = new OllamaApiClient(new Uri(endpoint), model);
-            return client.AsBuilder()
-                .UseFunctionInvocation()
-                .UseOpenTelemetry(sourceName: "Experimental.Microsoft.Extensions.AI")
-                .UseLogging()
-                .Build();
+            return (IChatClient)client;
         });
 
         return services;

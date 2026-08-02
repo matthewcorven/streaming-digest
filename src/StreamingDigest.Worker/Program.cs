@@ -130,12 +130,13 @@ builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredServic
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
-builder.Services.AddMeaiChatClient(builder.Configuration);
+// Note: AddMeaiChatClient is commented out because OllamaSharp's IChatClient implementation has compatibility issues with MEAI 10.5.0.
+// Instead, we use MeaiChatClientWrapper which does raw HTTP calls directly.
+// builder.Services.AddMeaiChatClient(builder.Configuration);
 builder.Services.AddMeaiChatClientWrapper(builder.Configuration);
-builder.Services.AddSingleton<IEmbeddingService>(sp => new MeaiEmbeddingServiceAdapter(
-    sp.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>(),
-    builder.Configuration,
-    sp.GetService<ILogger<MeaiEmbeddingServiceAdapter>>()));
+// Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
+// TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
+builder.Services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), builder.Configuration));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
