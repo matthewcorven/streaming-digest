@@ -28,4 +28,14 @@ public sealed class IngestionItem
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    
+    // Per-stage status tracking for orchestration and detail view
+    public string TranscriptStatus { get; set; } = "pending";
+    public string SegmentsStatus { get; set; } = "pending";
+    public string ScreenshotsStatus { get; set; } = "pending";
+    public string LinksStatus { get; set; } = "pending";
+    public string ReposStatus { get; set; } = "pending";
+    public string WebsitesStatus { get; set; } = "pending";
+    public string EmbeddingsStatus { get; set; } = "pending";
 }
