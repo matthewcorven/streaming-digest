@@ -69,15 +69,15 @@ Required extensions:
 
 Responsibilities:
 
-- Local embedding model endpoint.
-- Local LLM endpoint.
+- Local embedding model endpoint (`/api/embeddings`)
+- Local LLM endpoint (`/api/chat`)
 
-Accessed via Microsoft Semantic Kernel adapters.
+Accessed via **Microsoft.Extensions.AI (MEAI)** clients powered by **OllamaSharp 4**, with OpenTelemetry instrumentation for tracing and metrics.
 
 Default recommendation:
 
-- Embeddings: prefer `bge-m3` if available, otherwise document `nomic-embed-text`.
-- LLM: configurable small local instruction model with sufficient context and JSON reliability.
+- Embeddings: prefer `bge-m3` if available, otherwise `nomic-embed-text` (384-1024 dims depending on model)
+- LLM: configurable small local instruction model with sufficient context (>4K tokens) and JSON response reliability
 
 ### 2.5 Audio-to-text service: `streaming-digest-whisper`
 
@@ -334,15 +334,23 @@ Use a hybrid data access strategy:
 - Raw SQL/Dapper for search, pgvector queries, and tuned ingestion bulk operations.
 - EF migrations plus raw SQL migrations for indexes, pgvector, full-text, and trigram support.
 
-### 5.5 Microsoft Semantic Kernel
+### 5.5 Microsoft.Extensions.AI + OllamaSharp
 
-Use Semantic Kernel for:
+Model inference is standardized on **Microsoft.Extensions.AI** (MEAI) abstractions via **OllamaSharp 4**:
 
-- Embedding provider abstraction.
-- Local LLM abstraction.
-- Audio-to-text abstraction where compatible.
+- **Embeddings:** `IEmbeddingGenerator<string, Embedding<float>>` wraps Ollama `/api/embeddings` endpoint
+- **Chat/LLM:** `IChatClient` wraps Ollama `/api/chat` endpoint
+- **OpenTelemetry:** OllamaSharp clients wired with `UseOpenTelemetry()` middleware to emit traces/metrics
+- **Adapter Pattern:** Services consume via `IEmbeddingService` adapter + `MeaiChatClientWrapper` for backward compatibility
 
-Adapters should hide concrete Ollama/whisper implementation details from application services.
+Semantic Kernel is used **only for high-value scenarios** (complex prompting, structured output, function-calling) that justify the abstraction overhead. For simple embedding and chat calls, MEAI clients are used directly.
+
+**Migration seams:**
+- S1/S2/S3/S7: Embedding → `IEmbeddingGenerator` (via `MeaiEmbeddingServiceAdapter`)
+- S4/S5: Chat/LLM → `IChatClient` (via `MeaiChatClientWrapper`)
+- S6: Audio-to-text → Local Whisper (unchanged for MVP)
+
+Services fall back gracefully to deterministic/heuristic behavior when MEAI clients are unavailable or return errors.
 
 ### 5.6 Crawlee/Playwright
 
