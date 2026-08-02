@@ -25,6 +25,7 @@ using StreamingDigest.Worker;
 using StreamingDigest.Worker.Scraping;
 
 var builder = Host.CreateApplicationBuilder(args);
+var scraperStartupDependency = ResolveScraperStartupDependency(builder.Configuration["Scraper:BaseUrl"]);
 
 var applicationConfiguration = ApplicationConfigurationLoader.LoadFromDirectory(builder.Environment.ContentRootPath);
 builder.Services.AddSingleton(applicationConfiguration);
@@ -182,7 +183,11 @@ builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
 builder.Services.AddScoped<IScrapeFailureRecorder, ScrapeFailureRecorder>();
 builder.Services.AddHttpClient<ScraperClient>(client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["Scraper:BaseUrl"] ?? "http://localhost:3000");
+    if (scraperStartupDependency.BaseUri is not null)
+    {
+        client.BaseAddress = scraperStartupDependency.BaseUri;
+    }
+
     client.Timeout = TimeSpan.FromSeconds(10);
 });
 
@@ -211,9 +216,30 @@ if (compatibilityStateBeforeMigration is not null && compatibilityStateAfterMigr
 await WorkerConcurrencySettingsLoader.LoadAsync(connectionString, databaseStatus.Connected, startupLogger, workerConcurrencySettings);
 WorkerConcurrencySettingsLoader.LogResolvedSettings(startupLogger, workerConcurrencySettings);
 
-var scraperClient = host.Services.GetRequiredService<ScraperClient>();
-var scraperHealthy = await scraperClient.IsHealthyAsync();
-startupLogger.LogInformation("Scraper health check result: {Status}", scraperHealthy ? "healthy" : "unreachable");
+await using var startupServiceScope = host.Services.CreateAsyncScope();
+if (scraperStartupDependency.ConfigurationIssue is not null)
+{
+    await SignalStartupDependencyIssueAsync(
+        startupLogger,
+        startupServiceScope.ServiceProvider,
+        $"Worker startup degraded: scraper dependency is unavailable because {scraperStartupDependency.ConfigurationIssue}");
+}
+else
+{
+    var scraperClient = startupServiceScope.ServiceProvider.GetRequiredService<ScraperClient>();
+    var scraperHealthy = await scraperClient.IsHealthyAsync();
+    if (scraperHealthy)
+    {
+        startupLogger.LogInformation("Scraper health check result: healthy at {BaseUrl}", scraperStartupDependency.BaseUri);
+    }
+    else
+    {
+        await SignalStartupDependencyIssueAsync(
+            startupLogger,
+            startupServiceScope.ServiceProvider,
+            $"Worker startup degraded: scraper health check is unreachable at {scraperStartupDependency.BaseUri}.");
+    }
+}
 
 await host.RunAsync();
 
@@ -297,4 +323,47 @@ static bool ResolveDefaultObservabilityEnabled(IConfiguration configuration, IHo
     return environment.IsDevelopment() ? true : fallbackEnabled;
 }
 
+static ScraperStartupDependency ResolveScraperStartupDependency(string? configuredBaseUrl)
+{
+    if (string.IsNullOrWhiteSpace(configuredBaseUrl))
+    {
+        return new ScraperStartupDependency(null, null, "Scraper:BaseUrl is not configured.");
+    }
+
+    if (!Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var baseUri))
+    {
+        return new ScraperStartupDependency(null, configuredBaseUrl, $"Scraper:BaseUrl '{configuredBaseUrl}' is not a valid absolute URI.");
+    }
+
+    return new ScraperStartupDependency(baseUri, configuredBaseUrl, null);
+}
+
+static async Task SignalStartupDependencyIssueAsync(
+    ILogger logger,
+    IServiceProvider serviceProvider,
+    string message,
+    CancellationToken cancellationToken = default)
+{
+    logger.LogWarning("{Message}", message);
+
+    try
+    {
+        var notificationClient = serviceProvider.GetRequiredService<MatrixNotificationClient>();
+        var result = await notificationClient.SendTextMessageAsync(message, cancellationToken);
+        if (result.Success)
+        {
+            logger.LogInformation("Worker startup dependency warning sent to Matrix.");
+            return;
+        }
+
+        logger.LogInformation("Worker startup dependency warning was not sent to Matrix: {Reason}", result.Message);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Worker startup dependency warning could not be sent to Matrix.");
+    }
+}
+
 public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);
+
+public sealed record ScraperStartupDependency(Uri? BaseUri, string? ConfiguredBaseUrl, string? ConfigurationIssue);

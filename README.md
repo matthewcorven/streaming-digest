@@ -424,7 +424,7 @@ dotnet user-secrets set "Parameters:postgres-username" "streamingdigest" --proje
 dotnet user-secrets set "Parameters:postgres-password" "replace-me" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
 dotnet user-secrets set "Parameters:grafana-admin-user" "admin" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
 dotnet user-secrets set "Parameters:grafana-admin-password" "replace-me" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
-dotnet user-secrets set "Parameters:pgadmin-default-email" "admin@streamingdigest.local" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
+dotnet user-secrets set "Parameters:pgadmin-default-email" "admin@streamingdigest.dev" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
 dotnet user-secrets set "Parameters:pgadmin-default-password" "replace-me" --project src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj
 ```
 
