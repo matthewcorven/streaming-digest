@@ -336,21 +336,30 @@ Use a hybrid data access strategy:
 
 ### 5.5 Microsoft.Extensions.AI + OllamaSharp
 
-Model inference is standardized on **Microsoft.Extensions.AI** (MEAI) abstractions via **OllamaSharp 4**:
+Model inference standardization is in progress:
 
-- **Embeddings:** `IEmbeddingGenerator<string, Embedding<float>>` wraps Ollama `/api/embeddings` endpoint
-- **Chat/LLM:** `IChatClient` wraps Ollama `/api/chat` endpoint
-- **OpenTelemetry:** OllamaSharp clients wired with `UseOpenTelemetry()` middleware to emit traces/metrics
-- **Adapter Pattern:** Services consume via `IEmbeddingService` adapter + `MeaiChatClientWrapper` for backward compatibility
+- **Embeddings:** Currently using `OllamaEmbeddingService` with raw HTTP calls for backward compatibility.
+  - **Future migration path:** Migrate to `IEmbeddingGenerator<string, Embedding<float>>` via OllamaSharp 4.
+  - **Known blocker:** OllamaSharp 4.0.1 has a compatibility issue with Microsoft.Extensions.AI 10.5.0 (OllamaSharp's `IChatClient` implementation references `Metadata` property that doesn't exist in MEAI 10.5.0), causing `MissingMethodException` at service instantiation. See `MeaiEmbeddingServiceAdapter.cs` and `MeaiServiceCollectionExtensions.cs` for details.
+  - **Workaround:** Use raw `OllamaEmbeddingService` until OllamaSharp compatibility is resolved.
 
-Semantic Kernel is used **only for high-value scenarios** (complex prompting, structured output, function-calling) that justify the abstraction overhead. For simple embedding and chat calls, MEAI clients are used directly.
+- **Chat/LLM:** Migrated to `MeaiChatClientWrapper` for raw HTTP calls to Ollama `/api/chat` endpoint.
+  - Services (DeterministicTranscriptChunkingService, LinkClassificationService) consume via `MeaiChatClientWrapper` directly (not MEAI `IChatClient`).
+  - Uses OpenTelemetry + logging middleware for observability.
+  - Falls back to deterministic/heuristic behavior when chat calls fail.
+
+- **OpenTelemetry:** OllamaSharp clients are not currently wired with `UseOpenTelemetry()` due to the compatibility issue above.
+  - Once OllamaSharp compatibility is resolved, enable OTel tracing/metrics for embeddings.
+
+- **Long-term vision:** Standardize on Microsoft.Extensions.AI for both embeddings and chat once OllamaSharp 4.x compatibility is resolved or an alternative MEAI provider is available.
+  - Semantic Kernel will be reserved for high-value scenarios (complex prompting, structured output, function-calling) that justify the abstraction overhead.
 
 **Migration seams:**
-- S1/S2/S3/S7: Embedding → `IEmbeddingGenerator` (via `MeaiEmbeddingServiceAdapter`)
-- S4/S5: Chat/LLM → `IChatClient` (via `MeaiChatClientWrapper`)
+- S1/S2/S3/S7: Embedding → `OllamaEmbeddingService` (target: `IEmbeddingGenerator` once MEAI compat resolved)
+- S4/S5: Chat/LLM → `MeaiChatClientWrapper` (raw HTTP to `/api/chat`)
 - S6: Audio-to-text → Local Whisper (unchanged for MVP)
 
-Services fall back gracefully to deterministic/heuristic behavior when MEAI clients are unavailable or return errors.
+Services fall back gracefully to deterministic/heuristic behavior when clients are unavailable or return errors.
 
 ### 5.6 Crawlee/Playwright
 
