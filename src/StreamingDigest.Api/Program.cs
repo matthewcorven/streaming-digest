@@ -115,7 +115,10 @@ if (databaseStatus.Connected)
     await authService.EnsureSchemaAsync(connectionString);
 
     var readinessStateService = app.Services.GetRequiredService<AppReadinessStateService>();
-    await readinessStateService.EnsureSchemaAsync(connectionString);
+     await readinessStateService.EnsureSchemaAsync(connectionString);
+
+    var modelRuntimeStateSchemaGuard = app.Services.GetRequiredService<IModelRuntimeStateSchemaGuard>();
+    await modelRuntimeStateSchemaGuard.EnsureSchemaAsync(connectionString);
 }
 
 if (app.Environment.IsDevelopment())

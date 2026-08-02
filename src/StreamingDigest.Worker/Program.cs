@@ -13,6 +13,7 @@ using Npgsql;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
+using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Infrastructure.Persistence;
@@ -124,6 +125,8 @@ else
 builder.Services.AddSingleton(compatibilityEvaluation);
 builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
+builder.Services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
+builder.Services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
@@ -240,6 +243,9 @@ else
             $"Worker startup degraded: scraper health check is unreachable at {scraperStartupDependency.BaseUri}.");
     }
 }
+
+var modelRuntimeStateSchemaGuard = host.Services.GetRequiredService<IModelRuntimeStateSchemaGuard>();
+await modelRuntimeStateSchemaGuard.EnsureSchemaAsync(connectionString);
 
 await host.RunAsync();
 
