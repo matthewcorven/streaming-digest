@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "defaultModel": "mai-code-1-flash-picker",
+  "defaultModel": "deepseek/deepseek-v4-pro",
   "agentModelOverrides": {
-    "morpheus": "gpt-5.4",
-    "trinity": "claude-sonnet-4.6",
-    "tank": "mai-code-1-flash-picker",
-    "dozer": "mai-code-1-flash-picker",
-    "neo": "mai-code-1-flash-picker",
-    "switch": "claude-haiku-4.5",
-    "scribe": "claude-haiku-4.5",
-    "ralph": "claude-sonnet-4.6"
+    "morpheus": "deepseek/deepseek-v4-pro",
+    "trinity": "deepseek/deepseek-v4-pro",
+    "tank": "deepseek/deepseek-v4-flash",
+    "dozer": "deepseek/deepseek-v4-flash",
+    "neo": "deepseek/deepseek-v4-flash",
+    "switch": "deepseek/deepseek-v4-flash",
+    "scribe": "deepseek/deepseek-v4-flash",
+    "ralph": "deepseek/deepseek-v4-pro"
   }
 }
