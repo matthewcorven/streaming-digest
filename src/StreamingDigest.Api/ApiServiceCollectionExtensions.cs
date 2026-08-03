@@ -66,6 +66,8 @@ internal static class ApiServiceCollectionExtensions
         // Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
         // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
         services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), configuration));
+        // The runtime client builds its absolute request URI from config (embedding:ollamaEndpoint,
+        // OLLAMA_HOST, ...) rather than from HttpClient.BaseAddress, matching OllamaEmbeddingService.
         services.AddSingleton<Application.IModelRuntimeClient>(sp => new OllamaModelRuntimeClient(sp.GetRequiredService<HttpClient>(), configuration));
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();

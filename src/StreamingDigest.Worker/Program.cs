@@ -141,6 +141,7 @@ builder.Services.AddMeaiChatClientWrapper(builder.Configuration);
 // Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
 // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
 builder.Services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), builder.Configuration));
+// The runtime client builds its absolute request URI from config rather than HttpClient.BaseAddress, matching OllamaEmbeddingService.
 builder.Services.AddSingleton<IModelRuntimeClient>(sp => new OllamaModelRuntimeClient(sp.GetRequiredService<HttpClient>(), builder.Configuration));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();

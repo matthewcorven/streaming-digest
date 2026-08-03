@@ -69,7 +69,7 @@ public sealed class OllamaModelRuntimeClientTests
     }
 
     [Fact]
-    public async Task PullModelAsync_StreamsProgressLinesInOrderWithDerivedPercent()
+    public async Task PullModelAsync_StreamsRealisticProgressLinesInOrderWithDerivedPercent()
     {
         var requests = new List<(string Method, Uri Uri, string Body)>();
         using var httpClient = new HttpClient(new StubHttpHandler((request, _) =>
@@ -78,10 +78,16 @@ public sealed class OllamaModelRuntimeClientTests
                 ? string.Empty
                 : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
             requests.Add((request.Method.Method, request.RequestUri!, body));
+            // Realistic Ollama NDJSON: manifest line (no total/completed), a layer line where
+            // completed is absent early, then a layer line with full progress, plus a malformed
+            // line mid-stream that must be skipped without aborting, and a terminal success.
             var ndjson = string.Join('\n', new[]
             {
-                """{"status":"downloading","total":1000,"completed":250,"digest":"sha256:abc"}""",
-                """{"status":"downloading","total":1000,"completed":1000,"digest":"sha256:abc"}""",
+                """{"status":"pulling manifest"}""",
+                "{not json",
+                """{"status":"pulling sha256:abc","digest":"sha256:abc","total":1000}""",
+                """{"status":"downloading","digest":"sha256:abc","total":1000,"completed":250}""",
+                """{"status":"downloading","digest":"sha256:abc","total":1000,"completed":1000}""",
                 """{"status":"verifying sha256 digest"}""",
                 """{"status":"success"}"""
             }) + "\n";
@@ -102,20 +108,114 @@ public sealed class OllamaModelRuntimeClientTests
         Assert.Contains("\"stream\":true", requests[0].Body, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bge-m3", requests[0].Body);
 
-        Assert.Equal(4, progress.Count);
-        Assert.Equal("downloading", progress[0].Status);
-        Assert.Equal(1000L, progress[0].Total);
-        Assert.Equal(250L, progress[0].Completed);
-        Assert.Equal(25, progress[0].Percent);
+        // The malformed line is skipped, so six progress events remain (5 status lines + success).
+        Assert.Equal(6, progress.Count);
 
-        Assert.Equal("downloading", progress[1].Status);
-        Assert.Equal(100, progress[1].Percent);
+        // pulling manifest — no total/completed → null Percent, still yielded.
+        Assert.Equal("pulling manifest", progress[0].Status);
+        Assert.Null(progress[0].Total);
+        Assert.Null(progress[0].Completed);
+        Assert.Null(progress[0].Percent);
 
-        Assert.Equal("verifying sha256 digest", progress[2].Status);
-        Assert.Null(progress[2].Percent);
+        // pulling sha256:abc layer line — total present, completed absent → null Percent.
+        Assert.Equal("pulling sha256:abc", progress[1].Status);
+        Assert.Equal(1000L, progress[1].Total);
+        Assert.Null(progress[1].Completed);
+        Assert.Null(progress[1].Percent);
 
-        Assert.Equal("success", progress[3].Status);
-        Assert.Null(progress[3].Percent);
+        // downloading 250/1000 → 25%.
+        Assert.Equal("downloading", progress[2].Status);
+        Assert.Equal(1000L, progress[2].Total);
+        Assert.Equal(250L, progress[2].Completed);
+        Assert.Equal(25, progress[2].Percent);
+
+        // downloading 1000/1000 → 100%.
+        Assert.Equal("downloading", progress[3].Status);
+        Assert.Equal(100, progress[3].Percent);
+
+        Assert.Equal("verifying sha256 digest", progress[4].Status);
+        Assert.Null(progress[4].Percent);
+
+        Assert.Equal("success", progress[5].Status);
+        Assert.Null(progress[5].Percent);
+    }
+
+    [Fact]
+    public async Task PullModelAsync_TerminalErrorMidStream_ThrowsAndDoesNotYieldErrorLine()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
+        {
+            var ndjson = string.Join('\n', new[]
+            {
+                """{"status":"pulling manifest"}""",
+                """{"status":"downloading","total":1000,"completed":250}""",
+                """{"error":"manifest download failed"}""",
+                """{"status":"success"}"""
+            }) + "\n";
+            return Task.FromResult(StreamResponse(ndjson));
+        }));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var progress = new List<ModelPullProgress>();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var item in client.PullModelAsync("nope"))
+            {
+                progress.Add(item);
+            }
+        });
+
+        Assert.Contains("manifest download failed", exception.Message, StringComparison.OrdinalIgnoreCase);
+        // The error line must not be yielded as a progress event.
+        Assert.DoesNotContain(progress, p => p.Status.Contains("error", StringComparison.OrdinalIgnoreCase));
+        // Lines before the error were yielded.
+        Assert.Equal(2, progress.Count);
+    }
+
+    [Fact]
+    public async Task PullModelAsync_StreamFalse_YieldsSingleProgressObject()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((request, _) =>
+        {
+            // When stream:false Ollama returns a single JSON object (no trailing newline).
+            var body = request.Content is null
+                ? string.Empty
+                : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            Assert.Contains("\"stream\":false", body, StringComparison.OrdinalIgnoreCase);
+            return Task.FromResult(JsonResponse("""{"status":"success"}"""));
+        }));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var progress = new List<ModelPullProgress>();
+        await foreach (var item in client.PullModelAsync("bge-m3", stream: false))
+        {
+            progress.Add(item);
+        }
+
+        Assert.Single(progress);
+        Assert.Equal("success", progress[0].Status);
+    }
+
+    [Fact]
+    public async Task PullModelAsync_PercentRoundsAwayFromZero()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
+            Task.FromResult(StreamResponse(
+                """{"status":"downloading","total":3,"completed":1}""" + "\n" +
+                """{"status":"success"}""" + "\n"))));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var progress = new List<ModelPullProgress>();
+        await foreach (var item in client.PullModelAsync("m"))
+        {
+            progress.Add(item);
+        }
+
+        // 1/3 = 33.33...% → AwayFromZero → 33.
+        Assert.Equal(33, progress[0].Percent);
     }
 
     [Fact]
@@ -134,8 +234,9 @@ public sealed class OllamaModelRuntimeClientTests
     }
 
     [Fact]
-    public async Task ShowModelAsync_ParsesDetailsAndFamilies()
+    public async Task ShowModelAsync_ParsesDetailsAndFamiliesNestedUnderDetails()
     {
+        // Real Ollama wire shape: families and family are nested inside `details`, not at the root.
         var requests = new List<(string Method, Uri Uri, string Body)>();
         using var httpClient = new HttpClient(new StubHttpHandler((request, _) =>
         {
@@ -145,9 +246,18 @@ public sealed class OllamaModelRuntimeClientTests
             requests.Add((request.Method.Method, request.RequestUri!, body));
             var json = """
             {
-                "details": { "family": "llama", "parameter_size": "8B" },
                 "modelfile": "FROM llama3.1:8b",
-                "families": ["llama"]
+                "parameters": "",
+                "template": "{{ .Prompt }}",
+                "details": {
+                    "parent_model": "",
+                    "format": "gguf",
+                    "family": "llama",
+                    "families": ["llama"],
+                    "parameter_size": "8B",
+                    "quantization_level": "Q4_K_M"
+                },
+                "model_info": {}
             }
             """;
             return Task.FromResult(JsonResponse(json));
@@ -165,6 +275,43 @@ public sealed class OllamaModelRuntimeClientTests
         Assert.NotNull(info.Details);
         Assert.Contains("llama", info.Details!, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(["llama"], info.Families);
+    }
+
+    [Fact]
+    public async Task ShowModelAsync_ParsesMultipleFamiliesNestedUnderDetails()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
+            Task.FromResult(JsonResponse("""
+            {
+                "modelfile": "FROM qwen2.5:7b",
+                "details": {
+                    "family": "qwen2",
+                    "families": ["qwen2", "llama"],
+                    "parameter_size": "7B"
+                }
+            }
+            """))));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var info = await client.ShowModelAsync("qwen2.5:7b");
+
+        Assert.Equal(["qwen2", "llama"], info.Families);
+        Assert.NotNull(info.Details);
+    }
+
+    [Fact]
+    public async Task ShowModelAsync_DetailsAbsent_GracesfulEmptyFamilies()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
+            Task.FromResult(JsonResponse("""{"modelfile":"FROM scratch"}"""))));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var info = await client.ShowModelAsync("scratch");
+
+        Assert.Empty(info.Families);
+        Assert.Null(info.Details);
     }
 
     [Fact]

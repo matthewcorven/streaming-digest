@@ -100,6 +100,14 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
                     continue;
                 }
 
+                // Ollama emits a terminal {"error":"..."} object when a pull fails mid-stream
+                // (network error, model not found on library, etc.). Surface it rather than
+                // silently ending the enumeration as if the pull succeeded.
+                if (!string.IsNullOrWhiteSpace(parsed.Error))
+                {
+                    throw new InvalidOperationException($"Ollama pull for '{model}' failed: {parsed.Error}");
+                }
+
                 progress = MapPullProgress(parsed);
             }
             catch (JsonException)
@@ -130,7 +138,9 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
         var payload = await ReadJsonAsync<OllamaShowResponse>(response, cancellationToken);
 
         var details = payload.Details is null ? null : JsonSerializer.Serialize(payload.Details, JsonOptions);
-        var families = payload.Families ?? [];
+        // Ollama nests `families` (and `family`) inside the `details` object, not at the
+        // response root — see docs/api.md "Show Model Information".
+        var families = payload.Details?.Families ?? [];
         return new Application.ModelRuntimeInfo(ProviderName, model, details, families);
     }
 
@@ -143,6 +153,7 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
         {
             var ratio = (double)completed.Value / total.Value;
             ratio = Math.Clamp(ratio, 0d, 1d);
+            // AwayFromZero rounding so 33.33% -> 33 and 50.5% -> 51 (UI-friendly, no banker's rounding drift).
             percent = (int)Math.Round(ratio * 100, MidpointRounding.AwayFromZero);
         }
 
@@ -253,12 +264,24 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
 
         [JsonPropertyName("digest")]
         public string? Digest { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
     }
 
     private sealed class OllamaShowResponse
     {
         [JsonPropertyName("details")]
-        public JsonElement? Details { get; set; }
+        public OllamaShowDetails? Details { get; set; }
+    }
+
+    // Ollama nests family/families (plus parameter_size, quantization_level, format,
+    // parent_model) inside `details`; only the fields we consume are bound, the rest ride
+    // along when Details is serialized into the opaque ModelRuntimeInfo.Details string.
+    private sealed class OllamaShowDetails
+    {
+        [JsonPropertyName("family")]
+        public string? Family { get; set; }
 
         [JsonPropertyName("families")]
         public List<string>? Families { get; set; }
