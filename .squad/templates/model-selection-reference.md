@@ -94,8 +94,19 @@ When spawning, include the model in your acknowledgment:
 
 Include tier annotation only when the model was bumped or a specialist was chosen. Default-tier spawns just show the model name.
 
-**Valid models (current platform catalog):**
+**Resolving model IDs (once per session — no static catalog):**
 
-Premium: `claude-opus-4.6`, `claude-opus-4.6-1m` (Internal only), `claude-opus-4.5`
-Standard: `claude-sonnet-4.6`, `claude-sonnet-4.5`, `claude-sonnet-4`, `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex-max`, `gpt-5.1-codex`, `gpt-5.1`, `gemini-3-pro-preview`
-Fast/Cheap: `claude-haiku-4.5`, `gpt-5.4-mini`, `gpt-5.1-codex-mini`, `gpt-5-mini`, `gpt-4.1`
+Two ID shapes: **bare** (`claude-haiku-4.5`, first-party) and **prefixed** (`{uuid}/{vendor}/{model}`, all models). Catalog shifts over time — resolve at spawn, don't hardcode.
+
+1. **Discover:** spawn `create_session` or `task` with `model: "__discover__"`. Error returns live catalog. Copy IDs verbatim. Never hand-build the `{uuid}` — always copy from error or known-good config.
+2. **Pick prefixed form.** `create_session` needs prefixed always. `task` accepts bare first-party but rejects bare third-party. Prefixed works everywhere — use it.
+3. **Validate:** throwaway spawn with chosen model. If launches → cache in `.squad/config.json`, good for session.
+
+**Tiers (vendor-agnostic):**
+
+- Premium (architecture, deep analysis, complex planning): `moonshotai/kimi-k3`, `z-ai/glm-5.2`
+- Standard (code, refactoring, tests): `mai-code-1-flash-picker`, `openai/gpt-5.6-luna-pro`
+- Fast (docs, logs, triage, mechanical): `openai/gpt-5.6-luna`, `gemini-3.5-flash-lite`
+
+
+**On `model provider not found` / `Model not available`:** short ID given to a tool that needs prefixed. Re-resolve (step 1), use prefixed form, retry. Do NOT edit config to add prefixes — config stays short; resolution happens at spawn.
