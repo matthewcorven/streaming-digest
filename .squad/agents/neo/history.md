@@ -98,3 +98,32 @@ Implemented issue #212 ([App A6] DB-backed hybrid search) on branch `squad/212-d
 **Test-suite hygiene:** `AuthFlowIntegrationTests.Search_endpoint_returns_one_cluster_per_video_and_uses_the_effective_title` previously asserted the fixture corpus result via the search endpoint. With the DI default now DB-backed, the endpoint correctly returns empty on an empty DB. That suite verifies auth/CSRF/endpoint wiring (not DB search correctness — `DbHybridSearchIntegrationTests` owns that), so its factory now overrides `SearchUiService` back to the fixture constructor via `RemoveAll<SearchUiService>() + AddSingleton(new SearchUiService(SearchUiCorpusCatalog.CreateDefaultFixtureCorpus()))`, matching the recall-harness pattern.
 
 **Review artifacts emitted:** (1) decision record `Neo-a6-db-backed-hybrid-search-implemented-for-212-pr-.md` via `squad_decide`; (2) this history entry. Requesting independent adversarial review from Morpheus — **do not self-merge**.
+
+## 2025-01 — A6 #212: Morpheus PR #230 review fixes applied
+
+Morpheus independent adversarial review of PR #230 returned needs-changes,
+92% completeness. Applied reviewer change spec verbatim (no re-derivation).
+
+Findings addressed (commit 35c1182, branch squad/212-db-hybrid-search):
+- **F1 BLOCKING (vector leg unreachable)**: `BuildSearchSql` doc_scores CTE
+  selected FROM text_matches LEFT JOIN vector_matches — vector-only documents
+  never surfaced. Fixed: FULL OUTER JOIN both legs, COALESCE IDs/parent_video_id,
+  ORDER BY GREATEST(text_rank, vector_similarity). Added
+  `vector_matches.parent_video_id` to SELECT + GROUP BY. Added regression test
+  `Vector_leg_surfaces_documents_with_no_text_match` (seeds vector-only video,
+  asserts it appears in results). Upgraded `InMemoryRecentSearchStore` fake to
+  return a real `StoredQueryEmbedding` for a fixed recentSearchId so the vector
+  leg is actually exercised.
+- **F2 MODERATE (mixed-dimension 500)**: added
+  `AND vector_dims(e.embedding) = @query_dimensions` to vector CTE.
+- **F3 MINOR (matched_fields empty)**: replaced `''` with CASE expression
+  ('title,body,semantic' / 'title,body' / 'semantic' / '').
+- **F4 MINOR/interim (embedding degrade invisible)**: added `<remarks>` XML doc
+  to `EmbeddingErrorSink` noting WS-7 should REPLACE it, not stack on top.
+
+Verification: 406 unit tests passed, 73 integration tests passed (+1 vector-leg
+regression), 1 pre-existing skip, 0 failures. Build 0 errors / 0 warnings.
+Pushed to same branch (no rebase). Stopped for re-review — no self-merge.
+
+Completeness expectation after fixes: ~100% (F1 blocker resolved with both
+code fix AND exercising regression test; F2 500 path closed; F3 + F4 cleaned).
