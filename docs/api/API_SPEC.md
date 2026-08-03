@@ -1113,7 +1113,17 @@ Returns model/dimensions and latency.
 
 ### POST `/api/admin/test-audio-to-text`
 
-Runs service health test; may use bundled tiny audio fixture.
+Performs a real `GET /health` probe against the configured whisper service (`STREAMINGDIGEST_WHISPER_BASE_URL`) via `IAudioToTextProvider.CheckHealthAsync` and reports the truthful status. The previous behavior (a fake `completed`/`healthy` without probing) has been removed (issue #210).
+
+Response shape is the standard admin-action-result envelope. The `status`, `healthStatus`, and `message` fields reflect the probe outcome:
+
+| Probe outcome | `status` | `healthStatus` | `message` |
+| --- | --- | --- | --- |
+| `/health` returned 2xx | `completed` | `healthy` | Engine + endpoint + "succeeded" |
+| Whisper unavailable (no runtime, no provider registered, 5xx, connection refused, stub) | `completed` | `warning` | Engine + endpoint + "unavailable" + degrade note |
+| Probe threw (genuine fault) | `failed` | `error` | Failure detail |
+
+When whisper is unavailable, caption-less videos degrade to `unavailable_captions` with a `transcript_ingest_failed` domain event (notify); captioned ingestion proceeds with a warning (PRD §2.4). An unconfigured whisper runtime (no `IAudioToTextProvider` registered) is treated as the expected degrade state, not a fault, so it returns `completed`/`warning` (HTTP 200); HTTP 500 is reserved for genuine probe exceptions only.
 
 ### POST `/api/admin/test-scraper`
 

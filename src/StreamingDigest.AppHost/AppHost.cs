@@ -3,6 +3,7 @@ using Aspire.Hosting.Docker;
 using Aspire.Hosting.Docker.Resources;
 using Aspire.Hosting.Docker.Resources.ComposeNodes;
 using Aspire.Hosting.Docker.Resources.ServiceNodes;
+using System.Globalization;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -10,6 +11,18 @@ const string composeProjectName = "streaming-digest";
 const string defaultEmbeddingModel = "bge-m3";
 const string defaultLlmModel = "llama3.1:8b";
 const string ollamaDataVolumeName = "streamingdigest-ollama-data";
+// Whisper (audio-to-text) runtime — issue #210.
+// The whisper service is an OPTIONAL runtime: caption-less videos need it; captioned
+// ingestion proceeds with a warning when it is absent (PRD §2.4). For that reason api/worker
+// do NOT WaitFor(whisper). The image/tag are parameterized so the model-download plan can
+// swap in the verified community whisper.cpp HTTP image without touching this wiring.
+// TODO(model-download-implementation-plan): replace placeholder image with the verified
+// community whisper.cpp HTTP server image once acquisition/verification lands.
+const string whisperImage = "ghcr.io/fedir/whisper-cpp-server";
+// Pinned to a concrete tag (not :latest) so the compose artifact is reproducible until
+// the model-download plan swaps in the verified image.
+const string whisperImageTag = "1.5.4";
+const int whisperPort = 8080;
 
 var postgresUsername = builder.AddParameterFromConfiguration(
     "postgres-username",
@@ -67,6 +80,7 @@ builder.AddDockerComposeEnvironment("docker-compose")
         SetContainerName(composeFile, "scraper", "streaming-digest-scraper");
         SetContainerName(composeFile, "api", "streaming-digest-api");
         SetContainerName(composeFile, "worker", "streaming-digest-worker");
+        SetContainerName(composeFile, "whisper", "streaming-digest-whisper");
 
         if (composeFile.Services.TryGetValue("api", out var apiService))
         {
@@ -87,6 +101,7 @@ builder.AddDockerComposeEnvironment("docker-compose")
             apiService.AddEnvironmentalVariable("notifications__matrix__botUserId", "${NOTIFICATIONS_MATRIX_BOT_USER_ID:-}");
             apiService.AddEnvironmentalVariable("notifications__matrix__dashboardBaseUrl", "${NOTIFICATIONS_MATRIX_DASHBOARD_BASE_URL:-http://localhost:8080}");
             apiService.AddEnvironmentalVariable("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317");
+            apiService.AddEnvironmentalVariable("STREAMINGDIGEST_WHISPER_BASE_URL", "http://whisper:" + whisperPort.ToString(CultureInfo.InvariantCulture));
             apiService.Ports = ["8080:8080"];
         }
 
@@ -107,6 +122,7 @@ builder.AddDockerComposeEnvironment("docker-compose")
             workerService.AddEnvironmentalVariable("notifications__matrix__botUserId", "${NOTIFICATIONS_MATRIX_BOT_USER_ID:-}");
             workerService.AddEnvironmentalVariable("notifications__matrix__dashboardBaseUrl", "${NOTIFICATIONS_MATRIX_DASHBOARD_BASE_URL:-http://localhost:8080}");
             workerService.AddEnvironmentalVariable("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317");
+            workerService.AddEnvironmentalVariable("STREAMINGDIGEST_WHISPER_BASE_URL", "http://whisper:" + whisperPort.ToString(CultureInfo.InvariantCulture));
             workerService.AddVolume(new Volume { Name = "streaming-digest-media", Source = "streaming-digest-media", Target = "/var/lib/streaming-digest/media", Type = "volume", ReadOnly = false });
             workerService.AddVolume(new Volume { Name = "streaming-digest-debug-html", Source = "streaming-digest-debug-html", Target = "/var/lib/streaming-digest/raw-html", Type = "volume", ReadOnly = false });
             workerService.AddVolume(new Volume { Name = "streaming-digest-matrix-state", Source = "streaming-digest-matrix-state", Target = "/var/lib/streaming-digest/matrix", Type = "volume", ReadOnly = false });
@@ -142,6 +158,7 @@ builder.AddDockerComposeEnvironment("docker-compose")
         SetPublishedPorts(composeFile, "pgadmin", ["127.0.0.1:5050:5050"]);
         SetPublishedPorts(composeFile, "loki", ["127.0.0.1:3100:3100"]);
         SetPublishedPorts(composeFile, "tempo", ["127.0.0.1:3200:3200"]);
+        SetPublishedPorts(composeFile, "whisper", [$"127.0.0.1:{whisperPort}:{whisperPort}"]);
     });
 
 var postgres = builder.AddPostgres("postgres", postgresUsername, postgresPassword)
@@ -168,6 +185,17 @@ var ollamaBootstrap = builder.AddContainer("ollama-bootstrap", "ollama/ollama")
         "-c",
         $"ollama serve & ollama_pid=$!; until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull {defaultEmbeddingModel}; ollama pull {defaultLlmModel}; kill $ollama_pid; wait $ollama_pid")
     .WaitFor(ollama);
+
+// Whisper audio-to-text runtime (issue #210). Optional: api/worker do NOT WaitFor this so
+// captioned ingestion proceeds with a warning when whisper is absent (PRD §2.4).
+// TODO(model-download-implementation-plan): swap placeholder image for verified image.
+// NOTE: WithHttpHealthCheck("/health") assumes the placeholder image exposes a /health
+// endpoint; that contract is unverified pending the model-download image swap, so a probe
+// failure here is not yet guaranteed to be meaningful.
+var whisper = builder.AddContainer("whisper", whisperImage)
+    .WithImageTag(whisperImageTag)
+    .WithHttpEndpoint(targetPort: whisperPort, port: whisperPort, name: "http")
+    .WithHttpHealthCheck("/health");
 
 var otelCollector = builder.AddContainer("otel-collector", "otel/opentelemetry-collector-contrib")
     .WithImageTag("0.114.0")
@@ -241,6 +269,7 @@ builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("STREAMINGDIGEST_LLM_MODEL", defaultLlmModel)
     .WithEnvironment("Scraper__BaseUrl", "http://scraper:3000")
     .WithEnvironment("llm__baseUrl", "http://ollama:11434")
+    .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", "http://whisper:" + whisperPort.ToString(CultureInfo.InvariantCulture))
     .WithEnvironment("observability:services:grafana:url", "http://grafana:3000")
     .WithEnvironment("observability:services:pgadmin:url", "http://pgadmin:5050")
     .WithEnvironment("observability:services:prometheus:url", "http://prometheus:9090")
@@ -260,7 +289,8 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WithEnvironment("STREAMINGDIGEST_EMBEDDING_MODEL", defaultEmbeddingModel)
     .WithEnvironment("STREAMINGDIGEST_LLM_MODEL", defaultLlmModel)
     .WithEnvironment("Scraper__BaseUrl", "http://scraper:3000")
-    .WithEnvironment("llm__baseUrl", "http://ollama:11434");
+    .WithEnvironment("llm__baseUrl", "http://ollama:11434")
+    .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", "http://whisper:" + whisperPort.ToString(CultureInfo.InvariantCulture));
 
 builder.Build().Run();
 

@@ -91,7 +91,8 @@ internal static class ApiServiceCollectionExtensions
             sp.GetRequiredService<IAdminOperationStore>(),
             sp.GetService<IEmbeddingService>(),
             sp.GetService<ITranscriptIngestionService>(),
-            sp.GetService<ISearchDocumentRegenerationService>()));
+            sp.GetService<ISearchDocumentRegenerationService>(),
+            sp.GetService<IAudioToTextProvider>()));
         services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
         services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
         services.AddScoped<IChannelRepository, ChannelRepository>();

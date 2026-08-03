@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Domain;
 
@@ -16,13 +17,15 @@ public sealed class TranscriptIngestionService(
     ITemporaryMediaManager? temporaryMediaManager = null,
     IVideoMediaSourceResolver? mediaFileResolver = null,
     ISearchDocumentGenerator? searchDocumentGenerator = null,
-    ISearchDocumentEmbeddingStore? searchDocumentEmbeddingStore = null) : ITranscriptIngestionService
+    ISearchDocumentEmbeddingStore? searchDocumentEmbeddingStore = null,
+    ILogger<TranscriptIngestionService>? logger = null) : ITranscriptIngestionService
 {
     private readonly IAudioToTextProvider? _audioToTextProvider = audioToTextProvider;
     private readonly ITemporaryMediaManager? _temporaryMediaManager = temporaryMediaManager;
     private readonly IVideoMediaSourceResolver? _mediaFileResolver = mediaFileResolver;
     private readonly ISearchDocumentGenerator? _searchDocumentGenerator = searchDocumentGenerator;
     private readonly ISearchDocumentEmbeddingStore? _searchDocumentEmbeddingStore = searchDocumentEmbeddingStore;
+    private readonly ILogger<TranscriptIngestionService>? _logger = logger;
 
     public async Task<TranscriptIngestionResult> IngestAsync(Guid videoId, CancellationToken ct)
     {
@@ -53,6 +56,16 @@ public sealed class TranscriptIngestionService(
            engineName = null;
            modelName = null;
            fallbackUsed = false;
+
+           // Issue #210: captioned ingestion proceeds when whisper is absent, but the
+           // optional runtime being down is still surfaced as a warning so operators have
+           // a per-run signal that caption-less siblings would have degraded. Non-blocking.
+           if (_audioToTextProvider is null)
+           {
+               _logger?.LogWarning(
+                   "Whisper audio-to-text runtime is unconfigured for video {VideoId}; captioned ingestion proceeded from captions, but caption-less videos would degrade to 'unavailable_captions' with a notify event.",
+                   videoId);
+           }
         }
         else
         {
