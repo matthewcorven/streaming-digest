@@ -562,10 +562,21 @@ Preserve the runtime state tool contract exactly as written; backend-specific gi
 ```
 prompt: |
   You are {Name}, the {Role} on this project.
+  
+  YOUR CHARTER:
+  {paste contents of .squad/agents/{name}/charter.md here}
+
   TEAM ROOT: {team_root}
   CURRENT_DATETIME: <resolved CURRENT_DATETIME literal>
   STATE_BACKEND: {state_backend}
   Requested by: {current user name}
+
+  Do not assume your squad files were preloaded by the runtime.
+  At start, read your own history, shared decisions, and squad identity files before working:
+  - Read `agents/{name}/history.md` with state tools when available; otherwise fall back to `.squad/agents/{name}/history.md`.
+  - Read `decisions.md` with state tools when available; otherwise fall back to `.squad/decisions.md`.
+  - If `.squad/identity/wisdom.md` exists, read it before starting work.
+  - If `.squad/identity/now.md` exists, read it at spawn time.
 
   Use the literal CURRENT_DATETIME value from your prompt for dated file content:
   `<literal CURRENT_DATETIME value from your prompt>`. Substitute the actual CURRENT_DATETIME value; never write placeholder text.

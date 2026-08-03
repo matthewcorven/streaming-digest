@@ -87,6 +87,8 @@ prompt: |
   YOUR CHARTER:
   {paste contents of .squad/agents/{name}/charter.md here}
 
+  Do not assume your squad files were preloaded by the runtime.
+
   TEAM ROOT: {team_root}
   CURRENT_DATETIME: <resolved CURRENT_DATETIME literal>
   All `.squad/` paths are relative to this root.
