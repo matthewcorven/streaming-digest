@@ -852,6 +852,8 @@ Agents create branch (`squad/{issue-number}-{slug}`), do work, commit referencin
 
 **Mandatory independent adversarial review gate:** when an issue worker believes the work is complete, the worker MUST stop and request independent adversarial review instead of declaring the issue done. The coordinator MUST spawn a fresh reviewer sub-session (`create_session` in App mode; `task` only as fallback when sub-sessions are unavailable). The reviewer must be independent from the author session and must emit exactly two artifacts:
 
+Adversarial reviewer spawns MUST use the standard agent spawn template, including the reviewer charter and normal grounding context.
+
 - `completeness_after_any_fixes.txt` — the percent of the issue requirements that would be complete if the prescribed fixes are applied
 - `review_change_specifications.md` — concrete change instructions for the author session
 

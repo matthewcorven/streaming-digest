@@ -59,6 +59,8 @@ python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text
 
 ### Ralph handoff discipline inside the loop
 
+Adversarial reviewer spawns MUST use the standard agent spawn template, including the reviewer charter and normal grounding context.
+
 When an implementation session reports that it believes work is complete:
 
 1. Treat that as **requesting independent adversarial review**, not as final completion.

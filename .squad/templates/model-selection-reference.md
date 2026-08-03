@@ -62,9 +62,11 @@ Fast:     claude-haiku-4.5 → gpt-5.4-mini → gpt-5.1-codex-mini → gpt-4.1 �
 - Never fall back UP in tier — a fast/cheap task should not land on a premium model
 - Log fallbacks to the orchestration log for debugging, but never surface to the user unless asked
 
-**Passing the model to spawns:**
+**Passing the model to spawns — TOOL SHAPE MATTERS:**
 
-Pass the resolved model as the `model` parameter on every `task` tool call:
+The `model` parameter lives in DIFFERENT places depending on the spawn tool. Getting this wrong is a **silent footgun**: a misplaced `model` is dropped without error, and the session inherits the coordinator's default model instead.
+
+**`task` tool (CLI) — top-level `model`:**
 
 ```
 agent_type: "general-purpose"
@@ -76,7 +78,23 @@ prompt: |
   ...
 ```
 
-Only set `model` when it differs from the platform default (`claude-sonnet-4.6`). If the resolved model IS `claude-sonnet-4.6`, you MAY omit the `model` parameter — the platform uses it as default.
+**`create_session` tool (App mode) — `model` goes INSIDE `kickoff`, NOT top-level:**
+
+```
+project_id: "{project_id}"
+name: "{Name} {verb}ing {noun}"
+coordinate_with_creator: true
+notify_on_idle: "once"
+kickoff: {
+  "mode": "autopilot",
+  "model": "{resolved_model}",   // ← model lives HERE, inside kickoff
+  "prompt": "..."
+}
+```
+
+⚠ **CRITICAL:** On `create_session`, a top-level `model` field is **silently ignored** — the session launches on the coordinator's default model with no error. Always place `model` inside the `kickoff` object. (Verified by probe 2026-08-02: `kickoff.model = kimi-k3` → subagent reported kimi-k3; top-level `model = kimi-k3` → subagent reported the coordinator default glm-5.2.)
+
+Only set `model` when it differs from the platform default. If the resolved model IS the platform default, you MAY omit `model` entirely.
 
 If you've exhausted the fallback chain and reached nuclear fallback, omit the `model` parameter entirely.
 
@@ -98,9 +116,11 @@ Include tier annotation only when the model was bumped or a specialist was chose
 
 Two ID shapes: **bare** (`claude-haiku-4.5`, first-party) and **prefixed** (`{uuid}/{vendor}/{model}`, all models). Catalog shifts over time — resolve at spawn, don't hardcode.
 
-1. **Discover:** spawn `create_session` or `task` with `model: "__discover__"`. Error returns live catalog. Copy IDs verbatim. Never hand-build the `{uuid}` — always copy from error or known-good config.
-2. **Pick prefixed form.** `create_session` needs prefixed always. `task` accepts bare first-party but rejects bare third-party. Prefixed works everywhere — use it.
-3. **Validate:** throwaway spawn with chosen model. If launches → cache in `.squad/config.json`, good for session.
+**HARD GATE — run before the first `create_session`/`task` spawn of the session.** If you skip this and pass a short ID straight through, `create_session` fails with `model provider not found` and you waste a spawn cycle.
+
+1. **Discover (HARD GATE):** BEFORE the first spawn, call `create_session` with `model: "__discover__"` (a throwaway no-op session). The error response returns the live catalog of valid prefixed IDs. Copy the IDs verbatim — never hand-build the `{uuid}`. Cache the resolved short→prefixed mapping in **coordinator session memory only** (e.g. a `model_resolution` row in the session SQL DB, or an in-prompt variable). DO NOT write prefixed IDs into `.squad/config.json` — that file is short-ID-only by contract (see its `modelIdFormatNote`).
+2. **Pick prefixed form.** `create_session` needs prefixed ALWAYS — bare short IDs are rejected for third-party providers. `task` accepts bare first-party but rejects bare third-party. Prefixed works everywhere — use it. When in doubt, use prefixed.
+3. **Validate:** throwaway spawn with chosen model. If it launches, the prefixed ID is good for the rest of this session. Re-run the gate only if a new provider appears or the session restarts.
 
 **Tiers (vendor-agnostic):**
 
