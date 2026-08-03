@@ -439,16 +439,22 @@ public sealed class AdminOperationsServiceTests
     }
 
     [Fact]
-    public async Task TestAudioToTextServiceAsync_ReturnsFailedError_WhenNoProviderRegistered()
+    public async Task TestAudioToTextServiceAsync_ReturnsCompletedWarning_WhenNoProviderRegistered()
     {
+        // Truthful degrade (issue #210): "no provider registered" is an expected degrade
+        // (whisper runtime unconfigured), not a fault — must surface as completed/warning
+        // (200), mirroring the whisper-unconfigured path. Reserve failed/error (500) for
+        // genuine probe exceptions (see ...WhenProviderThrows below).
         var service = new AdminOperationsService(audioToTextProvider: null);
 
         var result = await service.TestAudioToTextServiceAsync();
 
-        Assert.Equal("failed", result.Status);
+        Assert.Equal("completed", result.Status);
         Assert.Equal("test.audio", result.OperationType);
-        Assert.Equal("error", result.HealthStatus);
-        Assert.Contains("no audio-to-text provider", result.Message);
+        Assert.Equal("warning", result.HealthStatus);
+        Assert.Contains("unavailable_captions", result.Message);
+        Assert.Contains("unconfigured", result.Message);
+        Assert.Contains("whisper", result.Message);
     }
 
     [Fact]

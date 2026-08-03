@@ -103,10 +103,12 @@ The admin operation `POST /api/admin/test-audio-to-text` performs a real `GET /h
 | Probe outcome | Admin op `status` | Admin op `healthStatus` |
 | --- | --- | --- |
 | `/health` returned 2xx | `completed` | `healthy` |
-| Provider unavailable (no runtime, 5xx, connection refused) | `completed` | `warning` |
-| No provider registered / probe threw | `failed` | `error` |
+| Provider unavailable (no runtime, no provider registered, 5xx, connection refused) | `completed` | `warning` |
+| Probe threw (genuine fault) | `failed` | `error` |
 
 When whisper is unavailable, `TranscriptIngestionService` degrades caption-less videos to `TranscriptStatus = "unavailable_captions"` and emits a `transcript_ingest_failed` domain event (severity `warning`) so the notify pipeline can fire. The previous behavior (a fake `completed`/`healthy` without probing) has been removed.
+
+An unconfigured whisper runtime (no `IAudioToTextProvider` registered) is the expected degrade state — semantically identical to `whisper-unconfigured` — so the admin test op returns `completed`/`warning` (HTTP 200) rather than `failed`/`error`; HTTP 500 is reserved for genuine probe exceptions. Per the issue's "captioned ingestion proceeds with a warning" wording, `TranscriptIngestionService` also emits an informational `LogWarning` on the captioned branch when `_audioToTextProvider` is null, so operators have a per-run signal that caption-less siblings would have degraded; ingestion success is unchanged.
 
 ### 2.6 Browser scraper: `streaming-digest-scraper`
 

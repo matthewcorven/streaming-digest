@@ -19,7 +19,9 @@ const string ollamaDataVolumeName = "streamingdigest-ollama-data";
 // TODO(model-download-implementation-plan): replace placeholder image with the verified
 // community whisper.cpp HTTP server image once acquisition/verification lands.
 const string whisperImage = "ghcr.io/fedir/whisper-cpp-server";
-const string whisperImageTag = "latest";
+// Pinned to a concrete tag (not :latest) so the compose artifact is reproducible until
+// the model-download plan swaps in the verified image.
+const string whisperImageTag = "1.5.4";
 const int whisperPort = 8080;
 
 var postgresUsername = builder.AddParameterFromConfiguration(
@@ -187,6 +189,9 @@ var ollamaBootstrap = builder.AddContainer("ollama-bootstrap", "ollama/ollama")
 // Whisper audio-to-text runtime (issue #210). Optional: api/worker do NOT WaitFor this so
 // captioned ingestion proceeds with a warning when whisper is absent (PRD §2.4).
 // TODO(model-download-implementation-plan): swap placeholder image for verified image.
+// NOTE: WithHttpHealthCheck("/health") assumes the placeholder image exposes a /health
+// endpoint; that contract is unverified pending the model-download image swap, so a probe
+// failure here is not yet guaranteed to be meaningful.
 var whisper = builder.AddContainer("whisper", whisperImage)
     .WithImageTag(whisperImageTag)
     .WithHttpEndpoint(targetPort: whisperPort, port: whisperPort, name: "http")

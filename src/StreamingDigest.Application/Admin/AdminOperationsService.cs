@@ -189,19 +189,16 @@ public sealed class AdminOperationsService : IAdminOperationsService
         // without probing anything. It now delegates to the configured IAudioToTextProvider
         // (which performs a GET /health against the whisper service) and reports the real
         // status:
-        //   - healthy provider           -> completed / healthy
-        //   - unavailable (but no throw) -> completed (NOT failed) / warning, with reason
-        //   - no provider / exception   -> failed / error
+        //   - healthy provider                    -> completed / healthy
+        //   - unavailable (but no throw)          -> completed (NOT failed) / warning, with reason
+        //   - no provider registered (unconfigured) -> completed / warning (same as whisper-unconfigured:
+        //        an optional runtime simply isn't wired — expected degrade, not a fault)
+        //   - probe threw (genuine fault)         -> failed / error
         // Caption-less videos degrade to "unavailable_captions" + notify in TranscriptIngestionService.
         if (_audioToTextProvider is null)
         {
-            return await CreateResultAsync(
-                "test.audio",
-                null,
-                "failed",
-                "Audio-to-text service health check failed: no audio-to-text provider is registered.",
-                "error",
-                cancellationToken);
+            const string noProviderMessage = "Audio-to-text service health check completed with warnings. No audio-to-text provider is registered (whisper runtime unconfigured). Caption-less videos will degrade to 'unavailable_captions' with a notify event; captioned ingestion proceeds with a warning.";
+            return await CreateCompletedResultAsync("test.audio", null, noProviderMessage, "warning", cancellationToken);
         }
 
         try
