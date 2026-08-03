@@ -9,6 +9,7 @@ using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
+using StreamingDigest.Infrastructure;
 using StreamingDigest.Infrastructure.AudioToText;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
@@ -65,6 +66,18 @@ internal static class ApiServiceCollectionExtensions
         // Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
         // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
         services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), configuration));
+        // The runtime client builds its absolute request URI from config (embedding:ollamaEndpoint,
+        // OLLAMA_HOST, ...) rather than from HttpClient.BaseAddress, matching OllamaEmbeddingService.
+        // Named client (not a captured singleton HttpClient) so handler rotation refreshes DNS for
+        // containerized Ollama; infinite client timeout because model pulls are long-running —
+        // cancellation flows via CancellationToken.
+        services.AddHttpClient("ollama-runtime")
+            .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+            .ConfigureHttpClient(c => c.Timeout = Timeout.InfiniteTimeSpan);
+        // Transient + factory-resolved per operation: the named client's pooled handler rotates
+        // with SetHandlerLifetime so DNS refreshes for containerized Ollama.
+        services.AddTransient<Application.IModelRuntimeClient>(sp =>
+            new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>(), configuration));
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);
