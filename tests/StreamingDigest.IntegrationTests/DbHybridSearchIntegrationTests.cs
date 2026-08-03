@@ -91,6 +91,58 @@ public sealed class DbHybridSearchIntegrationTests : IAsyncLifetime
         Assert.NotEmpty(response.Results[0].ScoreExplanation);
     }
 
+    [Fact]
+    public async Task Vector_leg_surfaces_documents_with_no_text_match()
+    {
+        // Regression for PR #230 Morpheus review Finding 1: the vector leg was previously
+        // text-gated (doc_scores selected FROM text_matches LEFT JOIN vector_matches), so a
+        // document with zero text match but high vector similarity never surfaced. This test
+        // seeds two videos: document A text-matches the query; document B does NOT text-match
+        // but its embedding is identical to the stored query embedding (cosine similarity 1.0).
+        // B's video must appear in the results — proving the vector leg is reachable.
+        var dataSourceBuilder = new NpgsqlDataSourceBuilder(_connectionString);
+        dataSourceBuilder.UseVector();
+        await using var dataSource = dataSourceBuilder.Build();
+        await using var connection = await dataSource.OpenConnectionAsync();
+
+        var channelId = Guid.NewGuid();
+        await InsertChannelAsync(connection, channelId, "Vector Channel");
+        var textMatchVideo = Guid.NewGuid();
+        var vectorOnlyVideo = Guid.NewGuid();
+        await InsertVideoAsync(connection, textMatchVideo, channelId, "Building a hybrid search engine", "hybrid search overview");
+        await InsertVideoAsync(connection, vectorOnlyVideo, channelId, "A day in the mountains", "hiking and scenery");
+
+        // Document A: text-matches "hybrid search".
+        var textDoc = Guid.NewGuid();
+        await InsertSearchDocumentAsync(connection, textDoc, textMatchVideo, "video_metadata", "Building a hybrid search engine", "hybrid search overview");
+
+        // Document B: body has no overlap with the query text, but its embedding is the
+        // query embedding (cosine similarity 1.0).
+        var queryEmbedding = new float[] { 0.7f, 0.1f, 0.0f };
+        var vectorDoc = Guid.NewGuid();
+        await InsertSearchDocumentWithEmbeddingAsync(
+            connection, vectorDoc, vectorOnlyVideo, "video_metadata",
+            "A day in the mountains", "hiking and scenery",
+            queryEmbedding, "test-provider", "test-model");
+
+        await using var searcher = new PostgresSearchCorpusSearcher(_connectionString!);
+        var recentSearchId = Guid.NewGuid();
+        var store = new InMemoryRecentSearchStore(recentSearchId, new StoredQueryEmbedding(
+            "test-provider", "test-model", 3, queryEmbedding.Select(f => (double)f).ToArray()));
+        var service = new SearchUiService(store, searcher, new FakeVideoClusterEmbeddingStore());
+
+        var response = await service.SearchAsync(new SearchRequest
+        {
+            Query = "hybrid search",
+            Filters = new SearchFilters { ResultType = "video" }
+        });
+
+        // Both videos must surface: the text-match video AND the vector-only video.
+        var resultVideoIds = response.Results.Select(r => r.VideoId).ToHashSet();
+        Assert.Contains(textMatchVideo, resultVideoIds);
+        Assert.Contains(vectorOnlyVideo, resultVideoIds);
+    }
+
     private static async Task InsertChannelAsync(NpgsqlConnection connection, Guid channelId, string name)
     {
         await using var command = new NpgsqlCommand(
@@ -136,6 +188,9 @@ public sealed class DbHybridSearchIntegrationTests : IAsyncLifetime
     }
 
     private static async Task InsertSearchDocumentAsync(NpgsqlConnection connection, Guid documentId, Guid videoId, string documentType, string title, string body)
+        => await InsertSearchDocumentWithEmbeddingAsync(connection, documentId, videoId, documentType, title, body, new float[] { 1f, 2f, 3f }, "test-provider", "test-model");
+
+    private static async Task InsertSearchDocumentWithEmbeddingAsync(NpgsqlConnection connection, Guid documentId, Guid videoId, string documentType, string title, string body, float[] embedding, string provider, string model)
     {
         await using var command = new NpgsqlCommand(
             """
@@ -164,14 +219,17 @@ public sealed class DbHybridSearchIntegrationTests : IAsyncLifetime
                 id, search_document_id, provider, model, dimensions, content_hash, embedding, embedding_status
             )
             VALUES (
-                @id, @search_document_id, 'test-provider', 'test-model', 3, @content_hash, @embedding, 'succeeded'
+                @id, @search_document_id, @provider, @model, @dimensions, @content_hash, @embedding, 'succeeded'
             );
             """,
             connection);
         embeddingCommand.Parameters.AddWithValue("id", Guid.NewGuid());
         embeddingCommand.Parameters.AddWithValue("search_document_id", documentId);
+        embeddingCommand.Parameters.AddWithValue("provider", provider);
+        embeddingCommand.Parameters.AddWithValue("model", model);
+        embeddingCommand.Parameters.AddWithValue("dimensions", embedding.Length);
         embeddingCommand.Parameters.AddWithValue("content_hash", $"{documentId:N}");
-        embeddingCommand.Parameters.AddWithValue("embedding", new Vector(new float[] { 1f, 2f, 3f }));
+        embeddingCommand.Parameters.AddWithValue("embedding", new Vector(embedding));
         await embeddingCommand.ExecuteNonQueryAsync();
     }
 
@@ -271,8 +329,22 @@ public sealed class DbHybridSearchIntegrationTests : IAsyncLifetime
 
     private sealed class InMemoryRecentSearchStore : IRecentSearchStore
     {
+        private readonly Guid? _fixedRecentSearchId;
+        private readonly StoredQueryEmbedding? _storedQueryEmbedding;
+
+        public InMemoryRecentSearchStore() { }
+
+        public InMemoryRecentSearchStore(Guid recentSearchId, StoredQueryEmbedding storedQueryEmbedding)
+        {
+            _fixedRecentSearchId = recentSearchId;
+            _storedQueryEmbedding = storedQueryEmbedding;
+        }
+
         public Task<StoredRecentSearch> StoreSearchAsync(string query, SearchFilters filters, SearchUiSettings settings, CancellationToken cancellationToken = default)
-            => Task.FromResult(new StoredRecentSearch(Guid.NewGuid(), query, DateTimeOffset.UtcNow));
+        {
+            var id = _fixedRecentSearchId ?? Guid.NewGuid();
+            return Task.FromResult(new StoredRecentSearch(id, query, DateTimeOffset.UtcNow));
+        }
 
         public Task<IReadOnlyList<string>> ListRecentQueriesAsync(int take = 8, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
@@ -287,7 +359,14 @@ public sealed class DbHybridSearchIntegrationTests : IAsyncLifetime
             => Task.FromResult<IReadOnlyDictionary<Guid, int>>(new Dictionary<Guid, int>());
 
         public Task<StoredQueryEmbedding?> GetQueryEmbeddingAsync(Guid recentSearchId, CancellationToken cancellationToken = default)
-            => Task.FromResult<StoredQueryEmbedding?>(null);
+        {
+            if (_storedQueryEmbedding is not null && _fixedRecentSearchId == recentSearchId)
+            {
+                return Task.FromResult<StoredQueryEmbedding?>(_storedQueryEmbedding);
+            }
+
+            return Task.FromResult<StoredQueryEmbedding?>(null);
+        }
     }
 
     private sealed class FakeVideoClusterEmbeddingStore : IVideoClusterEmbeddingStore

@@ -80,9 +80,11 @@ public sealed class PostgresSearchCorpusSearcher : ISearchCorpusSearcher, IAsync
 
         // The text leg uses websearch_to_tsquery against the generated fts_body column.
         // The vector leg joins the document embeddings to the query embedding by
-        // provider/model/dimensions and ranks by cosine similarity. We UNION both legs by
-        // search_document_id, taking the max text rank and max vector similarity observed
-        // for each document, then group per video.
+        // provider/model/dimensions and ranks by cosine similarity. We FULL OUTER JOIN both
+        // legs by search_document_id so a document that matches only one leg (text-only or
+        // vector-only) still surfaces — semantic recall from the vector leg is not gated on
+        // a text match. For each document we take the max text rank and max vector
+        // similarity observed, then group per video.
         var hasVectorLeg = request.QueryEmbedding is { Count: > 0 }
             && !string.IsNullOrWhiteSpace(request.QueryEmbeddingProvider)
             && !string.IsNullOrWhiteSpace(request.QueryEmbeddingModel)
@@ -210,6 +212,7 @@ public sealed class PostgresSearchCorpusSearcher : ISearchCorpusSearcher, IAsync
             vector_matches AS (
                 SELECT
                     sd.id AS search_document_id,
+                    sd.parent_video_id,
                     MAX(1 - (e.embedding <=> @query_embedding)) AS vector_similarity
                 FROM public.search_documents AS sd
                 INNER JOIN public.embeddings AS e
@@ -218,20 +221,39 @@ public sealed class PostgresSearchCorpusSearcher : ISearchCorpusSearcher, IAsync
                    AND e.provider = @query_provider
                    AND e.model = @query_model
                    AND e.dimensions = @query_dimensions
+                   AND vector_dims(e.embedding) = @query_dimensions
                 WHERE sd.is_stale = FALSE
                   AND sd.parent_video_id IS NOT NULL
-                GROUP BY sd.id
+                GROUP BY sd.id, sd.parent_video_id
             ),
             """
             : string.Empty;
 
-        var vectorJoin = hasVectorLeg
-            ? "LEFT JOIN vector_matches AS vm ON vm.search_document_id = tm.search_document_id"
-            : string.Empty;
-
-        var vectorSimilarity = hasVectorLeg
-            ? "COALESCE(MAX(vm.vector_similarity), 0)"
-            : "0";
+        var docScoresCte = hasVectorLeg
+            ? """
+            doc_scores AS (
+                SELECT
+                    COALESCE(tm.search_document_id, vm.search_document_id) AS search_document_id,
+                    COALESCE(tm.parent_video_id, vm.parent_video_id) AS parent_video_id,
+                    COALESCE(MAX(tm.text_rank), 0) AS text_rank,
+                    COALESCE(MAX(vm.vector_similarity), 0) AS vector_similarity
+                FROM text_matches AS tm
+                FULL OUTER JOIN vector_matches AS vm
+                    ON vm.search_document_id = tm.search_document_id
+                GROUP BY 1, 2
+            )
+            """
+            : """
+            doc_scores AS (
+                SELECT
+                    tm.search_document_id,
+                    tm.parent_video_id,
+                    MAX(tm.text_rank) AS text_rank,
+                    0 AS vector_similarity
+                FROM text_matches AS tm
+                GROUP BY tm.search_document_id, tm.parent_video_id
+            )
+            """;
 
         return $"""
             WITH text_matches AS (
@@ -245,16 +267,7 @@ public sealed class PostgresSearchCorpusSearcher : ISearchCorpusSearcher, IAsync
                   AND sd.parent_video_id IS NOT NULL
             ),
             {vectorCte}
-            doc_scores AS (
-                SELECT
-                    tm.search_document_id,
-                    tm.parent_video_id,
-                    MAX(tm.text_rank) AS text_rank,
-                    {vectorSimilarity} AS vector_similarity
-                FROM text_matches AS tm
-                {vectorJoin}
-                GROUP BY tm.search_document_id, tm.parent_video_id
-            )
+            {docScoresCte}
             SELECT
                 v.id AS video_id,
                 COALESCE(v.title_override, v.title_original) AS title,
@@ -282,14 +295,19 @@ public sealed class PostgresSearchCorpusSearcher : ISearchCorpusSearcher, IAsync
                 ts_headline('english', COALESCE(sd.title_effective, '') || ' ' || COALESCE(sd.body_effective, ''),
                             websearch_to_tsquery('english', @query),
                             'MaxWords=35, MinWords=10, ShortWord=3') AS snippet,
-                '' AS matched_fields
+                CASE
+                    WHEN ds.text_rank > 0 AND ds.vector_similarity > 0 THEN 'title,body,semantic'
+                    WHEN ds.text_rank > 0 THEN 'title,body'
+                    WHEN ds.vector_similarity > 0 THEN 'semantic'
+                    ELSE ''
+                END AS matched_fields
             FROM doc_scores AS ds
             INNER JOIN public.search_documents AS sd ON sd.id = ds.search_document_id
             INNER JOIN public.videos AS v ON v.id = ds.parent_video_id
             INNER JOIN public.channels AS c ON c.id = v.channel_id
             WHERE 1 = 1
             {filterWhere}
-            ORDER BY ds.text_rank DESC, ds.vector_similarity DESC, v.id
+            ORDER BY GREATEST(ds.text_rank, ds.vector_similarity) DESC, v.id
             LIMIT @max_clusters * @max_documents_per_cluster;
             """;
     }

@@ -386,6 +386,13 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
     /// events without crashing the search request. Kept intentionally lightweight until the
     /// model-readiness guard (WS-7) replaces it.
     /// </summary>
+    /// <remarks>
+    /// WS-7 handoff note: this sink is currently WRITE-ONLY — <see cref="Record"/> stores the
+    /// last exception but nothing reads it back yet. The degrade-to-text-only behavior itself
+    /// is correct (search never 500s when the model is down). When <c>IModelReadinessGuard</c>
+    /// (WS-7) lands, it should REPLACE this sink (surface degrade state through the guard)
+    /// rather than stack on top of it. See PR #230 Morpheus review Finding 4.
+    /// </remarks>
     private sealed class EmbeddingErrorSink
     {
         private Exception? _lastError;
