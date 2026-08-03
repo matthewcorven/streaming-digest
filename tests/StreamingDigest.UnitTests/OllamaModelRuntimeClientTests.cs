@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using StreamingDigest.Application;
 using StreamingDigest.Infrastructure;
-
 namespace StreamingDigest.UnitTests;
 
 public sealed class OllamaModelRuntimeClientTests
@@ -19,7 +18,21 @@ public sealed class OllamaModelRuntimeClientTests
             var json = """
             {
                 "models": [
-                    { "name": "bge-m3", "digest": "sha256:abc", "size": 1195304048 },
+                    {
+                        "name": "bge-m3",
+                        "model": "bge-m3:latest",
+                        "modified_at": "2025-05-10T08:06:48.639712648-07:00",
+                        "digest": "sha256:abc",
+                        "size": 1195304048,
+                        "details": {
+                            "family": "bge",
+                            "families": ["bge"],
+                            "format": "gguf",
+                            "parameter_size": "567M",
+                            "quantization_level": "F16",
+                            "parent_model": ""
+                        }
+                    },
                     { "name": "llama3.1:8b", "digest": "sha256:def", "size": 4661210678 }
                 ]
             }
@@ -54,6 +67,29 @@ public sealed class OllamaModelRuntimeClientTests
 
         Assert.NotNull(result);
         Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task ListInstalledModelsAsync_SkipsEntriesWithBlankNames()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
+            Task.FromResult(JsonResponse("""
+            {
+                "models": [
+                    { "name": "bge-m3", "digest": "sha256:abc", "size": 1195304048 },
+                    { "name": "  ", "digest": "sha256:blank", "size": 1 },
+                    { "name": "llama3.1:8b", "digest": "sha256:def", "size": 4661210678 }
+                ]
+            }
+            """))));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var result = await client.ListInstalledModelsAsync();
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal("bge-m3", result[0].ModelId);
+        Assert.Equal("llama3.1:8b", result[1].ModelId);
     }
 
     [Fact]
@@ -234,6 +270,38 @@ public sealed class OllamaModelRuntimeClientTests
     }
 
     [Fact]
+    public async Task PullModelAsync_NdjsonLinesSplitAcrossTransportChunks_ParseCorrectly()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
+        {
+            var ndjson = string.Join('\n', new[]
+            {
+                """{"status":"pulling manifest"}""",
+                """{"status":"downloading","digest":"sha256:abc","total":1000,"completed":250}""",
+                """{"status":"success"}"""
+            }) + "\n";
+            // 7-byte chunks guarantee splits mid-line and mid-UTF8-safe-ASCII token.
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ChunkedStreamContent(ndjson, chunkSize: 7)
+            });
+        }));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var progress = new List<ModelPullProgress>();
+        await foreach (var item in client.PullModelAsync("bge-m3"))
+        {
+            progress.Add(item);
+        }
+
+        Assert.Equal(3, progress.Count);
+        Assert.Equal("pulling manifest", progress[0].Status);
+        Assert.Equal(25, progress[1].Percent);
+        Assert.Equal("success", progress[2].Status);
+    }
+
+    [Fact]
     public async Task ShowModelAsync_ParsesDetailsAndFamiliesNestedUnderDetails()
     {
         // Real Ollama wire shape: families and family are nested inside `details`, not at the root.
@@ -301,7 +369,22 @@ public sealed class OllamaModelRuntimeClientTests
     }
 
     [Fact]
-    public async Task ShowModelAsync_DetailsAbsent_GracesfulEmptyFamilies()
+    public async Task ShowModelAsync_NonSuccess_Throws()
+    {
+        using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("model not found", Encoding.UTF8, "application/json")
+            })));
+
+        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.ShowModelAsync("nope"));
+        Assert.Contains("404", exception.Message);
+    }
+
+    [Fact]
+    public async Task ShowModelAsync_DetailsAbsent_GracefulEmptyFamilies()
     {
         using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
             Task.FromResult(JsonResponse("""{"modelfile":"FROM scratch"}"""))));
@@ -381,5 +464,35 @@ public sealed class OllamaModelRuntimeClientTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => handler(request, cancellationToken);
+    }
+
+    /// <summary>Delivers the payload in fixed-size byte chunks, splitting mid-line,
+    /// to prove NDJSON parsing is line-framed and not chunk-framed.</summary>
+    private sealed class ChunkedStreamContent : HttpContent
+    {
+        private readonly byte[] _payload;
+        private readonly int _chunkSize;
+
+        public ChunkedStreamContent(string payload, int chunkSize)
+        {
+            _payload = Encoding.UTF8.GetBytes(payload);
+            _chunkSize = chunkSize;
+        }
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            for (var offset = 0; offset < _payload.Length; offset += _chunkSize)
+            {
+                var count = Math.Min(_chunkSize, _payload.Length - offset);
+                await stream.WriteAsync(_payload.AsMemory(offset, count));
+                await stream.FlushAsync();
+            }
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = _payload.Length;
+            return true;
+        }
     }
 }

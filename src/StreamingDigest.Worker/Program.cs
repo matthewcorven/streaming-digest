@@ -142,7 +142,14 @@ builder.Services.AddMeaiChatClientWrapper(builder.Configuration);
 // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
 builder.Services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), builder.Configuration));
 // The runtime client builds its absolute request URI from config rather than HttpClient.BaseAddress, matching OllamaEmbeddingService.
-builder.Services.AddSingleton<IModelRuntimeClient>(sp => new OllamaModelRuntimeClient(sp.GetRequiredService<HttpClient>(), builder.Configuration));
+// Named client (not a captured singleton HttpClient) so handler rotation refreshes DNS for
+// containerized Ollama; infinite client timeout because model pulls are long-running —
+// cancellation flows via CancellationToken.
+builder.Services.AddHttpClient("ollama-runtime")
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+    .ConfigureHttpClient(c => c.Timeout = Timeout.InfiniteTimeSpan);
+builder.Services.AddSingleton<IModelRuntimeClient>(sp =>
+    new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("ollama-runtime"), builder.Configuration));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();

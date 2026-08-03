@@ -68,7 +68,14 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), configuration));
         // The runtime client builds its absolute request URI from config (embedding:ollamaEndpoint,
         // OLLAMA_HOST, ...) rather than from HttpClient.BaseAddress, matching OllamaEmbeddingService.
-        services.AddSingleton<Application.IModelRuntimeClient>(sp => new OllamaModelRuntimeClient(sp.GetRequiredService<HttpClient>(), configuration));
+        // Named client (not a captured singleton HttpClient) so handler rotation refreshes DNS for
+        // containerized Ollama; infinite client timeout because model pulls are long-running —
+        // cancellation flows via CancellationToken.
+        services.AddHttpClient("ollama-runtime")
+            .SetHandlerLifetime(TimeSpan.FromMinutes(5))
+            .ConfigureHttpClient(c => c.Timeout = Timeout.InfiniteTimeSpan);
+        services.AddSingleton<Application.IModelRuntimeClient>(sp =>
+            new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("ollama-runtime"), configuration));
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);
