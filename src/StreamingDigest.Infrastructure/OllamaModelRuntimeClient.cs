@@ -23,19 +23,23 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
 
-    public OllamaModelRuntimeClient(HttpClient httpClient, IConfiguration configuration)
+    public OllamaModelRuntimeClient(IHttpClientFactory httpClientFactory, IConfiguration configuration)
     {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
+
+    // Resolve the named client per operation so the pooled handler (and its DNS resolution)
+    // rotates with SetHandlerLifetime instead of being pinned for the process lifetime.
+    private HttpClient CreateClient() => _httpClientFactory.CreateClient("ollama-runtime");
 
     public async Task<IReadOnlyList<Application.ModelPresence>> ListInstalledModelsAsync(CancellationToken cancellationToken = default)
     {
         var endpoint = ResolveEndpoint();
-        var response = await _httpClient.GetAsync(BuildUri(endpoint, "api/tags"), cancellationToken);
+        var response = await CreateClient().GetAsync(BuildUri(endpoint, "api/tags"), cancellationToken);
         var payload = await ReadJsonAsync<OllamaTagsResponse>(response, cancellationToken);
 
         var models = payload.Models ?? [];
@@ -67,7 +71,7 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
             Content = JsonContent.Create(new OllamaPullRequest(model, stream), options: JsonOptions)
         };
 
-        using var response = await _httpClient.SendAsync(
+        using var response = await CreateClient().SendAsync(
             request,
             stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead,
             cancellationToken);
@@ -134,7 +138,7 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
             Content = JsonContent.Create(new OllamaShowRequest(model), options: JsonOptions)
         };
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await CreateClient().SendAsync(request, cancellationToken);
         var payload = await ReadJsonAsync<OllamaShowResponse>(response, cancellationToken);
 
         var details = payload.Details is null ? null : JsonSerializer.Serialize(payload.Details, JsonOptions);

@@ -40,7 +40,7 @@ public sealed class OllamaModelRuntimeClientTests
             return Task.FromResult(JsonResponse(json));
         }));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var result = await client.ListInstalledModelsAsync();
 
@@ -61,7 +61,7 @@ public sealed class OllamaModelRuntimeClientTests
         using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
             Task.FromResult(JsonResponse("""{"models":[]}"""))));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var result = await client.ListInstalledModelsAsync();
 
@@ -83,7 +83,7 @@ public sealed class OllamaModelRuntimeClientTests
             }
             """))));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var result = await client.ListInstalledModelsAsync();
 
@@ -98,7 +98,7 @@ public sealed class OllamaModelRuntimeClientTests
         using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.ListInstalledModelsAsync());
         Assert.Contains("503", exception.Message);
@@ -130,7 +130,7 @@ public sealed class OllamaModelRuntimeClientTests
             return Task.FromResult(StreamResponse(ndjson));
         }));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var progress = new List<ModelPullProgress>();
         await foreach (var item in client.PullModelAsync("bge-m3"))
@@ -191,7 +191,7 @@ public sealed class OllamaModelRuntimeClientTests
             return Task.FromResult(StreamResponse(ndjson));
         }));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var progress = new List<ModelPullProgress>();
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -222,7 +222,7 @@ public sealed class OllamaModelRuntimeClientTests
             return Task.FromResult(JsonResponse("""{"status":"success"}"""));
         }));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var progress = new List<ModelPullProgress>();
         await foreach (var item in client.PullModelAsync("bge-m3", stream: false))
@@ -242,7 +242,7 @@ public sealed class OllamaModelRuntimeClientTests
                 """{"status":"downloading","total":3,"completed":1}""" + "\n" +
                 """{"status":"success"}""" + "\n"))));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var progress = new List<ModelPullProgress>();
         await foreach (var item in client.PullModelAsync("m"))
@@ -263,7 +263,7 @@ public sealed class OllamaModelRuntimeClientTests
                 Content = new StringContent("model not found", Encoding.UTF8, "application/json")
             })));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => CollectAsync(client.PullModelAsync("nope")));
         Assert.Contains("404", exception.Message);
@@ -287,7 +287,7 @@ public sealed class OllamaModelRuntimeClientTests
             });
         }));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var progress = new List<ModelPullProgress>();
         await foreach (var item in client.PullModelAsync("bge-m3"))
@@ -331,7 +331,7 @@ public sealed class OllamaModelRuntimeClientTests
             return Task.FromResult(JsonResponse(json));
         }));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var info = await client.ShowModelAsync("llama3.1:8b");
 
@@ -360,7 +360,7 @@ public sealed class OllamaModelRuntimeClientTests
             }
             """))));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var info = await client.ShowModelAsync("qwen2.5:7b");
 
@@ -377,7 +377,7 @@ public sealed class OllamaModelRuntimeClientTests
                 Content = new StringContent("model not found", Encoding.UTF8, "application/json")
             })));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.ShowModelAsync("nope"));
         Assert.Contains("404", exception.Message);
@@ -389,7 +389,7 @@ public sealed class OllamaModelRuntimeClientTests
         using var httpClient = new HttpClient(new StubHttpHandler((_, _) =>
             Task.FromResult(JsonResponse("""{"modelfile":"FROM scratch"}"""))));
 
-        var client = new OllamaModelRuntimeClient(httpClient, new ConfigurationBuilder().Build());
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), new ConfigurationBuilder().Build());
 
         var info = await client.ShowModelAsync("scratch");
 
@@ -414,7 +414,7 @@ public sealed class OllamaModelRuntimeClientTests
             })
             .Build();
 
-        var client = new OllamaModelRuntimeClient(httpClient, configuration);
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), configuration);
 
         await client.ListInstalledModelsAsync();
 
@@ -438,7 +438,7 @@ public sealed class OllamaModelRuntimeClientTests
             })
             .Build();
 
-        var client = new OllamaModelRuntimeClient(httpClient, configuration);
+        var client = new OllamaModelRuntimeClient(new StubHttpClientFactory(httpClient), configuration);
 
         await client.ListInstalledModelsAsync();
 
@@ -464,6 +464,11 @@ public sealed class OllamaModelRuntimeClientTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => handler(request, cancellationToken);
+    }
+
+    private sealed class StubHttpClientFactory(HttpClient client) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => client;
     }
 
     /// <summary>Delivers the payload in fixed-size byte chunks, splitting mid-line,

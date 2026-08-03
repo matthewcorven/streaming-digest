@@ -148,8 +148,10 @@ builder.Services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingServic
 builder.Services.AddHttpClient("ollama-runtime")
     .SetHandlerLifetime(TimeSpan.FromMinutes(5))
     .ConfigureHttpClient(c => c.Timeout = Timeout.InfiniteTimeSpan);
-builder.Services.AddSingleton<IModelRuntimeClient>(sp =>
-    new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("ollama-runtime"), builder.Configuration));
+// Transient + factory-resolved per operation: the named client's pooled handler rotates
+// with SetHandlerLifetime so DNS refreshes for containerized Ollama.
+builder.Services.AddTransient<IModelRuntimeClient>(sp =>
+    new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>(), builder.Configuration));
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();

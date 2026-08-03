@@ -74,8 +74,10 @@ internal static class ApiServiceCollectionExtensions
         services.AddHttpClient("ollama-runtime")
             .SetHandlerLifetime(TimeSpan.FromMinutes(5))
             .ConfigureHttpClient(c => c.Timeout = Timeout.InfiniteTimeSpan);
-        services.AddSingleton<Application.IModelRuntimeClient>(sp =>
-            new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient("ollama-runtime"), configuration));
+        // Transient + factory-resolved per operation: the named client's pooled handler rotates
+        // with SetHandlerLifetime so DNS refreshes for containerized Ollama.
+        services.AddTransient<Application.IModelRuntimeClient>(sp =>
+            new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>(), configuration));
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);

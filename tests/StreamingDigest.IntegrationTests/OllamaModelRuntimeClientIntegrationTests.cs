@@ -97,7 +97,7 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
             .Build();
 
         using var httpClient = new HttpClient { BaseAddress = new Uri(_endpoint) };
-        var client = new OllamaModelRuntimeClient(httpClient, configuration);
+        var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
         var models = await client.ListInstalledModelsAsync();
 
@@ -123,7 +123,7 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
             .Build();
 
         using var httpClient = new HttpClient { BaseAddress = new Uri(_endpoint) };
-        var client = new OllamaModelRuntimeClient(httpClient, configuration);
+        var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
         // The model is already local after seeding, so the pull resolves quickly and emits a
         // terminal "success" status.
@@ -155,7 +155,7 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
             .Build();
 
         using var httpClient = new HttpClient { BaseAddress = new Uri(_endpoint) };
-        var client = new OllamaModelRuntimeClient(httpClient, configuration);
+        var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
         var info = await client.ShowModelAsync(SeedModel);
 
@@ -244,5 +244,10 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
             await RunDockerAsync($"volume rm {_volumeName}");
             _volumeName = null;
         }
+    }
+
+    private sealed class PassthroughHttpClientFactory(HttpClient client) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => client;
     }
 }
