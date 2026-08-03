@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Npgsql;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Application.AudioToText;
 
 namespace StreamingDigest.Application.Admin;
 
@@ -18,6 +19,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly IEmbeddingService _embeddingService;
     private readonly ITranscriptIngestionService? _transcriptIngestionService;
     private readonly ISearchDocumentRegenerationService? _searchDocumentRegenerationService;
+    private readonly IAudioToTextProvider? _audioToTextProvider;
 
     public AdminOperationsService(
         ApplicationConfiguration? configuration = null,
@@ -25,7 +27,8 @@ public sealed class AdminOperationsService : IAdminOperationsService
         IAdminOperationStore? operationStore = null,
         IEmbeddingService? embeddingService = null,
         ITranscriptIngestionService? transcriptIngestionService = null,
-        ISearchDocumentRegenerationService? searchDocumentRegenerationService = null)
+        ISearchDocumentRegenerationService? searchDocumentRegenerationService = null,
+        IAudioToTextProvider? audioToTextProvider = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
         _contentRootPath = contentRootPath;
@@ -33,6 +36,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         _embeddingService = embeddingService ?? new NullEmbeddingService();
         _transcriptIngestionService = transcriptIngestionService;
         _searchDocumentRegenerationService = searchDocumentRegenerationService;
+        _audioToTextProvider = audioToTextProvider;
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
@@ -180,7 +184,48 @@ public sealed class AdminOperationsService : IAdminOperationsService
     }
 
     public async Task<AdminActionResult> TestAudioToTextServiceAsync(CancellationToken cancellationToken = default)
-        => await CreateCompletedResultAsync("test.audio", null, "Audio-to-text service health check completed successfully.", "healthy", cancellationToken);
+    {
+        // Truthful probe (issue #210): previously this returned a fake "completed/healthy"
+        // without probing anything. It now delegates to the configured IAudioToTextProvider
+        // (which performs a GET /health against the whisper service) and reports the real
+        // status:
+        //   - healthy provider           -> completed / healthy
+        //   - unavailable (but no throw) -> completed (NOT failed) / warning, with reason
+        //   - no provider / exception   -> failed / error
+        // Caption-less videos degrade to "unavailable_captions" + notify in TranscriptIngestionService.
+        if (_audioToTextProvider is null)
+        {
+            return await CreateResultAsync(
+                "test.audio",
+                null,
+                "failed",
+                "Audio-to-text service health check failed: no audio-to-text provider is registered.",
+                "error",
+                cancellationToken);
+        }
+
+        try
+        {
+            var health = await _audioToTextProvider.CheckHealthAsync(cancellationToken);
+            var endpoint = string.IsNullOrEmpty(health.Endpoint) ? "(unconfigured)" : health.Endpoint;
+            var message = health.IsHealthy
+                ? $"Audio-to-text service health check succeeded. Engine '{health.Engine}' at {endpoint} responded healthy: {health.Reason}"
+                : $"Audio-to-text service health check completed with warnings. Engine '{health.Engine}' at {endpoint} is unavailable: {health.Reason} Caption-less videos will degrade to 'unavailable_captions' with a notify event; captioned ingestion proceeds with a warning.";
+
+            var healthStatus = health.IsHealthy ? "healthy" : "warning";
+            return await CreateCompletedResultAsync("test.audio", null, message, healthStatus, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return await CreateResultAsync(
+                "test.audio",
+                null,
+                "failed",
+                $"Audio-to-text service health check failed: {ex.Message}",
+                "error",
+                cancellationToken);
+        }
+    }
 
     public async Task<AdminActionResult> CreateBackupAsync(CancellationToken cancellationToken = default)
     {

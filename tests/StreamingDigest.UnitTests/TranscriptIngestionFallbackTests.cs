@@ -72,6 +72,17 @@ public sealed class TranscriptIngestionFallbackTests : IDisposable
         Assert.False(result.Succeeded);
         Assert.Equal("no_captions_available", result.ErrorMessage);
         Assert.Empty(await _context.VideoTranscripts.ToListAsync());
+
+        // Truthful degrade + notify (issue #210): the video is marked unavailable_captions
+        // and a TranscriptIngestFailed domain event is emitted so the notify pipeline can fire.
+        var refreshedVideo = await _context.Videos.SingleAsync();
+        Assert.Equal("unavailable_captions", refreshedVideo.TranscriptStatus);
+        var ingestFailedEvent = await _context.DomainEvents
+            .Where(e => e.EventType == DomainEventTypeCatalog.TranscriptIngestFailed)
+            .SingleAsync();
+        Assert.Equal("video", ingestFailedEvent.EntityType);
+        Assert.Equal(video.Id, ingestFailedEvent.EntityId);
+        Assert.Equal("warning", ingestFailedEvent.Severity);
     }
 
     [Fact]
@@ -146,12 +157,18 @@ public sealed class TranscriptIngestionFallbackTests : IDisposable
             RequestedFilePaths.Add(request.FilePath);
             return Task.FromResult(result);
         }
+
+        public Task<AudioToTextHealthResult> CheckHealthAsync(CancellationToken ct)
+            => Task.FromResult(new AudioToTextHealthResult(true, "whisper-test-stub", "http://whisper.test/", "Test stub reports healthy."));
     }
 
     private sealed class ThrowingAudioToTextProvider : IAudioToTextProvider
     {
         public Task<AudioTranscriptionResult> TranscribeAsync(AudioTranscriptionRequest request, CancellationToken ct)
             => throw new InvalidOperationException("transcription unavailable");
+
+        public Task<AudioToTextHealthResult> CheckHealthAsync(CancellationToken ct)
+            => Task.FromResult(new AudioToTextHealthResult(false, "whisper-test-stub", null, "Test stub reports unavailable."));
     }
 
     private sealed class RecordingTemporaryMediaManager : ITemporaryMediaManager

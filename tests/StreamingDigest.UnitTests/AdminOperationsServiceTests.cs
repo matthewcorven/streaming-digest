@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text.Json;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
+using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
@@ -407,6 +408,63 @@ public sealed class AdminOperationsServiceTests
         }
     }
 
+    [Fact]
+    public async Task TestAudioToTextServiceAsync_ReturnsCompletedHealthy_WhenProviderHealthy()
+    {
+        var provider = new StubAudioToTextProvider(healthy: true);
+        var service = new AdminOperationsService(audioToTextProvider: provider);
+
+        var result = await service.TestAudioToTextServiceAsync();
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("test.audio", result.OperationType);
+        Assert.Equal("healthy", result.HealthStatus);
+        Assert.Contains("whisper", result.Message);
+    }
+
+    [Fact]
+    public async Task TestAudioToTextServiceAsync_ReturnsCompletedWarning_WhenProviderUnavailable()
+    {
+        // Truthful degrade (issue #210): unavailable-but-not-thrown must be `completed`/`warning`,
+        // NOT `failed` — captioned ingestion still proceeds.
+        var provider = new StubAudioToTextProvider(healthy: false);
+        var service = new AdminOperationsService(audioToTextProvider: provider);
+
+        var result = await service.TestAudioToTextServiceAsync();
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("test.audio", result.OperationType);
+        Assert.Equal("warning", result.HealthStatus);
+        Assert.Contains("unavailable_captions", result.Message);
+    }
+
+    [Fact]
+    public async Task TestAudioToTextServiceAsync_ReturnsFailedError_WhenNoProviderRegistered()
+    {
+        var service = new AdminOperationsService(audioToTextProvider: null);
+
+        var result = await service.TestAudioToTextServiceAsync();
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("test.audio", result.OperationType);
+        Assert.Equal("error", result.HealthStatus);
+        Assert.Contains("no audio-to-text provider", result.Message);
+    }
+
+    [Fact]
+    public async Task TestAudioToTextServiceAsync_ReturnsFailedError_WhenProviderThrows()
+    {
+        var provider = new ThrowingAudioToTextProvider();
+        var service = new AdminOperationsService(audioToTextProvider: provider);
+
+        var result = await service.TestAudioToTextServiceAsync();
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("test.audio", result.OperationType);
+        Assert.Equal("error", result.HealthStatus);
+        Assert.Contains("probe-threw", result.Message);
+    }
+
     private sealed class TestAdminOperationStore : IAdminOperationStore
     {
         private readonly Dictionary<Guid, AdminActionStatus> _operations = new();
@@ -480,5 +538,25 @@ public sealed class AdminOperationsServiceTests
             Invoked = true;
             return Task.FromResult<IReadOnlyList<StoredSearchDocumentEmbedding>>([]);
         }
+    }
+
+    private sealed class StubAudioToTextProvider(bool healthy) : IAudioToTextProvider
+    {
+        public Task<AudioTranscriptionResult> TranscribeAsync(AudioTranscriptionRequest request, CancellationToken ct)
+            => Task.FromResult(new AudioTranscriptionResult("whisper", "base.en", "en", null, string.Empty, []));
+
+        public Task<AudioToTextHealthResult> CheckHealthAsync(CancellationToken ct)
+            => Task.FromResult(healthy
+                ? new AudioToTextHealthResult(true, "whisper", "http://whisper:8080/", "Whisper /health OK.")
+                : new AudioToTextHealthResult(false, "whisper-unconfigured", null, "unconfigured"));
+    }
+
+    private sealed class ThrowingAudioToTextProvider : IAudioToTextProvider
+    {
+        public Task<AudioTranscriptionResult> TranscribeAsync(AudioTranscriptionRequest request, CancellationToken ct)
+            => throw new NotImplementedException();
+
+        public Task<AudioToTextHealthResult> CheckHealthAsync(CancellationToken ct)
+            => throw new InvalidOperationException("probe-threw");
     }
 }

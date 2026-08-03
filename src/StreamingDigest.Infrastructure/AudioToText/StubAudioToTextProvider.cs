@@ -26,4 +26,15 @@ public sealed class StubAudioToTextProvider(ILogger<StubAudioToTextProvider> log
             FullText: string.Empty,
             Cues: []));
     }
+
+    public Task<AudioToTextHealthResult> CheckHealthAsync(CancellationToken ct)
+    {
+        // Truthful degrade: the stub is not a real runtime. Caption-less videos cannot be
+        // transcribed; the admin op must report this honestly rather than faking "completed".
+        return Task.FromResult(new AudioToTextHealthResult(
+            IsHealthy: false,
+            Engine: "stub",
+            Endpoint: null,
+            Reason: "Audio-to-text is using the stub provider; no whisper runtime is configured. Caption-less videos will degrade to 'unavailable_captions' with a notify event."));
+    }
 }

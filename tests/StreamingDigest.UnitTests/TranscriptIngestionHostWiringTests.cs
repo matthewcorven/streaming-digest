@@ -166,6 +166,9 @@ public sealed class TranscriptIngestionHostWiringTests : IDisposable
                 "Transcript created through the API host wiring.",
                 [new AudioTranscriptionCueDto(0m, 1m, "Transcript created through the API host wiring.")]));
         }
+
+        public Task<AudioToTextHealthResult> CheckHealthAsync(CancellationToken ct)
+            => Task.FromResult(new AudioToTextHealthResult(true, "whisper.cpp", "http://whisper:8080/", "Test stub reports healthy."));
     }
 
     private sealed class RecordingTemporaryMediaManager : ITemporaryMediaManager

@@ -152,6 +152,66 @@ public sealed class LocalWhisperAudioToTextProviderTests
         return new LocalWhisperAudioToTextProvider(httpClient, NullLogger<LocalWhisperAudioToTextProvider>.Instance);
     }
 
+    [Fact]
+    public async Task CheckHealthAsync_returns_healthy_when_health_endpoint_responds_200()
+    {
+        string? requestedPath = null;
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            requestedPath = request.RequestUri?.AbsolutePath;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        });
+        var provider = CreateProvider(handler, new Uri("http://whisper:8080/"));
+
+        var health = await provider.CheckHealthAsync(CancellationToken.None);
+
+        Assert.True(health.IsHealthy);
+        Assert.Equal("whisper", health.Engine);
+        Assert.Equal("http://whisper:8080/", health.Endpoint);
+        Assert.Contains("200", health.Reason);
+        Assert.Equal("/health", requestedPath);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_returns_unhealthy_when_health_endpoint_responds_5xx()
+    {
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        var provider = CreateProvider(handler, new Uri("http://whisper:8080/"));
+
+        var health = await provider.CheckHealthAsync(CancellationToken.None);
+
+        Assert.False(health.IsHealthy);
+        Assert.Equal("whisper", health.Engine);
+        Assert.Contains("503", health.Reason);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_returns_unavailable_when_base_address_not_configured()
+    {
+        var handler = new StubHttpMessageHandler((_, _) => throw new InvalidOperationException("HTTP should not be called when unconfigured."));
+        var provider = CreateProvider(handler, baseAddress: null);
+
+        var health = await provider.CheckHealthAsync(CancellationToken.None);
+
+        Assert.False(health.IsHealthy);
+        Assert.Equal("whisper-unconfigured", health.Engine);
+        Assert.Null(health.Endpoint);
+        Assert.Contains("STREAMINGDIGEST_WHISPER_BASE_URL", health.Reason);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_returns_unhealthy_when_http_call_throws()
+    {
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("connection refused"));
+        var provider = CreateProvider(handler, new Uri("http://whisper:8080/"));
+
+        var health = await provider.CheckHealthAsync(CancellationToken.None);
+
+        Assert.False(health.IsHealthy);
+        Assert.Equal("whisper", health.Engine);
+        Assert.Contains("connection refused", health.Reason);
+    }
+
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

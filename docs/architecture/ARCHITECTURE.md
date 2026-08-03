@@ -94,6 +94,20 @@ The service should expose an internal HTTP or gRPC API:
 - Metadata: model name, language, duration, confidence if available.
 - Model management: execute configured CLI download/use commands against a mounted model volume, including user-provided host model paths mounted into the container.
 
+#### 2.5.1 AppHost wiring + health probe (issue #210)
+
+The whisper service is an **optional runtime**: captioned-video ingestion proceeds with a warning when it is absent; only caption-less videos require it (PRD §2.4). The Aspire AppHost declares a `whisper` container resource exposing an HTTP endpoint with `WithHttpHealthCheck("/health")`. The `api` and `worker` projects receive `STREAMINGDIGEST_WHISPER_BASE_URL=http://whisper:<port>` and do **not** `WaitFor(whisper)` — so a missing/starting whisper runtime never blocks ingestion.
+
+The admin operation `POST /api/admin/test-audio-to-text` performs a real `GET /health` probe via `IAudioToTextProvider.CheckHealthAsync` and reports truthfully:
+
+| Probe outcome | Admin op `status` | Admin op `healthStatus` |
+| --- | --- | --- |
+| `/health` returned 2xx | `completed` | `healthy` |
+| Provider unavailable (no runtime, 5xx, connection refused) | `completed` | `warning` |
+| No provider registered / probe threw | `failed` | `error` |
+
+When whisper is unavailable, `TranscriptIngestionService` degrades caption-less videos to `TranscriptStatus = "unavailable_captions"` and emits a `transcript_ingest_failed` domain event (severity `warning`) so the notify pipeline can fire. The previous behavior (a fake `completed`/`healthy` without probing) has been removed.
+
 ### 2.6 Browser scraper: `streaming-digest-scraper`
 
 Responsibilities:

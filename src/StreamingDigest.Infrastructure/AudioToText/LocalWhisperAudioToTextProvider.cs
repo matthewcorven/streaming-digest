@@ -64,6 +64,53 @@ public sealed class LocalWhisperAudioToTextProvider(HttpClient httpClient, ILogg
             ActivityKind.Client);
     }
 
+    public async Task<AudioToTextHealthResult> CheckHealthAsync(CancellationToken ct)
+    {
+        if (httpClient.BaseAddress is null)
+        {
+            // Truthful degrade: no whisper runtime is configured, so caption-less videos
+            // cannot be transcribed. Captioned ingestion still proceeds with a warning
+            // (PRD §2.4); the admin "test audio-to-text" op surfaces this honestly.
+            return new AudioToTextHealthResult(
+                IsHealthy: false,
+                Engine: "whisper-unconfigured",
+                Endpoint: null,
+                Reason: "Audio-to-text is not configured. Set STREAMINGDIGEST_WHISPER_BASE_URL (or whisper:baseUrl) to the whisper service URL to enable caption-less transcription.");
+        }
+
+        try
+        {
+            using var response = await httpClient.GetAsync("/health", ct);
+            if (response.IsSuccessStatusCode)
+            {
+                return new AudioToTextHealthResult(
+                    IsHealthy: true,
+                    Engine: "whisper",
+                    Endpoint: httpClient.BaseAddress.ToString(),
+                    Reason: $"Whisper service health check succeeded (HTTP {(int)response.StatusCode}).");
+            }
+
+            return new AudioToTextHealthResult(
+                IsHealthy: false,
+                Engine: "whisper",
+                Endpoint: httpClient.BaseAddress.ToString(),
+                Reason: $"Whisper service /health returned HTTP {(int)response.StatusCode} {response.ReasonPhrase}.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Whisper /health probe failed against {Endpoint}.", httpClient.BaseAddress);
+            return new AudioToTextHealthResult(
+                IsHealthy: false,
+                Engine: "whisper",
+                Endpoint: httpClient.BaseAddress.ToString(),
+                Reason: $"Whisper service /health probe failed: {ex.Message}");
+        }
+    }
+
     private sealed record WhisperTranscriptionRequest(string FilePath, string? Language);
 
     private sealed record WhisperTranscriptionResponse(
