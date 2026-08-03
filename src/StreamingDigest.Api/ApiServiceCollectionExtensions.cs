@@ -49,14 +49,19 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<FirstUserSetupService>();
         services.AddSingleton<ModelDiscoveryService>();
         services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
-        services.AddSingleton<SearchUiService>();
+        services.AddSingleton<ISearchCorpusSearcher>(sp => new PostgresSearchCorpusSearcher(connectionString));
+        services.AddSingleton<SearchUiService>(sp => new SearchUiService(
+            sp.GetRequiredService<IRecentSearchStore>(),
+            sp.GetRequiredService<ISearchCorpusSearcher>(),
+            sp.GetRequiredService<IVideoClusterEmbeddingStore>(),
+            rankingService: null));
         services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
         services.AddHttpClient<IEmbeddingService, OllamaEmbeddingService>();
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);
         services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
-        services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
+        services.AddSingleton<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
         services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
         services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
         services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(

@@ -213,5 +213,8 @@ public sealed class SearchUiServiceTests
 
             return Task.FromResult<IReadOnlyDictionary<Guid, int>>(counts);
         }
+
+        public Task<StoredQueryEmbedding?> GetQueryEmbeddingAsync(Guid recentSearchId, CancellationToken cancellationToken = default)
+            => Task.FromResult<StoredQueryEmbedding?>(null);
     }
 }

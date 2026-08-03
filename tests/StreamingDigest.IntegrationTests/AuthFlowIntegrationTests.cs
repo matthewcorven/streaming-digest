@@ -444,6 +444,14 @@ public sealed class AuthFlowIntegrationTests : IAsyncLifetime
             {
                 services.RemoveAll<IEmbeddingService>();
                 services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
+
+                // This suite verifies auth/CSRF/endpoint wiring, not DB search correctness.
+                // Restore the fixture-backed SearchUiService default so the search endpoint
+                // returns the representative fixture cluster regardless of DB state. DB-backed
+                // search correctness is covered by DbHybridSearchIntegrationTests.
+                services.RemoveAll<ISearchCorpusSearcher>();
+                services.RemoveAll<SearchUiService>();
+                services.AddSingleton<SearchUiService>(_ => new SearchUiService(SearchUiCorpusCatalog.CreateDefaultFixtureCorpus()));
             });
         }
     }

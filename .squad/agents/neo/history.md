@@ -70,3 +70,60 @@ Completed implementation of issue #22 on branch `matthewcorven-issue-22-recent-s
 - Focused unit and integration coverage for persistence, clear-all behavior, and interaction-driven ranking
 
 Session: b06ad641-c9b7-4ab7-bfef-034c158d2688
+
+## 2026-08-02 — Issue #212 A6 DB-backed hybrid search (Neo)
+
+Implemented issue #212 ([App A6] DB-backed hybrid search) on branch `squad/212-db-hybrid-search` (branched from `feat/application-truth`). PR #230 (base `feat/application-truth`): https://github.com/matthewcorven/streaming-digest/pull/230. **Requesting independent adversarial review — no self-merge.**
+
+**What shipped:**
+- Replaced fixture-corpus `SearchUiService` DI default with real DB-backed hybrid search. Fixture corpus retained only for unit tests + recall harness.
+- **Text leg:** generated `fts_body tsvector` column on `search_documents` (title_effective + body_effective) + GIN index; queried via `websearch_to_tsquery` + `ts_rank_cd`. (Migration 019.) This directly applies the 11.3b latency lesson — materialized tsvector, not per-query construction.
+- **Vector leg:** pgvector cosine distance (`<=>`) between stored query embedding (`search_query_embeddings`) and `embeddings.embedding`, conditional on a stored query embedding row.
+- **Aggregation:** one cluster per video via the existing pure `HybridRankingService` (max + top-3 avg + coverage, note boost, interaction boost, relative similarity normalization).
+- **Empty corpus → waiting state** (PRD §2.10): readiness probe counts search_documents with succeeded embeddings; when 0, return empty results + "No searchable corpus yet. Run ingestion to populate search." — **never fabricated**.
+- **Related items:** `IVideoClusterEmbeddingStore.GetRelatedVideosAsync` → `SearchRelatedItemResponse` with `RelativeSimilarityPercent` (progressive enhancement, try/catch — never fails search).
+- **Interim model-readiness degrade:** embedding call in `PostgresRecentSearchStore.StoreSearchAsync` wrapped in try/catch; on failure, store recent search without embedding and proceed text-only. Awaiting `IModelReadinessGuard` (model plan WS-7).
+- New Application seam `ISearchCorpusSearcher` + Infrastructure `PostgresSearchCorpusSearcher` (CTE-based hybrid query, scores clamped to [0,1], filters applied in outer query after CTEs select from search_documents).
+- DI: `ISearchCorpusSearcher` singleton; `SearchUiService` DB-backed constructor; `IVideoClusterEmbeddingStore` bumped scoped→singleton (SearchUiService is singleton; NpgsqlDataSource is thread-safe).
+- `IRecentSearchStore.GetQueryEmbeddingAsync(recentSearchId)` + `StoredQueryEmbedding` record added so the service can fetch the stored query embedding row for the vector leg.
+
+**Deferred (with rationale):**
+- **HNSW/IVFFlat vector indexes NOT added.** The `embeddings.embedding` column is dimensionless `vector` (multi-model by design — different providers have different dimensions). Both HNSW and IVFFlat require `vector(N)`. Migration 019's original HNSW indexes failed with `PostgresException 22023: column does not have dimensions`. Fix: dropped the HNSW indexes from the migration; vector search uses exact nearest-neighbour scan (sequential `<=>`). Correctness is unaffected — only large-scale latency. This refines ADR-0016's scope: HNSW-as-MVP applies once the embedding column is specialised per model dimension (model plan). Tracked there, not here.
+- E2E slice: A6 requires unit + integration only per plan §10.3.
+
+**Test gate (plan §10.3):** Unit 406 passed · Integration 72 passed, 1 skipped (pre-existing network skip) · Build 0 errors / 0 warnings.
+
+**Npgsql+pgvector quirk reused from 11.3a/11.3b:** test connections that write `Pgvector.Vector` parameters need `NpgsqlDataSourceBuilder.UseVector()` (or `NpgsqlConnection.GlobalTypeMapper.UseVector()`) — bare `NpgsqlConnection` throws `Writing values of 'Pgvector.Vector' is not supported` on parameter binding. Applied in `DbHybridSearchIntegrationTests`.
+
+**Test-suite hygiene:** `AuthFlowIntegrationTests.Search_endpoint_returns_one_cluster_per_video_and_uses_the_effective_title` previously asserted the fixture corpus result via the search endpoint. With the DI default now DB-backed, the endpoint correctly returns empty on an empty DB. That suite verifies auth/CSRF/endpoint wiring (not DB search correctness — `DbHybridSearchIntegrationTests` owns that), so its factory now overrides `SearchUiService` back to the fixture constructor via `RemoveAll<SearchUiService>() + AddSingleton(new SearchUiService(SearchUiCorpusCatalog.CreateDefaultFixtureCorpus()))`, matching the recall-harness pattern.
+
+**Review artifacts emitted:** (1) decision record `Neo-a6-db-backed-hybrid-search-implemented-for-212-pr-.md` via `squad_decide`; (2) this history entry. Requesting independent adversarial review from Morpheus — **do not self-merge**.
+
+## 2025-01 — A6 #212: Morpheus PR #230 review fixes applied
+
+Morpheus independent adversarial review of PR #230 returned needs-changes,
+92% completeness. Applied reviewer change spec verbatim (no re-derivation).
+
+Findings addressed (commit 35c1182, branch squad/212-db-hybrid-search):
+- **F1 BLOCKING (vector leg unreachable)**: `BuildSearchSql` doc_scores CTE
+  selected FROM text_matches LEFT JOIN vector_matches — vector-only documents
+  never surfaced. Fixed: FULL OUTER JOIN both legs, COALESCE IDs/parent_video_id,
+  ORDER BY GREATEST(text_rank, vector_similarity). Added
+  `vector_matches.parent_video_id` to SELECT + GROUP BY. Added regression test
+  `Vector_leg_surfaces_documents_with_no_text_match` (seeds vector-only video,
+  asserts it appears in results). Upgraded `InMemoryRecentSearchStore` fake to
+  return a real `StoredQueryEmbedding` for a fixed recentSearchId so the vector
+  leg is actually exercised.
+- **F2 MODERATE (mixed-dimension 500)**: added
+  `AND vector_dims(e.embedding) = @query_dimensions` to vector CTE.
+- **F3 MINOR (matched_fields empty)**: replaced `''` with CASE expression
+  ('title,body,semantic' / 'title,body' / 'semantic' / '').
+- **F4 MINOR/interim (embedding degrade invisible)**: added `<remarks>` XML doc
+  to `EmbeddingErrorSink` noting WS-7 should REPLACE it, not stack on top.
+
+Verification: 406 unit tests passed, 73 integration tests passed (+1 vector-leg
+regression), 1 pre-existing skip, 0 failures. Build 0 errors / 0 warnings.
+Pushed to same branch (no rebase). Stopped for re-review — no self-merge.
+
+Completeness expectation after fixes: ~100% (F1 blocker resolved with both
+code fix AND exercising regression test; F2 500 path closed; F3 + F4 cleaned).

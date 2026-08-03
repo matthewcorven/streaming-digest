@@ -3,12 +3,15 @@ namespace StreamingDigest.Application;
 public sealed class SearchUiService
 {
     public const string CandidateScoringVersion = "seeded-heuristic-blend-v1";
+    public const string DbCandidateScoringVersion = "db-hybrid-tsvector-pgvector-v1";
 
     private readonly object _syncRoot = new();
     private readonly IRecentSearchStore _recentSearchStore;
     private readonly IReadOnlyList<SearchCorpusClusterSeed> _candidateSeeds;
     private readonly HybridRankingService? _injectedRankingService;
     private readonly bool _useSeedRecentOpenCount;
+    private readonly ISearchCorpusSearcher? _corpusSearcher;
+    private readonly IVideoClusterEmbeddingStore? _videoClusterEmbeddingStore;
     private SearchUiSettings _settings = SearchUiSettings.Default;
 
     public SearchUiService(IRecentSearchStore recentSearchStore, HybridRankingService? rankingService = null)
@@ -26,6 +29,22 @@ public sealed class SearchUiService
         _candidateSeeds = candidateSeeds ?? throw new ArgumentNullException(nameof(candidateSeeds));
         _injectedRankingService = rankingService;
         _useSeedRecentOpenCount = useSeedRecentOpenCount;
+    }
+
+    /// <summary>
+    /// DB-backed constructor used by production DI. Runs real hybrid text+vector search over
+    /// the live search corpus and aggregates one cluster per video via
+    /// <see cref="HybridRankingService"/>. Fixture seeds are not used.
+    /// </summary>
+    public SearchUiService(
+        IRecentSearchStore recentSearchStore,
+        ISearchCorpusSearcher corpusSearcher,
+        IVideoClusterEmbeddingStore videoClusterEmbeddingStore,
+        HybridRankingService? rankingService = null)
+        : this(recentSearchStore, Array.Empty<SearchCorpusClusterSeed>(), rankingService, useSeedRecentOpenCount: false)
+    {
+        _corpusSearcher = corpusSearcher ?? throw new ArgumentNullException(nameof(corpusSearcher));
+        _videoClusterEmbeddingStore = videoClusterEmbeddingStore ?? throw new ArgumentNullException(nameof(videoClusterEmbeddingStore));
     }
 
     public SearchUiService(IReadOnlyList<SearchCorpusClusterSeed> candidateSeeds)
@@ -80,6 +99,18 @@ public sealed class SearchUiService
         => SearchAsync(request, stateKey, CancellationToken.None).GetAwaiter().GetResult();
 
     public async Task<SearchResponse> SearchAsync(SearchRequest request, string? stateKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (_corpusSearcher is not null && _videoClusterEmbeddingStore is not null)
+        {
+            return await SearchDbAsync(request, _corpusSearcher, _videoClusterEmbeddingStore, cancellationToken);
+        }
+
+        return await SearchFixtureAsync(request, cancellationToken);
+    }
+
+    private async Task<SearchResponse> SearchFixtureAsync(SearchRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -139,6 +170,211 @@ public sealed class SearchUiService
             Summary = results.Count == 0
                 ? "No clusters matched the current filters."
                 : $"Showing {results.Count} clustered video result{(results.Count == 1 ? string.Empty : "s")} for '{normalizedQuery}'."
+        };
+    }
+
+    private async Task<SearchResponse> SearchDbAsync(
+        SearchRequest request,
+        ISearchCorpusSearcher corpusSearcher,
+        IVideoClusterEmbeddingStore videoClusterEmbeddingStore,
+        CancellationToken cancellationToken)
+    {
+        var normalizedQuery = string.IsNullOrWhiteSpace(request.Query) ? string.Empty : request.Query.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedQuery))
+        {
+            throw new ArgumentException("A search query is required.", nameof(request));
+        }
+
+        var activeFilters = request.Filters ?? SearchFilters.Empty;
+        var effectiveSettings = GetSettings();
+
+        var readiness = await corpusSearcher.GetReadinessAsync(cancellationToken);
+        if (!readiness.HasSearchableCorpus)
+        {
+            // Persist the recent search so the waiting state still tracks intent, but never
+            // fabricate results. The query embedding is best-effort (degrades to text-only
+            // when the embedding service is unavailable).
+            var waitingStoredSearch = await _recentSearchStore.StoreSearchAsync(
+                normalizedQuery,
+                activeFilters,
+                effectiveSettings,
+                cancellationToken);
+            var waitingRecent = await _recentSearchStore.ListRecentQueriesAsync(cancellationToken: cancellationToken);
+
+            return new SearchResponse
+            {
+                Query = normalizedQuery,
+                RecentSearchId = waitingStoredSearch.Id,
+                Results = Array.Empty<SearchResultClusterResponse>(),
+                RecentSearches = waitingRecent,
+                Settings = effectiveSettings,
+                Summary = "No searchable corpus yet. Run ingestion to populate search."
+            };
+        }
+
+        var storedSearch = await _recentSearchStore.StoreSearchAsync(
+            normalizedQuery,
+            activeFilters,
+            effectiveSettings,
+            cancellationToken);
+
+        var recentSearches = await _recentSearchStore.ListRecentQueriesAsync(cancellationToken: cancellationToken);
+
+        var queryEmbedding = await _recentSearchStore.GetQueryEmbeddingAsync(storedSearch.Id, cancellationToken);
+
+        var clusters = await corpusSearcher.SearchAsync(
+            new SearchCorpusSearchRequest(
+                Query: normalizedQuery,
+                QueryEmbedding: queryEmbedding?.Values,
+                QueryEmbeddingProvider: queryEmbedding?.Provider,
+                QueryEmbeddingModel: queryEmbedding?.Model,
+                QueryEmbeddingDimensions: queryEmbedding?.Dimensions,
+                Filters: activeFilters,
+                Settings: effectiveSettings),
+            cancellationToken);
+
+        if (clusters.Count == 0)
+        {
+            return CreateEmptyResponse(normalizedQuery, storedSearch.Id, recentSearches, effectiveSettings);
+        }
+
+        var candidates = clusters
+            .Select(cluster => new HybridClusterCandidate(
+                Id: cluster.ClusterId,
+                Title: cluster.Title,
+                Documents: cluster.Documents
+                    .Select(document => new HybridDocumentCandidate(
+                        Id: document.SearchDocumentId.ToString("D", System.Globalization.CultureInfo.InvariantCulture),
+                        DocumentType: document.DocumentType,
+                        TextScore: document.TextScore,
+                        VectorScore: document.VectorScore,
+                        MatchedFields: document.MatchedFields,
+                        Snippet: document.Snippet))
+                    .ToList(),
+                RecentOpenCount: cluster.RecentOpenCount,
+                HasMatchingNote: cluster.HasMatchingNote))
+            .ToList();
+
+        var rankingService = CreateRankingService(effectiveSettings);
+        var rankingResults = rankingService.Rank(
+            candidates,
+            relativeSimilarityPoolScores: candidates.Select(cluster => cluster.Documents.Max(document => document.VectorScore)).ToList());
+
+        var clusterById = clusters.ToDictionary(cluster => cluster.ClusterId, StringComparer.OrdinalIgnoreCase);
+        var results = new List<SearchResultClusterResponse>();
+        foreach (var ranking in rankingResults)
+        {
+            if (!clusterById.TryGetValue(ranking.ClusterId, out var cluster))
+            {
+                continue;
+            }
+
+            var relatedItems = await BuildRelatedItemsAsync(videoClusterEmbeddingStore, cluster.VideoId, cancellationToken);
+            results.Add(MapDbResult(ranking, cluster, relatedItems));
+        }
+
+        return new SearchResponse
+        {
+            Query = normalizedQuery,
+            RecentSearchId = storedSearch.Id,
+            Results = results,
+            RecentSearches = recentSearches,
+            Settings = effectiveSettings,
+            Summary = results.Count == 0
+                ? "No clusters matched the current filters."
+                : $"Showing {results.Count} clustered video result{(results.Count == 1 ? string.Empty : "s")} for '{normalizedQuery}'."
+        };
+    }
+
+    private static async Task<IReadOnlyList<SearchRelatedItemResponse>> BuildRelatedItemsAsync(
+        IVideoClusterEmbeddingStore videoClusterEmbeddingStore,
+        Guid videoId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var related = await videoClusterEmbeddingStore.GetRelatedVideosAsync(videoId, take: 3, cancellationToken);
+            return related
+                .Select(item => new SearchRelatedItemResponse
+                {
+                    Title = item.VideoId.ToString("D", System.Globalization.CultureInfo.InvariantCulture),
+                    Type = "video",
+                    RelativeSimilarityPercent = item.RelativeSimilarityPercent,
+                    Detail = $"Related video (similarity {item.SimilarityPercent:0.##}%)"
+                })
+                .ToList();
+        }
+        catch (Exception)
+        {
+            // Related items are a progressive enhancement; never fail a search because the
+            // cluster embedding store is unavailable.
+            return Array.Empty<SearchRelatedItemResponse>();
+        }
+    }
+
+    private static SearchResultClusterResponse MapDbResult(
+        HybridClusterRankingResult ranking,
+        SearchCorpusCluster cluster,
+        IReadOnlyList<SearchRelatedItemResponse> relatedItems)
+    {
+        var primaryDocument = cluster.Documents
+            .OrderByDescending(document => Math.Max(document.TextScore, document.VectorScore))
+            .FirstOrDefault();
+
+        var matchedFields = ranking.MatchedFields.Count > 0
+            ? ranking.MatchedFields
+            : (cluster.Documents
+                .SelectMany(document => document.MatchedFields ?? Array.Empty<string>())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+
+        return new SearchResultClusterResponse
+        {
+            ClusterId = ranking.ClusterId,
+            VideoId = cluster.VideoId,
+            Title = cluster.Title,
+            Channel = cluster.Channel,
+            PublishDate = cluster.PublishDate ?? DateTimeOffset.MinValue,
+            ResultType = cluster.ResultType,
+            HasTranscript = cluster.HasTranscript,
+            HasRepo = cluster.HasRepo,
+            HasNotes = cluster.HasNotes,
+            HasScreenshot = cluster.HasScreenshot,
+            ProcessingStatus = cluster.ProcessingStatus,
+            CanRetry = cluster.CanRetry,
+            MatchesInsideCount = cluster.Documents.Count,
+            PrimaryMatch = primaryDocument?.Snippet,
+            PrimaryMatchTimestamp = null,
+            PrimaryMatchUrl = null,
+            Score = ranking.Score,
+            ScoreExplanation = ranking.Explanation,
+            RelativeSimilarityPercent = ranking.RelativeSimilarityPercent,
+            MatchedFields = matchedFields,
+            ProcessingWarnings = Array.Empty<string>(),
+            RepositoryLinks = Array.Empty<string>(),
+            WebsiteLinks = Array.Empty<string>(),
+            ScreenshotUrl = null,
+            Submatches = cluster.Documents
+                .Where(document => !string.IsNullOrWhiteSpace(document.Snippet))
+                .Select(document => new SearchSubmatchResponse
+                {
+                    Title = document.DocumentType,
+                    Type = document.DocumentType,
+                    Detail = document.Snippet ?? string.Empty,
+                    TimestampLabel = null,
+                    Url = null
+                })
+                .ToList(),
+            RelatedItems = relatedItems,
+            ScoreComponents = new SearchScoreComponentsResponse
+            {
+                BaseScore = ranking.ScoreComponents.BaseScore,
+                MaxDocumentScore = ranking.ScoreComponents.MaxDocumentScore,
+                AverageTopThreeDocumentScore = ranking.ScoreComponents.AverageTopThreeDocumentScore,
+                CoverageScore = ranking.ScoreComponents.CoverageScore,
+                NoteBoost = ranking.ScoreComponents.NoteBoost,
+                InteractionBoost = ranking.ScoreComponents.InteractionBoost
+            }
         };
     }
 
@@ -530,6 +766,11 @@ public sealed class SearchUiService
                 .ToDictionary(group => group.Key, group => group.Count());
 
             return Task.FromResult<IReadOnlyDictionary<Guid, int>>(counts);
+        }
+
+        public Task<StoredQueryEmbedding?> GetQueryEmbeddingAsync(Guid recentSearchId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<StoredQueryEmbedding?>(null);
         }
     }
 }
