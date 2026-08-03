@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "defaultModel": "deepseek/deepseek-v4-pro",
+  "defaultModel": "z-ai/glm-5.2",
   "agentModelOverrides": {
-    "morpheus": "deepseek/deepseek-v4-pro",
-    "trinity": "deepseek/deepseek-v4-pro",
+    "morpheus": "z-ai/glm-5.2",
+    "trinity": "z-ai/glm-5.2",
     "tank": "deepseek/deepseek-v4-flash",
     "dozer": "deepseek/deepseek-v4-flash",
     "neo": "deepseek/deepseek-v4-flash",
     "switch": "deepseek/deepseek-v4-flash",
     "scribe": "deepseek/deepseek-v4-flash",
-    "ralph": "deepseek/deepseek-v4-pro"
+    "ralph": "z-ai/glm-5.2"
   }
 }
