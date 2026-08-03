@@ -62,7 +62,7 @@ Check: Does `{TEAM_ROOT}/team.md` exist? (fall back to `.ai-team/team.md` for re
 
 **DISPATCH MECHANISM (detect once per session, then use consistently):**
 
-When spawning any squad member to do work for commit-producing work, issue execution, adversarial review loops, and any work product another agent must consume, always use their named squad identity — never generic agents:
+When spawning any squad member to do work for commit-producing work, issue execution, adversarial review loops, and any work product another agent must consume, always use their named squad identity — preferrably as a named agent, where supported:
 
 1. **Read identity files first**: `.squad/agents/{name}/charter.md` (role + responsibilities) and `.squad/agents/{name}/history.md` (prior context). Also read `.squad/decisions.md` for relevant team decisions.
 2. **Set `name` to the cast name**: Use the lowercase squad member names.

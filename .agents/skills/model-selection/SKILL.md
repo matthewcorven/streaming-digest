@@ -56,6 +56,8 @@ Resolution is **first-match-wins** — the highest layer with a value wins.
 6. FALLBACK Layer 4: `claude-haiku-4.5`
 7. INCLUDE model in spawn acknowledgment: `🔧 {Name} ({resolved_model}) — {task}`
 
+The model name specified should be available from the model catalog. This is clear-cut in instances like "some-model-name". Sometimes, a model may be specified like "somefamily/some-model-name" and not be found verbatim in the model catalog; in that case, the model catalog should be searched for an identical match in a nested path, and if found, that model should be used. If no match is found, the spawn should fail with an error message indicating that the model is not available.
+
 ### When User Sets a Preference
 
 **Trigger phrases:** "always use X", "use X for everything", "switch to X", "default to X"
