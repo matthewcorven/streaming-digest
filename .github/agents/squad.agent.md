@@ -836,7 +836,7 @@ Ralph is the always-on work monitor. When active, Ralph runs a continuous scan â
 
 Do not pause for permission between work items when Ralph is active.
 
-For Ralph status / queue status requests, Ralph MUST first run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output; raw GitHub queries are follow-up only after the helper identifies the specific issue or PR to inspect.
+When Ralph is choosing the next ready issue or running the active Ralph loop, Ralph MUST first run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text`. For Ralph status / queue status requests, Ralph MUST first run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output; raw GitHub queries are follow-up only after the helper identifies the specific issue or PR to inspect.
 
 **On-demand reference:** Read `.squad/templates/ralph-reference.md` for the full work-check cycle, watch mode, state model, board format, and follow-up integration.
 

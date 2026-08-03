@@ -30,13 +30,13 @@ These are intent signals, not exact strings — match meaning, not words.
 
 When Ralph is active, run this check cycle after every batch of agent work completes (or immediately on activation):
 
-**Step 1 — Scan for work** (this helper is the canonical first command):
+**Step 1 — Scan for work** (this helper is the canonical first command when Ralph is choosing the next ready issue):
 
 ```bash
-python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status
+python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text
 ```
 
-**MUST / NEVER rule:** Ralph MUST use the helper above for Ralph status, queue status, and initial board scans. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output or ad hoc label filtering. Use targeted `gh issue view`, `gh pr view`, or `gh pr list` only after the helper identifies the specific issue or PR that needs follow-up.
+**MUST / NEVER rule:** Ralph MUST use `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text` when choosing the next ready issue in the active Ralph loop. For Ralph status or queue status requests, Ralph MUST use `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output or ad hoc label filtering. Use targeted `gh issue view`, `gh pr view`, or `gh pr list` only after the helper identifies the specific issue or PR that needs follow-up.
 
 **Step 2 — Categorize findings:**
 
