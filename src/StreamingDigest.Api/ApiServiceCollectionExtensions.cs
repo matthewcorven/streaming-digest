@@ -9,6 +9,7 @@ using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
+using StreamingDigest.Infrastructure;
 using StreamingDigest.Infrastructure.AudioToText;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
@@ -65,6 +66,7 @@ internal static class ApiServiceCollectionExtensions
         // Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
         // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
         services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), configuration));
+        services.AddSingleton<Application.IModelRuntimeClient>(sp => new OllamaModelRuntimeClient(sp.GetRequiredService<HttpClient>(), configuration));
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);
