@@ -21,3 +21,9 @@ Tank owns core API and pipeline execution paths.
 ## 2026-07-28 — PR #179 revision submitted for re-review (commit 80c983e)
 
 Submitted revision commit 80c983e on PR #179 ([Task 12.2] Implement vector search SQL) addressing prior review feedback. Re-reviewed independently by Morpheus; upgrade-path migration safety for legacy materialized view shape confirmed safe. **Verdict from Morpheus: ready for review.** PR approved for maintainer review; issue #25 now ready-for-review in Ralph's queue.
+
+## 2026-08-02 — Ralph cycle status (issue #199 / PR #228)
+
+- Branch `squad/199-model-runtime-client` reached maintainer-ready state after one revision cycle.
+- Morpheus first-pass feedback was applied in commit `aecce5d`; independent adversarial re-review approved the final artifact at 95%.
+- Coordinator later confirmed the initial `z-ai/glm-5.2` runtime was a spawn-schema footgun (`create_session.model` at top level); the fix is `kickoff.model`, not a Tank-specific routing problem.

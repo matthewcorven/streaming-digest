@@ -1,24 +1,32 @@
 ---
-updated_at: 2026-07-30T20:18:40.101-04:00
-focus_area: idle — board clear after Phase 11-12 completion
-active_issues: []
-completed_this_round: [22, 23, 28, 30, 31, 32]
+updated_at: 2026-08-03T21:30:00Z
+focus_area: Ralph cycle complete — PRs #228, #229, and #230 merged; feat/application-truth awaits final merge to main
+active_issues: [202, 203, 204, 211]
+completed_this_round: [199, 210, 212]
 ---
 
 # What We're Focused On
 
-Board is clear. Phase 11 (tail) and Phase 12 fully completed in this Ralph loop.
+Ralph cycle complete. Three PRs merged in sequence:
 
-## Completed This Loop
-- #22 [Task 11.6] recent-search storage & embeddings — Neo (`4f3e309`)
-- #23 [Task 11.7] video-cluster aggregate embeddings — Neo (`283d8bf`)
-- #28 [Task 12.5] cluster ranking & similarity percentages — Neo (`90426f7`)
-- #30 [Task 12.6] dashboard daily digest & pending-action inbox — Trinity (`191d4e6`)
-- #31 [Task 12.7] search recall evaluation harness — Switch (`8812621`)
-- #32 [Task 12.8] search latency measurement — Switch (`732669f`)
+- ✅ PR #228 (#199, WS-1 Model Runtime Client) — merged to `main` at `fdc14d9`
+- ✅ PR #229 (#210, A5 Whisper Runtime) — merged to `main` at `2db731e`
+- ✅ PR #230 (#212, A6 DB-backed Hybrid Search) — merged to `feat/application-truth` at `8590eb3`
 
-## In Flight
-- none
+## Review coverage recorded this cycle
 
-## Blocked
-- none
+- Morpheus: four review passes on PR #228 plus re-reviews of PR #229 and PR #230
+- Switch: independent second review of PR #228
+- Dozer: closed the G2 DI-lifetime blocker on PR #228
+- Neo: revised PR #230 per Morpheus's spec before final approval
+
+## Branch state
+
+- `feat/application-truth` is still ahead of/behind `main` and needs its final merge PR to land on `main`.
+
+## Next ready queue
+
+1. #202
+2. #203
+3. #204
+4. #211
