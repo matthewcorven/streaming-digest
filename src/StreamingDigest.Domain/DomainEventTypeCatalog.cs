@@ -23,6 +23,7 @@ public static class DomainEventTypeCatalog
     public const string EmbeddingReprocessFailed = "embedding_reprocess_failed";
     public const string NotificationDispatchOutcome = "notification_dispatch_outcome";
     public const string DigestAssembled = "digest_assembled";
+    public const string ModelReadinessDegraded = "model_readiness_degraded";
 
     public static IReadOnlyList<string> All { get; } =
     [
@@ -46,7 +47,8 @@ public static class DomainEventTypeCatalog
         EmbeddingReprocessCompleted,
         EmbeddingReprocessFailed,
         NotificationDispatchOutcome,
-        DigestAssembled
+        DigestAssembled,
+        ModelReadinessDegraded
     ];
 
     public static bool IsDefined(string? eventType)

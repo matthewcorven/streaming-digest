@@ -29,7 +29,8 @@ public sealed class DomainEventTypeCatalogTests
             DomainEventTypeCatalog.EmbeddingReprocessCompleted,
             DomainEventTypeCatalog.EmbeddingReprocessFailed,
             DomainEventTypeCatalog.NotificationDispatchOutcome,
-            DomainEventTypeCatalog.DigestAssembled
+            DomainEventTypeCatalog.DigestAssembled,
+            DomainEventTypeCatalog.ModelReadinessDegraded
         };
 
         Assert.Equal(expected, DomainEventTypeCatalog.All);

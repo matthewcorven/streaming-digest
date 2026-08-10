@@ -13,7 +13,12 @@ public static class TranscriptIngestionServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.AddScoped<ITranscriptIngestionService, TranscriptIngestionService>();
+        // WS-7 S6 (review Fix 3): construct via ActivatorUtilities so the optional
+        // IModelReadinessNotifier (and IModelReadinessGuard) are injected; both hosts
+        // already register them as singletons. A direct AddScoped<TImpl>() cannot
+        // supply the optional seam dependencies.
+        services.AddScoped<ITranscriptIngestionService>(sp =>
+            ActivatorUtilities.CreateInstance<TranscriptIngestionService>(sp));
         services.AddScoped<IYouTubeCaptionClient, StubYouTubeCaptionClient>();
         services.AddScoped<ITemporaryMediaManager, TemporaryMediaManager>();
         services.AddScoped<IVideoMediaSourceResolver, YtDlpVideoMediaSourceResolver>();

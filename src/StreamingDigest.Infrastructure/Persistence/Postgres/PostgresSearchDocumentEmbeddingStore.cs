@@ -4,6 +4,7 @@ using Npgsql;
 using Pgvector;
 using Pgvector.Npgsql;
 using StreamingDigest.Application;
+using StreamingDigest.Domain;
 
 namespace StreamingDigest.Infrastructure.Persistence;
 
@@ -11,8 +12,14 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly IEmbeddingService _embeddingService;
+    private readonly IModelReadinessGuard? _modelReadinessGuard;
+    private readonly IModelReadinessNotifier? _modelReadinessNotifier;
 
-    public PostgresSearchDocumentEmbeddingStore(string connectionString, IEmbeddingService embeddingService)
+    public PostgresSearchDocumentEmbeddingStore(
+        string connectionString,
+        IEmbeddingService embeddingService,
+        IModelReadinessGuard? modelReadinessGuard = null,
+        IModelReadinessNotifier? modelReadinessNotifier = null)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -20,6 +27,8 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         }
 
         _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
+        _modelReadinessGuard = modelReadinessGuard;
+        _modelReadinessNotifier = modelReadinessNotifier;
 
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.UseVector();
@@ -83,6 +92,13 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         var storedEmbeddings = new List<StoredSearchDocumentEmbedding>(candidates.Count);
         var affectedVideoIds = new HashSet<Guid>();
 
+        // WS-7 S1/S3: preflight the embedding model once per store operation. When the model is
+        // unready we persist the search documents and mark their embeddings 'pending' (deferred)
+        // instead of calling the runtime and throwing a 500-class error.
+        var embeddingReadiness = _modelReadinessGuard is null
+            ? null
+            : await _modelReadinessGuard.CheckAsync(RuntimeRole.Embedding, cancellationToken);
+
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -103,6 +119,27 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
             if (upsertedDocument.ShouldMarkClusterStale && upsertedDocument.ParentVideoId is Guid parentVideoId)
             {
                 affectedVideoIds.Add(parentVideoId);
+            }
+
+            if (embeddingReadiness is { IsReady: false })
+            {
+                // Defer: record a 'pending' embedding row so the document is searchable by text
+                // and the embedding can be backfilled when the model becomes ready.
+                _modelReadinessNotifier?.ReportDegraded(
+                    "S1",
+                    embeddingReadiness,
+                    "Search document embedding deferred (marked 'pending'); document remains text-searchable",
+                    entityType: "search_document",
+                    entityId: upsertedDocument.Id);
+                await UpsertDeferredEmbeddingAsync(
+                    connection,
+                    transaction,
+                    upsertedDocument.Id,
+                    document.ContentHash,
+                    embeddingReadiness,
+                    generatedByOperationId,
+                    cancellationToken);
+                continue;
             }
 
             if (!embeddingCache.TryGetValue(document.ContentHash, out var cachedEmbedding))
@@ -330,6 +367,68 @@ public sealed class PostgresSearchDocumentEmbeddingStore : ISearchDocumentEmbedd
         command.Parameters.AddWithValue("content_hash", contentHash);
         command.Parameters.AddWithValue("source_text_hash", embedding.SourceTextHash);
         command.Parameters.AddWithValue("embedding", embedding.Vector);
+        command.Parameters.AddWithValue("generated_by_operation_id", (object?)generatedByOperationId ?? DBNull.Value);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is Guid id
+            ? id
+            : throw new InvalidOperationException("PostgreSQL did not return an embedding id.");
+    }
+
+    private static async Task<Guid> UpsertDeferredEmbeddingAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid searchDocumentId,
+        string contentHash,
+        ModelReadiness readiness,
+        Guid? generatedByOperationId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO public.embeddings (
+                id,
+                search_document_id,
+                provider,
+                model,
+                dimensions,
+                content_hash,
+                source_text_hash,
+                embedding,
+                embedding_status,
+                error_summary,
+                generated_by_operation_id,
+                created_at
+            )
+            VALUES (
+                @id,
+                @search_document_id,
+                @provider,
+                @model,
+                0,
+                @content_hash,
+                @content_hash,
+                NULL,
+                'pending',
+                @error_summary,
+                @generated_by_operation_id,
+                CURRENT_TIMESTAMP
+            )
+            ON CONFLICT ON CONSTRAINT uq_embeddings_identity DO UPDATE SET
+                embedding_status = 'pending',
+                error_summary = EXCLUDED.error_summary,
+                generated_by_operation_id = EXCLUDED.generated_by_operation_id
+            RETURNING id;
+            """,
+            connection,
+            transaction);
+
+        command.Parameters.AddWithValue("id", Guid.NewGuid());
+        command.Parameters.AddWithValue("search_document_id", searchDocumentId);
+        command.Parameters.AddWithValue("provider", readiness.Provider);
+        command.Parameters.AddWithValue("model", readiness.ModelId);
+        command.Parameters.AddWithValue("content_hash", contentHash);
+        command.Parameters.AddWithValue("error_summary", $"deferred: {readiness.Reason}");
         command.Parameters.AddWithValue("generated_by_operation_id", (object?)generatedByOperationId ?? DBNull.Value);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
