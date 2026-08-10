@@ -58,6 +58,7 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<AppReadinessStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+        services.AddSingleton<Application.ModelRuntimeReconcileService>();
         services.AddSingleton<FirstUserSetupService>();
         // Verify rewrite (WS-4): the discovery service probes real runtimes (Ollama tags /
         // whisper /health) and persists truth to model_runtime_state + app_readiness_checks.

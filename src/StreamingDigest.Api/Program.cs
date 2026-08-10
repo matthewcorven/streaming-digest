@@ -121,6 +121,11 @@ if (databaseStatus.Connected)
 
     var modelRuntimeStateSchemaGuard = app.Services.GetRequiredService<IModelRuntimeStateSchemaGuard>();
     await modelRuntimeStateSchemaGuard.EnsureSchemaAsync(connectionString);
+
+    // WS-3 startup reconcile (S10): hydrate model_runtime_state from the runtime /api/tags so
+    // bootstrap-installed models show `ready` without a manual verify. Failures signal (log +
+    // Matrix) instead of silently degrading; startup never blocks on the runtime.
+    await ReconcileModelRuntimeStateAtStartupAsync(app, connectionString);
 }
 
 if (app.Environment.IsDevelopment())
@@ -154,5 +159,65 @@ app.MapNoteEndpoints();
 ApiRequestPipeline.MapReservedNotFoundFallbacks(app);
 app.MapFallbackToFile("index.html");
 app.Run();
+
+static async Task ReconcileModelRuntimeStateAtStartupAsync(WebApplication app, string connectionString)
+{
+    try
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        var reconcileService = scope.ServiceProvider.GetRequiredService<StreamingDigest.Application.ModelRuntimeReconcileService>();
+        var repository = scope.ServiceProvider.GetRequiredService<StreamingDigest.Application.Repositories.IModelRuntimeStateRepository>();
+
+        var result = await reconcileService.ReconcileAsync(repository);
+        if (!result.RuntimeReachable)
+        {
+            var message = $"API startup degraded: model runtime reconcile could not reach /api/tags ({result.ErrorSummary}). Models will not show ready until the runtime is reachable and the app restarts.";
+            app.Logger.LogWarning("{Message}", message);
+            await TrySignalStartupIssueAsync(app, scope.ServiceProvider, message);
+            return;
+        }
+
+        if (!result.Succeeded)
+        {
+            var message = $"API startup degraded: model runtime reconcile reached /api/tags but failed to persist state ({result.ErrorSummary}).";
+            app.Logger.LogWarning("{Message}", message);
+            await TrySignalStartupIssueAsync(app, scope.ServiceProvider, message);
+            return;
+        }
+
+        app.Logger.LogInformation(
+            "Model runtime startup reconcile completed: {PresentCount} present, {ReadyCount} marked ready, {InFlightCount} in-flight refreshed, {SkippedCount} skipped.",
+            result.PresentCount,
+            result.MarkedReadyCount,
+            result.RefreshedInFlightCount,
+            result.SkippedCount);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Model runtime startup reconcile failed unexpectedly; continuing startup.");
+    }
+}
+
+static async Task TrySignalStartupIssueAsync(WebApplication app, IServiceProvider serviceProvider, string message)
+{
+    try
+    {
+        var notificationClient = serviceProvider.GetService<StreamingDigest.MatrixNotifier.MatrixNotificationClient>();
+        if (notificationClient is null)
+        {
+            return;
+        }
+
+        var result = await notificationClient.SendTextMessageAsync(message);
+        if (!result.Success)
+        {
+            app.Logger.LogInformation("Startup dependency warning was not sent to Matrix: {Reason}", result.Message);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Startup dependency warning could not be sent to Matrix.");
+    }
+}
 
 public partial class Program;
