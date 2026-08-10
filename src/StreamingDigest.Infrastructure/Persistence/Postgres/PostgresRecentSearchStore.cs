@@ -18,6 +18,7 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
+    private readonly EmbeddingErrorSink _embeddingErrors = new();
 
     public PostgresRecentSearchStore(string connectionString, IEmbeddingService embeddingService)
     {
@@ -47,9 +48,22 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
         var searchedAt = DateTimeOffset.UtcNow;
         var filtersJson = SerializeFilters(filters);
         var contentHash = ComputeSha256(normalizedQuery);
-        var embedding = await _embeddingService.GenerateEmbeddingAsync(normalizedQuery, cancellationToken);
-        var vector = new Vector(embedding.Values.Select(static value => (float)value).ToArray());
         var recentSearchId = Guid.NewGuid();
+
+        // Interim model-readiness degrade (plan §6 D4 / WS-7): if the embedding service is
+        // unavailable, persist the recent search without a query embedding and let the
+        // ranking layer fall back to text-only. Never 500 because the model is down.
+        EmbeddingGenerationResult? embedding = null;
+        Vector? vector = null;
+        try
+        {
+            embedding = await _embeddingService.GenerateEmbeddingAsync(normalizedQuery, cancellationToken);
+            vector = new Vector(embedding.Values.Select(static value => (float)value).ToArray());
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _embeddingErrors.Record(ex);
+        }
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -64,16 +78,19 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
             filtersJson,
             cancellationToken);
 
-        await InsertSearchQueryEmbeddingAsync(
-            connection,
-            transaction,
-            Guid.NewGuid(),
-            recentSearchId,
-            embedding,
-            contentHash,
-            vector,
-            searchedAt,
-            cancellationToken);
+        if (embedding is not null && vector is not null)
+        {
+            await InsertSearchQueryEmbeddingAsync(
+                connection,
+                transaction,
+                Guid.NewGuid(),
+                recentSearchId,
+                embedding,
+                contentHash,
+                vector,
+                searchedAt,
+                cancellationToken);
+        }
 
         await transaction.CommitAsync(cancellationToken);
 
@@ -214,6 +231,41 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
         return counts;
     }
 
+    public async Task<StoredQueryEmbedding?> GetQueryEmbeddingAsync(
+        Guid recentSearchId,
+        CancellationToken cancellationToken = default)
+    {
+        if (recentSearchId == Guid.Empty)
+        {
+            return null;
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT provider, model, dimensions, embedding
+            FROM public.search_query_embeddings
+            WHERE recent_search_id = @recent_search_id
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1;
+            """,
+            connection);
+        command.Parameters.AddWithValue("recent_search_id", recentSearchId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var provider = reader.GetString(0);
+        var model = reader.GetString(1);
+        var dimensions = reader.GetInt32(2);
+        var vector = reader.GetFieldValue<Vector>(3);
+
+        return new StoredQueryEmbedding(provider, model, dimensions, vector.ToArray().Select(static value => (double)value).ToArray());
+    }
+
     public ValueTask DisposeAsync() => _dataSource.DisposeAsync();
 
     private static async Task InsertRecentSearchAsync(
@@ -327,5 +379,28 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Captures the most recent embedding-service failure so callers can observe degrade
+    /// events without crashing the search request. Kept intentionally lightweight until the
+    /// model-readiness guard (WS-7) replaces it.
+    /// </summary>
+    /// <remarks>
+    /// WS-7 handoff note: this sink is currently WRITE-ONLY — <see cref="Record"/> stores the
+    /// last exception but nothing reads it back yet. The degrade-to-text-only behavior itself
+    /// is correct (search never 500s when the model is down). When <c>IModelReadinessGuard</c>
+    /// (WS-7) lands, it should REPLACE this sink (surface degrade state through the guard)
+    /// rather than stack on top of it. See PR #230 Morpheus review Finding 4.
+    /// </remarks>
+    private sealed class EmbeddingErrorSink
+    {
+        private Exception? _lastError;
+
+        public void Record(Exception error)
+        {
+            ArgumentNullException.ThrowIfNull(error);
+            _lastError = error;
+        }
     }
 }
