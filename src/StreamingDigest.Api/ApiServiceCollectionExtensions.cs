@@ -58,6 +58,7 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<AppReadinessStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+        services.AddSingleton<Application.ModelRuntimeReconcileService>();
         services.AddSingleton<FirstUserSetupService>();
         services.AddSingleton<ModelDiscoveryService>();
         services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));

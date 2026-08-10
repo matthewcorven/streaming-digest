@@ -1,17 +1,11 @@
+using StreamingDigest.Application.Models;
 using StreamingDigest.Domain;
 
 namespace StreamingDigest.Infrastructure.Persistence;
 
 public sealed class ModelDiscoveryService
 {
-    private static readonly IReadOnlyList<ModelOptionDefinition> SupportedModels =
-    [
-        new("bge-m3", "embedding", "available", "BAAI bge-m3", ModelProvider.Ollama, RuntimeRole.Embedding, true, "ollama pull bge-m3", "/mnt/models/embedding"),
-        new("text-embedding-3-small", "embedding", "available", "OpenAI text-embedding-3-small", ModelProvider.OpenAI, RuntimeRole.Embedding, false, null, null),
-        new("llama3.1:8b", "llm", "available", "Llama 3.1 8B", ModelProvider.Ollama, RuntimeRole.LLM, true, "ollama pull llama3.1:8b", "/mnt/models/llm"),
-        new("qwen2.5:7b", "llm", "available", "Qwen 2.5 7B", ModelProvider.Ollama, RuntimeRole.LLM, true, "ollama pull qwen2.5:7b", "/mnt/models/llm"),
-        new("whisper", "audio", "available", "Whisper Base", ModelProvider.Whisper, RuntimeRole.Audio, false, null, null)
-    ];
+    private static readonly IReadOnlyList<ModelOptionDefinition> SupportedModels = ModelCatalog.SupportedModels;
 
     private readonly AppReadinessStateService _readinessStateService;
 
@@ -110,17 +104,6 @@ public sealed class ModelDiscoveryService
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
-
-public sealed record ModelOptionDefinition(
-    string Id,
-    string Family,
-    string Status,
-    string Label,
-    ModelProvider Provider,
-    RuntimeRole RuntimeRole,
-    bool Downloadable,
-    string? InstallCommand = null,
-    string? MountPath = null);
 
 public sealed record ModelDownloadResult(string Status, string ModelKind, string ModelId, Guid OperationId, string StatusUrl);
 
