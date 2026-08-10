@@ -7,6 +7,7 @@ using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Application.Models;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
@@ -65,6 +66,8 @@ internal static class ApiServiceCollectionExtensions
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
         services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), sp.GetRequiredService<IConfiguration>()));
         services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
+        // Single in-process broadcaster shared by every publisher and SSE subscriber.
+        services.AddSingleton<IModelLifecycleEventBroadcaster, ModelLifecycleEventBroadcaster>();
         services.AddSingleton<Application.ModelRuntimeReconcileService>();
         // WS-5: durable operation persistence for the model download handoff.
         services.AddSingleton<IOperationStore>(sp => new PostgresOperationStore(connectionString));
