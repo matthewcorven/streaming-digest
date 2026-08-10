@@ -60,7 +60,17 @@ internal static class ApiServiceCollectionExtensions
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
         services.AddSingleton<Application.ModelRuntimeReconcileService>();
         services.AddSingleton<FirstUserSetupService>();
-        services.AddSingleton<ModelDiscoveryService>();
+        // Verify rewrite (WS-4): the discovery service probes real runtimes (Ollama tags /
+        // whisper /health) and persists truth to model_runtime_state + app_readiness_checks.
+        // The runtime state repository is stateless (constructed from the connection string),
+        // so it is safe to construct directly inside this singleton factory — resolving the
+        // scoped IModelRuntimeStateRepository here would fail from the root provider.
+        services.AddSingleton<ModelDiscoveryService>(sp => new ModelDiscoveryService(
+            sp.GetRequiredService<AppReadinessStateService>(),
+            sp.GetService<Application.IModelRuntimeClient>(),
+            new PostgresModelRuntimeStateRepository(connectionString),
+            sp.GetService<IAudioToTextProvider>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<ModelDiscoveryService>>()));
         services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
         services.AddSingleton<ISearchCorpusSearcher>(sp => new PostgresSearchCorpusSearcher(connectionString));
         services.AddSingleton<SearchUiService>(sp => new SearchUiService(
