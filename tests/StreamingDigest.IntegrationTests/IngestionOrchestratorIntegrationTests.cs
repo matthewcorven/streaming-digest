@@ -239,7 +239,7 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
                 new ApplicationConfiguration(),
                 NullLogger<MetadataAdapterSelector>.Instance));
 
-        services.AddSingleton<IModelReadinessGuard, InterimModelReadinessGuard>();
+        services.AddSingleton<StreamingDigest.Application.Orchestration.IModelReadinessGuard, InterimModelReadinessGuard>();
         services.AddSingleton<IVideoLinkExtractionService, VideoLinkExtractionService>();
         services.AddSingleton<AuthorChapterSegmentationService>();
         services.AddSingleton<IRepositoryMetadataService>(_ =>

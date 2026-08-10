@@ -23,6 +23,7 @@ public static class DomainEventTypeCatalog
     public const string EmbeddingReprocessFailed = "embedding_reprocess_failed";
     public const string NotificationDispatchOutcome = "notification_dispatch_outcome";
     public const string DigestAssembled = "digest_assembled";
+    public const string ModelReadinessDegraded = "model_readiness_degraded";
     public const string ModelCapabilityUnready = "model_capability_unready";
     public const string StageFallbackApplied = "stage_fallback_applied";
     public const string IngestionStageFailed = "ingestion_stage_failed";
@@ -50,6 +51,7 @@ public static class DomainEventTypeCatalog
         EmbeddingReprocessFailed,
         NotificationDispatchOutcome,
         DigestAssembled,
+        ModelReadinessDegraded,
         ModelCapabilityUnready,
         StageFallbackApplied,
         IngestionStageFailed

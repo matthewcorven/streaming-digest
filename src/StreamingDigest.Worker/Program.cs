@@ -27,6 +27,11 @@ using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
 using StreamingDigest.Worker.Scraping;
+// Two distinct readiness-guard seams share the name IModelReadinessGuard: the WS-7 runtime
+// seam guard (StreamingDigest.Application, CheckAsync over RuntimeRole) and the A2 ingestion
+// pipeline preflight seam (StreamingDigest.Application.Orchestration, IsReadyAsync over a
+// capability string). Alias the WS-7 one; unqualified references resolve to Orchestration.
+using RuntimeModelReadinessGuard = StreamingDigest.Application.IModelReadinessGuard;
 
 var builder = Host.CreateApplicationBuilder(args);
 var scraperStartupDependency = ResolveScraperStartupDependency(builder.Configuration["Scraper:BaseUrl"]);
@@ -132,6 +137,23 @@ builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNp
 builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
 builder.Services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+// WS-5: model download execution pipeline. The Hangfire job (ModelDownloadJob) hands commands
+// to the bounded channel; the hosted service is the single reader, enforcing pull concurrency 1.
+builder.Services.AddSingleton<IOperationStore>(sp => new PostgresOperationStore(connectionString));
+builder.Services.AddSingleton<AppReadinessStateService>();
+builder.Services.AddSingleton<StreamingDigest.Worker.ModelDownload.ChannelModelDownloadQueue>();
+builder.Services.AddSingleton<StreamingDigest.Worker.ModelDownload.ModelDownloadJob>();
+builder.Services.AddHostedService(sp => new StreamingDigest.Worker.ModelDownload.ModelDownloadHostedService(
+    sp.GetRequiredService<StreamingDigest.Worker.ModelDownload.ChannelModelDownloadQueue>(),
+    sp.GetRequiredService<IModelRuntimeClient>(),
+    new PostgresModelRuntimeStateRepository(connectionString),
+    sp.GetRequiredService<IOperationStore>(),
+    sp.GetRequiredService<AppReadinessStateService>(),
+    connectionString,
+    sp,
+    sp.GetRequiredService<ILogger<StreamingDigest.Worker.ModelDownload.ModelDownloadHostedService>>()));
+builder.Services.AddSingleton<RuntimeModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), builder.Configuration));
+builder.Services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
@@ -153,20 +175,25 @@ builder.Services.AddHttpClient("ollama-runtime")
 // with SetHandlerLifetime so DNS refreshes for containerized Ollama.
 builder.Services.AddTransient<IModelRuntimeClient>(sp =>
     new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>(), builder.Configuration));
+builder.Services.AddSingleton<ModelRuntimeReconcileService>();
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
-builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<RuntimeModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
 builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
 builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
 builder.Services.AddScoped<ILinkClassificationService, LinkClassificationService>(sp =>
     new LinkClassificationService(
         sp.GetService<MeaiChatClientWrapper>(),
-        sp.GetRequiredService<ILogger<LinkClassificationService>>()));
-builder.Services.AddScoped(sp => ActivatorUtilities.CreateInstance<DeterministicTranscriptChunkingService>(
-    sp,
-    sp.GetService<MeaiChatClientWrapper>()));
+        sp.GetRequiredService<ILogger<LinkClassificationService>>(),
+        sp.GetService<RuntimeModelReadinessGuard>(),
+        sp.GetService<IModelReadinessNotifier>()));
+builder.Services.AddScoped(sp => new DeterministicTranscriptChunkingService(
+    sp.GetService<MeaiChatClientWrapper>(),
+    sp.GetService<ILogger<DeterministicTranscriptChunkingService>>(),
+    sp.GetService<RuntimeModelReadinessGuard>(),
+    sp.GetService<IModelReadinessNotifier>()));
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {
@@ -229,7 +256,7 @@ builder.Services.AddSingleton<IMetadataAdapterSelector>(sp =>
 
 // ── Ingestion Orchestrator + Stage Handlers (App A2, #211) ───────────────────────
 builder.Services.AddScoped<IChannelRepository, ChannelRepository>();
-builder.Services.AddSingleton<IModelReadinessGuard, InterimModelReadinessGuard>();
+builder.Services.AddSingleton<StreamingDigest.Application.Orchestration.IModelReadinessGuard, InterimModelReadinessGuard>();
 builder.Services.AddSingleton<IVideoLinkExtractionService, VideoLinkExtractionService>();
 builder.Services.AddSingleton<AuthorChapterSegmentationService>();
 builder.Services.AddSingleton<IRepositoryMetadataService>(sp =>
@@ -298,6 +325,11 @@ else
 
 var modelRuntimeStateSchemaGuard = host.Services.GetRequiredService<IModelRuntimeStateSchemaGuard>();
 await modelRuntimeStateSchemaGuard.EnsureSchemaAsync(connectionString);
+
+// WS-3 startup reconcile (S10): hydrate model_runtime_state from the runtime /api/tags so
+// bootstrap-installed models show `ready` without a manual verify. Failures signal instead of
+// silently degrading; startup never blocks on the runtime.
+await ReconcileModelRuntimeStateAtStartupAsync(startupLogger, startupServiceScope.ServiceProvider);
 
 await host.RunAsync();
 
@@ -394,6 +426,48 @@ static ScraperStartupDependency ResolveScraperStartupDependency(string? configur
     }
 
     return new ScraperStartupDependency(baseUri, configuredBaseUrl, null);
+}
+
+static async Task ReconcileModelRuntimeStateAtStartupAsync(ILogger logger, IServiceProvider serviceProvider)
+{
+    try
+    {
+        var reconcileService = serviceProvider.GetRequiredService<ModelRuntimeReconcileService>();
+        var repository = serviceProvider.GetRequiredService<IModelRuntimeStateRepository>();
+
+        var result = await reconcileService.ReconcileAsync(repository);
+        if (!result.RuntimeReachable)
+        {
+            await SignalStartupDependencyIssueAsync(
+                logger,
+                serviceProvider,
+                $"Worker startup degraded: model runtime reconcile could not reach /api/tags ({result.ErrorSummary}). Models will not show ready until the runtime is reachable and the worker restarts.");
+            return;
+        }
+
+        if (!result.Succeeded)
+        {
+            await SignalStartupDependencyIssueAsync(
+                logger,
+                serviceProvider,
+                $"Worker startup degraded: model runtime reconcile reached /api/tags but failed to persist state ({result.ErrorSummary}).");
+            return;
+        }
+
+        logger.LogInformation(
+            "Model runtime startup reconcile completed: {PresentCount} present, {ReadyCount} marked ready, {InFlightCount} in-flight refreshed, {SkippedCount} skipped.",
+            result.PresentCount,
+            result.MarkedReadyCount,
+            result.RefreshedInFlightCount,
+            result.SkippedCount);
+    }
+    catch (Exception ex)
+    {
+        await SignalStartupDependencyIssueAsync(
+            logger,
+            serviceProvider,
+            $"Worker startup degraded: model runtime reconcile failed unexpectedly ({ex.Message}).");
+    }
 }
 
 static async Task SignalStartupDependencyIssueAsync(

@@ -879,6 +879,10 @@ Canonical `event_type` values (the code-level catalog lives in `src/StreamingDig
 - `embedding_reprocess_failed`
 - `notification_dispatch_outcome`
 - `digest_assembled`
+- `model_readiness_degraded`
+
+`model_readiness_degraded` is emitted by the WS-7 seam guards (S1–S7) when a runtime seam degrades because its model is missing or unready; the payload identifies the seam, the model provider/id, the readiness status, and the user-visible action taken.
+
 - `model_capability_unready`
 - `stage_fallback_applied`
 - `ingestion_stage_failed`

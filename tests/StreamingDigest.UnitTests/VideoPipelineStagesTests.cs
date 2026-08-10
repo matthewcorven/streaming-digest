@@ -5,6 +5,8 @@ using StreamingDigest.Application.Orchestration;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
 
+using IModelReadinessGuard = StreamingDigest.Application.Orchestration.IModelReadinessGuard;
+
 namespace StreamingDigest.UnitTests;
 
 public sealed class VideoPipelineStagesTests
