@@ -43,4 +43,10 @@ public sealed record ChannelIngestionRequest
 
     /// <summary>Max videos processed concurrently within this run (bounded concurrency).</summary>
     public int MaxVideoConcurrency { get; init; } = 2;
+
+    /// <summary>
+    /// Optional Matrix room or notification target to route the digest notification to.
+    /// When <c>null</c>, the dispatch service uses its configured default target.
+    /// </summary>
+    public string? NotificationTarget { get; init; }
 }

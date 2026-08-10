@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using StreamingDigest.Application.Orchestration;
 using StreamingDigest.Domain;
 using StreamingDigest.MatrixNotifier;
 
@@ -7,7 +8,7 @@ namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;
 public sealed class DigestAssemblyService(
     StreamingDigestDbContext context,
     IMatrixNotificationService? notificationService = null,
-    INotificationDispatchService? notificationDispatchService = null)
+    INotificationDispatchService? notificationDispatchService = null) : IDigestAssemblyService
 {
     public async Task<Digest> AssembleAndPersistAsync(DigestAssemblyRequest request, CancellationToken cancellationToken = default)
     {
@@ -71,21 +72,4 @@ public sealed class DigestAssemblyService(
             IsBackfillRun = request.IsBackfillRun
         };
     }
-}
-
-public sealed class DigestAssemblyRequest
-{
-    public Guid IngestionRunId { get; init; }
-    public Guid? OperationId { get; init; }
-    public string RunType { get; init; } = "standard";
-    public string? NotificationTarget { get; init; }
-    public IReadOnlyCollection<DigestItem> NewVideos { get; init; } = Array.Empty<DigestItem>();
-    public IReadOnlyCollection<DigestResource> NewResources { get; init; } = Array.Empty<DigestResource>();
-    public IReadOnlyCollection<HighSignalMatch> HighSignalMatches { get; init; } = Array.Empty<HighSignalMatch>();
-    public IReadOnlyCollection<DigestItem> FailedItems { get; init; } = Array.Empty<DigestItem>();
-    public IReadOnlyCollection<DigestItem> SkippedItems { get; init; } = Array.Empty<DigestItem>();
-    public IReadOnlyCollection<ActiveDeferment> ActiveDeferments { get; init; } = Array.Empty<ActiveDeferment>();
-    public bool IsEmbeddingTransitionActive { get; init; }
-    public bool IsBackfillRun { get; init; }
-    public double HighSignalThresholdPercent { get; init; } = 70d;
 }

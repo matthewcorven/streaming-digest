@@ -213,6 +213,7 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+builder.Services.AddScoped<IDigestAssemblyService, DigestAssemblyService>();
 builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
 builder.Services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
 builder.Services.AddScoped<IIngestionItemRepository, IngestionItemRepository>();

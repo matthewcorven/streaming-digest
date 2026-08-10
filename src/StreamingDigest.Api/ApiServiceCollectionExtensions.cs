@@ -123,6 +123,7 @@ internal static class ApiServiceCollectionExtensions
             sp.GetService<IAudioToTextProvider>(),
             sp.GetService<IModelReadinessGuard>()));
         services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+        services.AddScoped<StreamingDigest.Application.Orchestration.IDigestAssemblyService, DigestAssemblyService>();
         services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
         services.AddScoped<IChannelRepository, ChannelRepository>();
         services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();

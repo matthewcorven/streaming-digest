@@ -214,6 +214,55 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
         Assert.Equal(new[] { 1, 2 }, generations.Select(g => g.GenerationVersion).ToArray());
     }
 
+    // ── A8: Digest assembly + notification outbox on run completion ───────────────
+
+    [Fact(Skip = "Requires PostgreSQL infrastructure; runs locally only")]
+    public async Task RunChannelIngestion_assembles_digest_and_enqueues_outbox_on_completion()
+    {
+        var channelId = Guid.NewGuid();
+        await using (var seed = new StreamingDigestDbContext(_options!))
+        {
+            seed.Channels.Add(new Channel
+            {
+                Id = channelId,
+                YoutubeChannelId = "UC_a8_digest_test",
+                NameOriginal = "A8 Digest Channel",
+                ProfileUrl = "https://www.youtube.com/channel/UC_a8_digest_test",
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        const string youtubeVideoId = "a8digestvid1";
+        var (services, _, _) = BuildServiceProvider(youtubeVideoId);
+
+        var orchestrator = services.GetRequiredService<IIngestionOrchestrator>();
+        var run = await orchestrator.RunChannelIngestionAsync(
+            new ChannelIngestionRequest { ChannelId = channelId, RunType = "manual", TriggeredBy = "integration-test" });
+
+        Assert.Equal("completed", run.Status);
+
+        await using var db = new StreamingDigestDbContext(_options!);
+
+        // A8: Digest is assembled and stored.
+        var digest = await db.Digests.SingleAsync(d => d.IngestionRunId == run.Id);
+        Assert.Equal(run.Id, digest.IngestionRunId);
+        Assert.Equal("manual", digest.RunType);
+
+        var payload = StreamingDigest.Domain.DigestPayloadSerializer.Deserialize(digest.PayloadJson);
+        Assert.Single(payload.NewVideos);
+        Assert.Equal(youtubeVideoId, payload.NewVideos[0].Id);
+        Assert.Empty(payload.FailedItems);
+
+        // A8: Notification outbox is enqueued (no Matrix service configured → remains pending).
+        var outbox = await db.OutboxMessages.SingleAsync(m => m.AggregateType == "Notification");
+        Assert.NotNull(outbox);
+        Assert.Equal("matrix_notification", outbox.MessageType);
+
+        var notification = await db.Notifications.SingleAsync();
+        Assert.Equal(run.Id, notification.IngestionRunId);
+        Assert.Equal("matrix", notification.Provider);
+    }
+
     // ── Composition root ─────────────────────────────────────────────────────────
 
     private (ServiceProvider Services, LogCapture Capture, StreamingDigestDbContext SeedDb) BuildServiceProvider(string youtubeVideoId)
@@ -265,6 +314,8 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
         services.AddScoped<IVideoStageHandler, WebsitesStageHandler>();
         services.AddScoped<IVideoStageHandler, EmbeddingsStageHandler>();
         services.AddScoped<VideoPipelineProcessor>();
+        services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+        services.AddScoped<StreamingDigest.Application.Orchestration.IDigestAssemblyService, DigestAssemblyService>();
         services.AddScoped<IIngestionOrchestrator, IngestionOrchestrator>();
 
         return (services.BuildServiceProvider(), capture, new StreamingDigestDbContext(_options!));

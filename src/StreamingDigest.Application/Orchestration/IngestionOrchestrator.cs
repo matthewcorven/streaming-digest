@@ -13,6 +13,8 @@ namespace StreamingDigest.Application.Orchestration;
 /// active metadata adapter, filters by long-form + max-age, applies the idempotency guard,
 /// persists the run + queued items, then executes the per-video guarded pipeline (§5.2)
 /// with bounded concurrency and finalizes run counters + terminal status.
+/// After the run reaches a terminal state, drives <see cref="IDigestAssemblyService"/> to
+/// assemble + store the run-scoped Digest and enqueue the notification outbox (A8, §4.7).
 /// </summary>
 /// <remarks>
 /// The orchestrator's own DbContext is used only for discovery / run bookkeeping. Each
@@ -27,6 +29,7 @@ public sealed class IngestionOrchestrator(
     IMetadataAdapterSelector metadataAdapters,
     ApplicationConfiguration configuration,
     IServiceScopeFactory scopeFactory,
+    IDigestAssemblyService? digestAssemblyService = null,
     ILogger<IngestionOrchestrator>? logger = null) : IIngestionOrchestrator
 {
     /// <inheritdoc />
@@ -137,7 +140,11 @@ public sealed class IngestionOrchestrator(
             var terminal = run.VideosFailed > 0
                 ? "completed_with_warnings"
                 : "completed";
-            return await CompleteRunAsync(run, terminal, null, cancellationToken);
+            var completedRun = await CompleteRunAsync(run, terminal, null, cancellationToken);
+
+            await AssembleDigestBestEffortAsync(completedRun, request, outcomes, newVideos, cancellationToken);
+
+            return completedRun;
         }
         catch (OperationCanceledException)
         {
@@ -157,9 +164,9 @@ public sealed class IngestionOrchestrator(
         Failed,
     }
 
-    private sealed record VideoRunResult(VideoOutcome Outcome, bool HasTranscript, int RepositoryCount)
+    private sealed record VideoRunResult(VideoOutcome Outcome, bool HasTranscript, int RepositoryCount, Video Video)
     {
-        public static readonly VideoRunResult FailedResult = new(VideoOutcome.Failed, false, 0);
+        public static VideoRunResult FailedResult(Video video) => new(VideoOutcome.Failed, false, 0, video);
     }
 
     private async Task<VideoRunResult> ProcessOneVideoAsync(
@@ -201,7 +208,7 @@ public sealed class IngestionOrchestrator(
                 outcome != VideoOutcome.Failed,
                 context.ScreenshotOutcome,
                 cancellationToken);
-            return new VideoRunResult(outcome, context.Transcript is not null, context.Repositories.Count);
+            return new VideoRunResult(outcome, context.Transcript is not null, context.Repositories.Count, video);
         }
         catch (OperationCanceledException)
         {
@@ -211,7 +218,7 @@ public sealed class IngestionOrchestrator(
         {
             logger?.LogError(ex, "Video pipeline failed for video {VideoId}", video.Id);
             await CompensateFailedVideoAsync(video, item, run, ex, cancellationToken);
-            return VideoRunResult.FailedResult;
+            return VideoRunResult.FailedResult(video);
         }
         finally
         {
@@ -295,6 +302,55 @@ public sealed class IngestionOrchestrator(
         // without the YouTube API adapter this run resolves no new videos. Tracked as a
         // follow-up — the pipeline below is adapter-agnostic once candidates exist.
         return [];
+    }
+
+    private async Task AssembleDigestBestEffortAsync(
+        IngestionRun run,
+        ChannelIngestionRequest request,
+        VideoRunResult[] outcomes,
+        List<Video> processedVideos,
+        CancellationToken cancellationToken)
+    {
+        if (digestAssemblyService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var successVideos = outcomes
+                .Where(o => o.Outcome is VideoOutcome.Processed or VideoOutcome.ProcessedWithWarnings)
+                .Select(o => new DigestItem { Id = o.Video.YoutubeVideoId, Label = o.Video.DisplayTitle })
+                .ToArray();
+
+            var failedVideos = outcomes
+                .Where(o => o.Outcome == VideoOutcome.Failed)
+                .Select(o => new DigestItem { Id = o.Video.YoutubeVideoId, Label = o.Video.DisplayTitle })
+                .ToArray();
+
+            var digestRequest = new DigestAssemblyRequest
+            {
+                IngestionRunId = run.Id,
+                OperationId = request.OperationId,
+                RunType = run.RunType,
+                NotificationTarget = request.NotificationTarget,
+                NewVideos = successVideos,
+                FailedItems = failedVideos,
+                IsBackfillRun = string.Equals(run.RunType, "backfill", StringComparison.OrdinalIgnoreCase),
+            };
+
+            await digestAssemblyService.AssembleAndPersistAsync(digestRequest, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Digest assembly is post-run best-effort; a failure must not retroactively
+            // fail an otherwise successful ingestion run.
+            logger?.LogError(ex, "Digest assembly failed for run {RunId}; run status is unchanged", run.Id);
+        }
     }
 
     private async Task<IngestionRun> CompleteRunAsync(
