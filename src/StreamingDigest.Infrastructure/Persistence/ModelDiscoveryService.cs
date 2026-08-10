@@ -34,15 +34,20 @@ public sealed class ModelDiscoveryService
 
     public IReadOnlyList<ModelOptionDefinition> GetSupportedModels() => SupportedModels.ToList();
 
-    public async Task<ModelDownloadResult> QueueDownloadAsync(string connectionString, string? modelKind, string? modelId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Resolves a catalog model for a download request, rejecting anything that is not a
+    /// downloadable Ollama model. Kept side-effect free; durable persistence and enqueueing
+    /// happen in the API endpoint before it returns 202 (WS-5).
+    /// </summary>
+    public ModelOptionDefinition ResolveDownloadableModel(string? modelKind, string? modelId)
     {
         var model = ResolveModel(modelKind, modelId);
-        var operationId = Guid.NewGuid();
-        var statusUrl = $"/api/admin/operations/{operationId}";
+        if (!model.Downloadable || model.Provider != ModelProvider.Ollama)
+        {
+            throw new ArgumentException($"The requested model '{model.Id}' is verify-only and cannot be downloaded.", nameof(modelId));
+        }
 
-        await RecordReadinessVerificationAsync(connectionString, model, cancellationToken, "queued");
-
-        return new ModelDownloadResult("queued", model.Family, model.Id, operationId, statusUrl);
+        return model;
     }
 
     /// <summary>
@@ -229,10 +234,22 @@ public sealed class ModelDiscoveryService
         if (!string.IsNullOrWhiteSpace(normalizedModelId))
         {
             var byId = SupportedModels.FirstOrDefault(model => string.Equals(model.Id, normalizedModelId, StringComparison.OrdinalIgnoreCase));
-            if (byId is not null && (normalizedKind is null || string.Equals(byId.Family, normalizedKind, StringComparison.OrdinalIgnoreCase)))
+            if (byId is not null)
             {
+                // Exact-ID wins over kind; a mismatched kind is a caller error, not a silent
+                // substitution (reconciles #234's ID-first change with WS-5's strictness).
+                if (!string.IsNullOrWhiteSpace(normalizedKind)
+                    && !string.Equals(byId.Family, normalizedKind, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException(
+                        $"The requested model '{normalizedModelId}' does not belong to the '{normalizedKind}' model kind.",
+                        nameof(modelId));
+                }
+
                 return byId;
             }
+
+            throw new ArgumentException($"The requested model '{normalizedModelId}' is not currently supported.", nameof(modelId));
         }
 
         if (!string.IsNullOrWhiteSpace(normalizedKind))
@@ -247,45 +264,6 @@ public sealed class ModelDiscoveryService
         throw new ArgumentException($"The requested model '{modelId ?? "(null)"}' is not currently supported.", nameof(modelId));
     }
 
-    private async Task RecordReadinessVerificationAsync(string connectionString, ModelOptionDefinition model, CancellationToken cancellationToken, string status)
-    {
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
-
-        var stepKey = ResolveReadinessStepKey(model);
-
-        try
-        {
-            await _readinessStateService.VerifyStepAsync(
-                connectionString,
-                stepKey,
-                new OnboardingStepVerificationRequest(
-                    status,
-                    null,
-                    new Dictionary<string, object?>
-                    {
-                        ["provider"] = model.Provider.ToString().ToLowerInvariant(),
-                        ["modelId"] = model.Id,
-                        ["modelKind"] = model.Family,
-                        ["modelLabel"] = model.Label,
-                        ["requestedAt"] = DateTimeOffset.UtcNow
-                    }),
-                cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            // Best-effort onboarding state updates are not required for the model discovery flow to
-            // proceed, but per the 2026-08-01 directive we signal rather than silently degrade.
-            _logger?.LogWarning(
-                ex,
-                "Readiness verification for step {StepKey} failed while queueing model {ModelId}; app_readiness_checks was not updated.",
-                stepKey,
-                model.Id);
-        }
-    }
-
     private static string ResolveReadinessStepKey(ModelOptionDefinition model) => model.Family switch
     {
         "embedding" => "embedding_model_verified",
@@ -298,7 +276,5 @@ public sealed class ModelDiscoveryService
 
     private sealed record ModelProbeResult(bool Verified, bool PresentInRuntime, string Message, string? ProbeKind = null);
 }
-
-public sealed record ModelDownloadResult(string Status, string ModelKind, string ModelId, Guid OperationId, string StatusUrl);
 
 public sealed record ModelVerificationResult(string Status, string ModelKind, string ModelId, bool Verified, string Message);

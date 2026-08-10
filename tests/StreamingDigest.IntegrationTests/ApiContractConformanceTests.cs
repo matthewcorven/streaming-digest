@@ -3,10 +3,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using StreamingDigest.Infrastructure.Persistence;
 using Xunit.Abstractions;
@@ -147,6 +149,69 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         Assert.Equal("queued", downloadPayload.Status);
         Assert.Equal("llm", downloadPayload.ModelKind);
         Assert.Equal("llama3.1:8b", downloadPayload.ModelId);
+
+        // WS-5 durable handoff: the operation row and model_runtime_state=queued row must
+        // exist (with a hangfire_job_id) before the API returned 202.
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await using var operationCommand = new NpgsqlCommand(
+            "SELECT status, operation_type, hangfire_job_id FROM public.operations WHERE id = @id",
+            connection);
+        operationCommand.Parameters.AddWithValue("id", downloadPayload.OperationId);
+        await using (var reader = await operationCommand.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync(), "Expected a persisted operations row for the download.");
+            Assert.Equal("queued", reader.GetString(0));
+            Assert.Equal("model.download", reader.GetString(1));
+            Assert.False(reader.IsDBNull(2));
+            Assert.False(string.IsNullOrWhiteSpace(reader.GetString(2)));
+        }
+
+        await using var stateCommand = new NpgsqlCommand(
+            "SELECT status, current_operation_id FROM public.model_runtime_state WHERE provider = 'ollama' AND model_id = 'llama3.1:8b'",
+            connection);
+        await using (var reader = await stateCommand.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync(), "Expected a persisted model_runtime_state row for the download.");
+            Assert.Equal("queued", reader.GetString(0));
+            Assert.Equal(downloadPayload.OperationId, reader.GetGuid(1));
+        }
+    }
+
+    [Fact]
+    public async Task ModelDownloadEndpoint_RejectsVerifyOnlyModels()
+    {
+        using var client = CreateClient();
+        using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        Assert.True(loginResponse.IsSuccessStatusCode);
+
+        using var downloadRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
+        downloadRequest.Content = JsonContent.Create(new { modelKind = "embedding", modelId = "text-embedding-3-small" });
+        using var downloadResponse = await client.SendAsync(downloadRequest);
+
+        Assert.Equal(HttpStatusCode.BadRequest, downloadResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ModelDownloadEndpoint_Returns503_WhenHangfireStorageIsInMemory()
+    {
+        // WS-5 durable handoff: when the API cannot reach Postgres for Hangfire storage it must
+        // refuse the download with 503 rather than return an optimistic 202 whose job can never
+        // execute (the API process runs no Hangfire server). Simulate by overriding the DI
+        // JobStorage with MemoryStorage for this host only.
+        using var factory = new ContractConformanceWebApplicationFactory(_connectionString!, useMemoryHangfireStorage: true);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        Assert.True(loginResponse.IsSuccessStatusCode);
+
+        using var downloadRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
+        downloadRequest.Content = JsonContent.Create(new { modelKind = "llm", modelId = "llama3.1:8b" });
+        using var downloadResponse = await client.SendAsync(downloadRequest);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, downloadResponse.StatusCode);
+        var problem = await downloadResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Download handoff unavailable", problem.GetProperty("title").GetString());
     }
 
     [Fact]
@@ -351,7 +416,7 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         return port;
     }
 
-    private sealed class ContractConformanceWebApplicationFactory(string connectionString) : WebApplicationFactory<Program>
+    private sealed class ContractConformanceWebApplicationFactory(string connectionString, bool useMemoryHangfireStorage = false) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -368,6 +433,20 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
                     ["BOOTSTRAP_ADMIN_PASSWORD"] = BootstrapPassword
                 });
             });
+            if (useMemoryHangfireStorage)
+            {
+                builder.ConfigureServices(services =>
+                {
+                    // Replace ALL JobStorage registrations (Hangfire's + the app's explicit one)
+                    // with in-memory storage so the endpoint's degraded-mode guard is exercised.
+                    var descriptors = services.Where(d => d.ServiceType == typeof(Hangfire.JobStorage)).ToList();
+                    foreach (var descriptor in descriptors)
+                    {
+                        services.Remove(descriptor);
+                    }
+                    services.AddSingleton<Hangfire.JobStorage>(new Hangfire.MemoryStorage.MemoryStorage());
+                });
+            }
         }
     }
 
@@ -502,6 +581,8 @@ public sealed class ModelDownloadResponse
     public string? Status { get; set; }
     public string? ModelKind { get; set; }
     public string? ModelId { get; set; }
+    public Guid OperationId { get; set; }
+    public string? StatusUrl { get; set; }
 }
 
 public sealed class ModelVerificationResponse

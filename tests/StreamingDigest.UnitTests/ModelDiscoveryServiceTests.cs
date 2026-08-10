@@ -10,15 +10,24 @@ namespace StreamingDigest.UnitTests;
 public sealed class ModelDiscoveryServiceTests
 {
     [Fact]
-    public async Task QueueDownloadAsync_UsesAdminOperationStatusUrl()
+    public void ResolveDownloadableModel_ReturnsOllamaModel()
     {
         var service = new ModelDiscoveryService(new AppReadinessStateService());
 
-        var result = await service.QueueDownloadAsync(string.Empty, "embedding", "bge-m3");
+        var model = service.ResolveDownloadableModel("embedding", "bge-m3");
 
-        Assert.Equal("queued", result.Status);
-        Assert.StartsWith("/api/admin/operations/", result.StatusUrl, StringComparison.Ordinal);
-        Assert.EndsWith(result.OperationId.ToString(), result.StatusUrl, StringComparison.Ordinal);
+        Assert.Equal("bge-m3", model.Id);
+        Assert.Equal(ModelProvider.Ollama, model.Provider);
+        Assert.True(model.Downloadable);
+    }
+
+    [Fact]
+    public void ResolveDownloadableModel_RejectsVerifyOnlyModels()
+    {
+        var service = new ModelDiscoveryService(new AppReadinessStateService());
+
+        Assert.Throws<ArgumentException>(() => service.ResolveDownloadableModel(null, "text-embedding-3-small"));
+        Assert.Throws<ArgumentException>(() => service.ResolveDownloadableModel(null, "whisper"));
     }
 
     [Fact]
