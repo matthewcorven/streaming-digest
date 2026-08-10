@@ -14,6 +14,7 @@ using Npgsql;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
+using StreamingDigest.Application.Orchestration;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Application.Transcripts;
@@ -26,6 +27,11 @@ using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
 using StreamingDigest.Worker.Scraping;
+// Two distinct readiness-guard seams share the name IModelReadinessGuard: the WS-7 runtime
+// seam guard (StreamingDigest.Application, CheckAsync over RuntimeRole) and the A2 ingestion
+// pipeline preflight seam (StreamingDigest.Application.Orchestration, IsReadyAsync over a
+// capability string). Alias the WS-7 one; unqualified references resolve to Orchestration.
+using RuntimeModelReadinessGuard = StreamingDigest.Application.IModelReadinessGuard;
 
 var builder = Host.CreateApplicationBuilder(args);
 var scraperStartupDependency = ResolveScraperStartupDependency(builder.Configuration["Scraper:BaseUrl"]);
@@ -146,7 +152,7 @@ builder.Services.AddHostedService(sp => new StreamingDigest.Worker.ModelDownload
     connectionString,
     sp,
     sp.GetRequiredService<ILogger<StreamingDigest.Worker.ModelDownload.ModelDownloadHostedService>>()));
-builder.Services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), builder.Configuration));
+builder.Services.AddSingleton<RuntimeModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), builder.Configuration));
 builder.Services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
@@ -174,19 +180,19 @@ builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
-builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<IModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
+builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<RuntimeModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
 builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
 builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
 builder.Services.AddScoped<ILinkClassificationService, LinkClassificationService>(sp =>
     new LinkClassificationService(
         sp.GetService<MeaiChatClientWrapper>(),
         sp.GetRequiredService<ILogger<LinkClassificationService>>(),
-        sp.GetService<IModelReadinessGuard>(),
+        sp.GetService<RuntimeModelReadinessGuard>(),
         sp.GetService<IModelReadinessNotifier>()));
 builder.Services.AddScoped(sp => new DeterministicTranscriptChunkingService(
     sp.GetService<MeaiChatClientWrapper>(),
     sp.GetService<ILogger<DeterministicTranscriptChunkingService>>(),
-    sp.GetService<IModelReadinessGuard>(),
+    sp.GetService<RuntimeModelReadinessGuard>(),
     sp.GetService<IModelReadinessNotifier>()));
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
@@ -247,6 +253,25 @@ builder.Services.AddSingleton<IMetadataAdapterSelector>(sp =>
     // YouTube API adapter is optional; if API key is missing, it will be marked as unconfigured
     return new MetadataAdapterSelector(ytDlpAdapter, youtubeApiAdapter, appConfig, logger);
 });
+
+// ── Ingestion Orchestrator + Stage Handlers (App A2, #211) ───────────────────────
+builder.Services.AddScoped<IChannelRepository, ChannelRepository>();
+builder.Services.AddSingleton<StreamingDigest.Application.Orchestration.IModelReadinessGuard, InterimModelReadinessGuard>();
+builder.Services.AddSingleton<IVideoLinkExtractionService, VideoLinkExtractionService>();
+builder.Services.AddSingleton<AuthorChapterSegmentationService>();
+builder.Services.AddSingleton<IRepositoryMetadataService>(sp =>
+    new RepositoryMetadataService(new RepositoryHostDetectionService(), sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(RepositoryMetadataService))));
+builder.Services.AddScoped<IVideoPipelinePersistence, EfVideoPipelinePersistence>();
+builder.Services.AddScoped<IWebsiteScraper, WorkerWebsiteScraper>();
+builder.Services.AddScoped<IVideoStageHandler, TranscriptStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, SegmentsStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, ScreenshotsStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, LinksStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, ReposStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, WebsitesStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, EmbeddingsStageHandler>();
+builder.Services.AddScoped<VideoPipelineProcessor>();
+builder.Services.AddScoped<IIngestionOrchestrator, IngestionOrchestrator>();
 
 var host = builder.Build();
 var environmentName = builder.Environment.EnvironmentName;

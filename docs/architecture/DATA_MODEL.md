@@ -883,6 +883,10 @@ Canonical `event_type` values (the code-level catalog lives in `src/StreamingDig
 
 `model_readiness_degraded` is emitted by the WS-7 seam guards (S1–S7) when a runtime seam degrades because its model is missing or unready; the payload identifies the seam, the model provider/id, the readiness status, and the user-visible action taken.
 
+- `model_capability_unready`
+- `stage_fallback_applied`
+- `ingestion_stage_failed`
+
 Any change that writes a new domain-event kind must add its `event_type` to this catalog and to the code-level catalog in the same change.
 
 Columns:

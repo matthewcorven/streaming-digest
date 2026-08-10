@@ -5,7 +5,7 @@ public sealed class SegmentGeneration
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid VideoId { get; init; }
     public string SourceType { get; init; } = string.Empty;
-    public int GenerationVersion { get; init; }
+    public int GenerationVersion { get; set; }
     public bool IsActive { get; set; }
     public bool RequiresUserApproval { get; set; }
     public string Status { get; set; } = "draft";
@@ -50,8 +50,24 @@ public sealed class SegmentScreenshot
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid VideoId { get; init; }
+
+    /// <summary>
+    /// In-memory grouping only — not a persisted column. The screenshots table
+    /// (DATA_MODEL §3.12) links rows to the segment/video, not to the generation.
+    /// </summary>
     public Guid SegmentGenerationId { get; init; }
+    public Guid? SegmentId { get; init; }
+    public decimal TimestampSeconds { get; init; }
+    public string FilePath { get; init; } = string.Empty;
+    public string? StorageKey { get; init; }
+    public string? PublicUrlPath { get; init; }
+    public string MimeType { get; init; } = "image/webp";
+    public int? Width { get; init; }
+    public int? Height { get; init; }
+    public long? FileSizeBytes { get; init; }
+    public string? ContentHash { get; init; }
     public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class SegmentNote

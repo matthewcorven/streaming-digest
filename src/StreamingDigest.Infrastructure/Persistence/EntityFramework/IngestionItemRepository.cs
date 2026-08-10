@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using StreamingDigest.Application.Repositories;
 using StreamingDigest.Domain;
 
 namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;

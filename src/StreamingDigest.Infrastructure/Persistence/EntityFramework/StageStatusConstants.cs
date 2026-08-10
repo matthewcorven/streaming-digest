@@ -6,14 +6,25 @@ namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;
 public static class StageStatusConstants
 {
     public const string Pending = "pending";
+    public const string Processing = "processing";
     public const string Completed = "completed";
     public const string Failed = "failed";
+    public const string Skipped = "skipped";
+
+    /// <summary>
+    /// The stage was deferred because a required model capability was unready
+    /// (e.g. embeddings deferred until the model runtime is ready).
+    /// </summary>
+    public const string Deferred = "deferred";
 
     private static readonly HashSet<string> ValidStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
         Pending,
+        Processing,
         Completed,
-        Failed
+        Failed,
+        Skipped,
+        Deferred
     };
 
     /// <summary>

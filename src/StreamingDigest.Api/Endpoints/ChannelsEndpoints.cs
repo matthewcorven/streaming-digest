@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using StreamingDigest.Application;
+using StreamingDigest.Application.Repositories;
 using StreamingDigest.Domain;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 
