@@ -2,6 +2,7 @@ extern alias StreamingDigestWorker;
 
 using System.Text.Json;
 using Hangfire;
+using Hangfire.MemoryStorage;
 using StreamingDigest.Application.Models;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Domain;
@@ -32,7 +33,7 @@ internal static class ModelsEndpoints
                 })
                 : Results.Unauthorized());
 
-        app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, IModelRuntimeStateRepository stateRepository, IOperationStore operationStore, IBackgroundJobClient backgroundJobs, CancellationToken cancellationToken) =>
+        app.MapPost("/api/models/download", async (HttpContext context, ModelDiscoveryService modelDiscoveryService, IModelRuntimeStateRepository stateRepository, IOperationStore operationStore, IBackgroundJobClient backgroundJobs, JobStorage hangfireStorage, CancellationToken cancellationToken) =>
         {
             if (!ApiRequestPipeline.IsAuthenticated(context.Request))
             {
@@ -61,6 +62,19 @@ internal static class ModelsEndpoints
 
             // Durable handoff (WS-5): the 202 is only returned after the operation record and
             // the model_runtime_state=queued row are persisted AND the Hangfire job is enqueued.
+            // When Hangfire falls back to in-memory storage (Postgres unavailable at startup),
+            // the API process never runs a Hangfire server so an enqueued job could never execute;
+            // reject explicitly instead of returning an optimistic 202 that cannot be fulfilled.
+            // Uses the DI-registered storage for THIS app rather than the process-global
+            // JobStorage.Current, which is shared across hosts (e.g. co-hosted test factories).
+            if (hangfireStorage is MemoryStorage)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Download handoff unavailable",
+                    detail: "The job queue is running on in-memory storage because PostgreSQL is unavailable; a model download cannot be durably persisted or executed right now.");
+            }
+
             var provider = model.Provider.ToString().ToLowerInvariant();
             var runtimeRole = model.RuntimeRole.ToString().ToLowerInvariant();
             var now = DateTimeOffset.UtcNow;

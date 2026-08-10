@@ -3,10 +3,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using StreamingDigest.Infrastructure.Persistence;
 using Xunit.Abstractions;
@@ -192,6 +194,27 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ModelDownloadEndpoint_Returns503_WhenHangfireStorageIsInMemory()
+    {
+        // WS-5 durable handoff: when the API cannot reach Postgres for Hangfire storage it must
+        // refuse the download with 503 rather than return an optimistic 202 whose job can never
+        // execute (the API process runs no Hangfire server). Simulate by overriding the DI
+        // JobStorage with MemoryStorage for this host only.
+        using var factory = new ContractConformanceWebApplicationFactory(_connectionString!, useMemoryHangfireStorage: true);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        Assert.True(loginResponse.IsSuccessStatusCode);
+
+        using var downloadRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
+        downloadRequest.Content = JsonContent.Create(new { modelKind = "llm", modelId = "llama3.1:8b" });
+        using var downloadResponse = await client.SendAsync(downloadRequest);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, downloadResponse.StatusCode);
+        var problem = await downloadResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Download handoff unavailable", problem.GetProperty("title").GetString());
+    }
+
+    [Fact]
     public async Task ModelDiscoveryEndpoints_ReturnProviderAwareMetadata()
     {
         using var client = CreateClient();
@@ -228,8 +251,11 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ModelVerificationEndpoint_ReturnsVerifiedState()
+    public async Task ModelVerificationEndpoint_WithoutReachableRuntime_ReportsHonestFailure()
     {
+        // WS-4 (#203): verify runs a real runtime probe and must not report success when the
+        // runtime is unreachable. The harness container has no Ollama, so the probe fails and
+        // the response must be a truthful failure, not an optimistic "verified".
         using var client = CreateClient();
         using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
         Assert.True(loginResponse.IsSuccessStatusCode);
@@ -241,7 +267,9 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
         var verifyPayload = await verifyResponse.Content.ReadFromJsonAsync<ModelVerificationResponse>();
         Assert.NotNull(verifyPayload);
-        Assert.True(verifyPayload.Verified);
+        Assert.False(verifyPayload.Verified);
+        Assert.Equal("failed", verifyPayload.Status);
+        Assert.False(string.IsNullOrWhiteSpace(verifyPayload.Message));
         Assert.Equal("embedding", verifyPayload.ModelKind);
         Assert.Equal("bge-m3", verifyPayload.ModelId);
     }
@@ -388,7 +416,7 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         return port;
     }
 
-    private sealed class ContractConformanceWebApplicationFactory(string connectionString) : WebApplicationFactory<Program>
+    private sealed class ContractConformanceWebApplicationFactory(string connectionString, bool useMemoryHangfireStorage = false) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -405,6 +433,20 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
                     ["BOOTSTRAP_ADMIN_PASSWORD"] = BootstrapPassword
                 });
             });
+            if (useMemoryHangfireStorage)
+            {
+                builder.ConfigureServices(services =>
+                {
+                    // Replace ALL JobStorage registrations (Hangfire's + the app's explicit one)
+                    // with in-memory storage so the endpoint's degraded-mode guard is exercised.
+                    var descriptors = services.Where(d => d.ServiceType == typeof(Hangfire.JobStorage)).ToList();
+                    foreach (var descriptor in descriptors)
+                    {
+                        services.Remove(descriptor);
+                    }
+                    services.AddSingleton<Hangfire.JobStorage>(new Hangfire.MemoryStorage.MemoryStorage());
+                });
+            }
         }
     }
 

@@ -27,9 +27,18 @@ public sealed class ChannelModelDownloadQueue : IModelDownloadQueue
 
     private readonly ConcurrentDictionary<string, byte> _pending = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool TryEnqueue(ModelDownloadCommand command)
+    /// <summary>True when the command was written to the channel.</summary>
+    public bool TryEnqueue(ModelDownloadCommand command) => TryEnqueue(command, out _);
+
+    /// <summary>
+    /// Attempts to enqueue; <paramref name="droppedBecauseFull"/> distinguishes a bounded-channel
+    /// drop (the API has already persisted a queued row that now needs operator attention) from a
+    /// true de-dup no-op so the caller can log/diagnose each case appropriately.
+    /// </summary>
+    public bool TryEnqueue(ModelDownloadCommand command, out bool droppedBecauseFull)
     {
         ArgumentNullException.ThrowIfNull(command);
+        droppedBecauseFull = false;
 
         var key = KeyFor(command.Provider, command.ModelId);
         if (!_pending.TryAdd(key, 0))
@@ -45,6 +54,7 @@ public sealed class ChannelModelDownloadQueue : IModelDownloadQueue
 
         // Bounded channel is full: release the dedup slot so a later retry can enqueue again.
         _pending.TryRemove(key, out _);
+        droppedBecauseFull = true;
         return false;
     }
 

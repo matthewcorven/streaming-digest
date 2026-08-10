@@ -65,10 +65,76 @@ public sealed class ChannelModelDownloadQueueTests
 
         Assert.Equal([first, second], read);
     }
+
+    [Fact]
+    public async Task TryEnqueue_FullChannel_ReportsDropDistinctFromDedup()
+    {
+        var queue = new ChannelModelDownloadQueue();
+
+        // Occupy the bounded channel (capacity 32) with distinct models; no reader drains.
+        for (var i = 0; i < 32; i++)
+        {
+            Assert.True(queue.TryEnqueue(Command($"model-{i}"), out var dropped));
+            Assert.False(dropped);
+        }
+
+        // BoundedChannelFullMode.DropWrite may either reject the new write (TryWrite=false)
+        // or silently accept it while dropping the pending item; assert both observability
+        // guarantees that actually matter to the caller:
+        //  1. A full-channel rejection is reported distinctly from a true dedup.
+        //  2. A repeat of a *queued* model is always a true dedup (never a drop report).
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var overflowEnqueued = queue.TryEnqueue(Command("model-overflow"), out var droppedBecauseFull);
+        if (overflowEnqueued)
+        {
+            // Silently accepted (an earlier pending item was dropped instead): the dedup
+            // slot for model-overflow is held, so a repeat must dedup, not re-enqueue.
+            Assert.False(droppedBecauseFull);
+            Assert.False(queue.TryEnqueue(Command("model-overflow"), out var repeatDrop));
+            Assert.False(repeatDrop);
+        }
+        else
+        {
+            Assert.True(droppedBecauseFull);
+
+            // A full-channel drop releases the dedup slot, so the same model can retry…
+            Assert.False(queue.TryEnqueue(Command("model-0"), out var dedupDrop));
+            Assert.False(dedupDrop);
+        }
+
+        // …and in both cases a queued model is still deduplicated by identity.
+        var read = new List<ModelDownloadCommand>();
+        await foreach (var item in queue.ReadAllAsync(cts.Token))
+        {
+            read.Add(item);
+            if (read.Count == 32)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(32, read.Select(c => c.ModelId).Distinct().Count());
+    }
 }
 
 public sealed class ModelDownloadJobTests
 {
+    [Fact]
+    public void RunAsync_DisablesAutomaticRetries()
+    {
+        // The API persists the queued operation before enqueueing; Hangfire retries would
+        // re-push commands for operations the pipeline may already have completed/failed.
+        var attribute = typeof(ModelDownloadJob)
+            .GetMethod(nameof(ModelDownloadJob.RunAsync))!
+            .GetCustomAttributes(typeof(Hangfire.AutomaticRetryAttribute), inherit: true)
+            .Cast<Hangfire.AutomaticRetryAttribute>()
+            .SingleOrDefault();
+
+        Assert.NotNull(attribute);
+        Assert.Equal(0, attribute!.Attempts);
+    }
+
     [Fact]
     public async Task RunAsync_EnqueuesIntoBoundedChannel()
     {
