@@ -8,6 +8,7 @@ public interface IStreamingDigestDbContext
 {
     DbSet<Video> Videos { get; }
     DbSet<Segment> Segments { get; }
+    DbSet<SegmentScreenshot> SegmentScreenshots { get; }
     DbSet<VideoTranscript> VideoTranscripts { get; }
     DbSet<TranscriptCue> TranscriptCues { get; }
     DbSet<ExternalResource> ExternalResources { get; }

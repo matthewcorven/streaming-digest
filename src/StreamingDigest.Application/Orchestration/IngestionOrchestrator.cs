@@ -194,7 +194,13 @@ public sealed class IngestionOrchestrator(
                 videoStatus,
                 context.Warnings.Count > 0 ? string.Join("; ", context.Warnings) : null,
                 cancellationToken);
-            await persistence.SetVideoIngestionStatusAsync(video.Id, videoStatus, run.Id, outcome != VideoOutcome.Failed, cancellationToken);
+            await persistence.SetVideoIngestionStatusAsync(
+                video.Id,
+                videoStatus,
+                run.Id,
+                outcome != VideoOutcome.Failed,
+                context.ScreenshotOutcome,
+                cancellationToken);
             return new VideoRunResult(outcome, context.Transcript is not null, context.Repositories.Count);
         }
         catch (OperationCanceledException)
@@ -204,11 +210,49 @@ public sealed class IngestionOrchestrator(
         catch (Exception ex)
         {
             logger?.LogError(ex, "Video pipeline failed for video {VideoId}", video.Id);
+            await CompensateFailedVideoAsync(video, item, run, ex, cancellationToken);
             return VideoRunResult.FailedResult;
         }
         finally
         {
             gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Best-effort compensating write when the pipeline throws: leaves the video + item at
+    /// a terminal <c>failed</c> state instead of orphaned mid-state (video stuck at
+    /// <c>processing</c> would be skipped by the idempotency guard forever). Runs in a
+    /// fresh DI scope because the failed scope's DbContext may be poisoned.
+    /// </summary>
+    private async Task CompensateFailedVideoAsync(
+        Video video,
+        IngestionItem item,
+        IngestionRun run,
+        Exception failure,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var persistence = scope.ServiceProvider.GetRequiredService<IVideoPipelinePersistence>();
+            await persistence.FinalizeItemAsync(item.Id, IngestionStatuses.Failed, failure.Message, cancellationToken);
+            await persistence.SetVideoIngestionStatusAsync(
+                video.Id,
+                IngestionStatuses.Failed,
+                run.Id,
+                succeeded: false,
+                ScreenshotStageOutcome.None,
+                cancellationToken);
+        }
+        catch (Exception compensationError)
+        {
+            // Partial state after a secondary failure is acceptable only if logged loudly.
+            logger?.LogError(
+                compensationError,
+                "Compensating failure write failed for video {VideoId} (item {ItemId}); row may be left mid-state",
+                video.Id,
+                item.Id);
         }
     }
 

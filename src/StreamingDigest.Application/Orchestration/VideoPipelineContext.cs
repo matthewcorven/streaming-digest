@@ -44,4 +44,30 @@ public sealed class VideoPipelineContext
     /// <c>failed</c> and no further stages run.
     /// </summary>
     public bool StageFailed { get; set; }
+
+    /// <summary>
+    /// Names of stages a handler explicitly deferred (e.g. embeddings storage deferred
+    /// because the model capability is unready). The pipeline stamps these stages
+    /// <c>deferred</c> instead of <c>completed</c> so retry targeting can find them.
+    /// </summary>
+    public HashSet<string> DeferredStages { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Outcome of the screenshots stage; mapped to <c>videos.screenshot_status</c> at finalize.</summary>
+    public ScreenshotStageOutcome ScreenshotOutcome { get; set; } = ScreenshotStageOutcome.None;
+}
+
+/// <summary>How the screenshots stage ended for a video (drives <c>videos.screenshot_status</c>).</summary>
+public enum ScreenshotStageOutcome
+{
+    /// <summary>The stage did not run or produced nothing (no segments / no media attempted).</summary>
+    None,
+
+    /// <summary>No local media file was available; generation was deferred.</summary>
+    Deferred,
+
+    /// <summary>At least one screenshot was generated and recorded without failures.</summary>
+    Generated,
+
+    /// <summary>Some segment screenshots failed to generate.</summary>
+    PartialFailure,
 }

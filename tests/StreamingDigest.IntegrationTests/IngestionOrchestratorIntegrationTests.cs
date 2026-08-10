@@ -73,7 +73,7 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
         }
 
         const string youtubeVideoId = "inttestvideo1";
-        var services = BuildServiceProvider(youtubeVideoId);
+        var (services, _, _) = BuildServiceProvider(youtubeVideoId);
 
         var orchestrator = services.GetRequiredService<IIngestionOrchestrator>();
 
@@ -130,6 +130,16 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
         var segments = await db.Segments.Where(s => s.SegmentGenerationId == generation!.Id).ToListAsync();
         Assert.NotEmpty(segments);
 
+        // Screenshot rows must survive the pipeline (regression guard for the EF-ignored nav).
+        var screenshots = await db.SegmentScreenshots.Where(s => s.VideoId == video.Id).ToListAsync();
+        Assert.NotEmpty(screenshots);
+        Assert.All(screenshots, s =>
+        {
+            Assert.NotEqual(Guid.Empty, s.SegmentId);
+            Assert.False(string.IsNullOrWhiteSpace(s.FilePath));
+        });
+        Assert.Equal("completed", video.ScreenshotStatus);
+
         // Resources are global rows (video linkage is by provenance); assert both kinds exist.
         var resources = await db.ExternalResources.ToListAsync();
         Assert.Contains(resources, r => r.ResourceType == "repository" && r.Domain == "github.com");
@@ -147,9 +157,66 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
         Assert.Equal(1, fake.StoreCallCount);
     }
 
+    // ── Reprocess idempotency: second run must not violate unique constraints ────
+
+    [Fact]
+    public async Task RunChannelIngestion_reprocess_upserts_canonical_rows_and_completes_again()
+    {
+        var channelId = Guid.NewGuid();
+        await using (var seed = new StreamingDigestDbContext(_options!))
+        {
+            seed.Channels.Add(new Channel
+            {
+                Id = channelId,
+                YoutubeChannelId = "UC_reprocess_test",
+                NameOriginal = "Reprocess Channel",
+                ProfileUrl = "https://www.youtube.com/channel/UC_reprocess_test",
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        const string youtubeVideoId = "r3process001";
+        var (services, _, _) = BuildServiceProvider(youtubeVideoId);
+
+        var first = await services.GetRequiredService<IIngestionOrchestrator>().RunChannelIngestionAsync(
+            new ChannelIngestionRequest { ChannelId = channelId, RunType = "manual", TriggeredBy = "integration-test" });
+        var second = await services.GetRequiredService<IIngestionOrchestrator>().RunChannelIngestionAsync(
+            new ChannelIngestionRequest { ChannelId = channelId, RunType = "manual", TriggeredBy = "integration-test", IsReprocessRequest = true });
+
+        await using var db = new StreamingDigestDbContext(_options!);
+        var runs = await db.IngestionRuns.OrderBy(r => r.CreatedAt).ToListAsync();
+        Assert.Equal(2, runs.Count);
+
+        var video = await db.Videos.SingleAsync(v => v.YoutubeVideoId == youtubeVideoId);
+        Assert.Equal("processed", video.IngestionStatus);
+        Assert.Equal(runs[1].Id, video.LastSuccessfulIngestionRunId);
+
+        // Second run items reach processed — no unique-constraint violation on reprocess.
+        var secondRunItems = await db.IngestionItems.Where(i => i.IngestionRunId == runs[1].Id).ToListAsync();
+        Assert.NotEmpty(secondRunItems);
+        Assert.All(secondRunItems, i => Assert.Equal("processed", i.Status));
+
+        // Canonical rows are upserted, not duplicated.
+        Assert.Equal(2, await db.ExternalResources.CountAsync());
+        Assert.Single(await db.Repositories.ToListAsync());
+
+        // Scraped pages have no canonical uniqueness — each scrape is a new snapshot row,
+        // so a reprocess adds one more page for the same resource (no constraint violation).
+        Assert.Equal(2, await db.ScrapedPages.CountAsync());
+
+        // Reprocess creates a new segment generation at the next version (unique on
+        // video_id + generation_version), not a collision on version 1.
+        var generations = await db.SegmentGenerations
+            .Where(g => g.VideoId == video.Id)
+            .OrderBy(g => g.GenerationVersion)
+            .ToListAsync();
+        Assert.Equal(2, generations.Count);
+        Assert.Equal(new[] { 1, 2 }, generations.Select(g => g.GenerationVersion).ToArray());
+    }
+
     // ── Composition root ─────────────────────────────────────────────────────────
 
-    private ServiceProvider BuildServiceProvider(string youtubeVideoId)
+    private (ServiceProvider Services, LogCapture Capture, StreamingDigestDbContext SeedDb) BuildServiceProvider(string youtubeVideoId)
     {
         var services = new ServiceCollection();
 
@@ -200,7 +267,7 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
         services.AddScoped<VideoPipelineProcessor>();
         services.AddScoped<IIngestionOrchestrator, IngestionOrchestrator>();
 
-        return services.BuildServiceProvider();
+        return (services.BuildServiceProvider(), capture, new StreamingDigestDbContext(_options!));
     }
 
     // ── Stubs ────────────────────────────────────────────────────────────────────
@@ -268,6 +335,16 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
     {
         public async Task<TranscriptIngestionResult> IngestAsync(Guid videoId, CancellationToken cancellationToken)
         {
+            // Mirror the real service: deactivate any prior active transcript so the
+            // partial unique index on (video_id) WHERE is_active isn't violated on reprocess.
+            var priorActive = await dbContext.VideoTranscripts
+                .Where(t => t.VideoId == videoId && t.IsActive)
+                .ToListAsync(cancellationToken);
+            foreach (var prior in priorActive)
+            {
+                prior.IsActive = false;
+            }
+
             var transcript = new VideoTranscript
             {
                 VideoId = videoId,

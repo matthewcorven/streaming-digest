@@ -19,6 +19,15 @@ public interface IVideoPipelinePersistence
     /// <summary>Writes the item's terminal status and error summary.</summary>
     Task FinalizeItemAsync(Guid itemId, string status, string? errorSummary, CancellationToken cancellationToken);
 
-    /// <summary>Updates the video row's ingestion status after the pipeline finishes.</summary>
-    Task SetVideoIngestionStatusAsync(Guid videoId, string status, Guid? runId, bool succeeded, CancellationToken cancellationToken);
+    /// <summary>
+    /// Updates the video row's ingestion status after the pipeline finishes, and maintains
+    /// <c>videos.screenshot_status</c> from the screenshots stage outcome.
+    /// </summary>
+    Task SetVideoIngestionStatusAsync(
+        Guid videoId,
+        string status,
+        Guid? runId,
+        bool succeeded,
+        ScreenshotStageOutcome screenshotOutcome,
+        CancellationToken cancellationToken);
 }

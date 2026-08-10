@@ -24,7 +24,10 @@ public sealed class VideoPipelineProcessor(
             try
             {
                 await stage.ExecuteAsync(context, cancellationToken);
-                await persistence.SetStageStatusAsync(context.Item.Id, stage.StageName, IngestionStageStatuses.Completed, cancellationToken);
+                var status = context.DeferredStages.Contains(stage.StageName)
+                    ? IngestionStageStatuses.Deferred
+                    : IngestionStageStatuses.Completed;
+                await persistence.SetStageStatusAsync(context.Item.Id, stage.StageName, status, cancellationToken);
             }
             catch (OperationCanceledException)
             {

@@ -45,6 +45,7 @@ public sealed class ScreenshotsStageHandler(
         if (media is null)
         {
             context.Warnings.Add("screenshots: no local media file available; deferred");
+            context.ScreenshotOutcome = ScreenshotStageOutcome.Deferred;
             context.PendingEvents.Add(new DomainEvent
             {
                 EventType = DomainEventTypeCatalog.ScreenshotFileMissing,
@@ -81,6 +82,9 @@ public sealed class ScreenshotsStageHandler(
                     {
                         VideoId = context.Video.Id,
                         SegmentGenerationId = context.SegmentGeneration.Id,
+                        SegmentId = segment.Id,
+                        TimestampSeconds = segment.StartSeconds,
+                        FilePath = outputPath,
                         IsActive = true,
                     });
                 }
@@ -96,6 +100,11 @@ public sealed class ScreenshotsStageHandler(
             if (failures > 0)
             {
                 context.Warnings.Add($"screenshots: {failures} of {context.SegmentGeneration.Segments.Count} segments failed");
+                context.ScreenshotOutcome = ScreenshotStageOutcome.PartialFailure;
+            }
+            else if (context.SegmentGeneration.Screenshots.Count > 0)
+            {
+                context.ScreenshotOutcome = ScreenshotStageOutcome.Generated;
             }
         }
         finally

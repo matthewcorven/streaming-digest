@@ -230,7 +230,13 @@ public sealed class VideoPipelineStagesTests
         public Task FinalizeItemAsync(Guid itemId, string status, string? errorSummary, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
-        public Task SetVideoIngestionStatusAsync(Guid videoId, string status, Guid? runId, bool succeeded, CancellationToken cancellationToken)
+        public Task SetVideoIngestionStatusAsync(
+            Guid videoId,
+            string status,
+            Guid? runId,
+            bool succeeded,
+            ScreenshotStageOutcome screenshotOutcome,
+            CancellationToken cancellationToken)
             => Task.CompletedTask;
     }
 
@@ -295,6 +301,24 @@ public sealed class VideoPipelineStagesTests
             action(context);
             return Task.CompletedTask;
         }
+    }
+
+    [Fact]
+    public async Task Processor_marks_deferred_stage_deferred_instead_of_completed()
+    {
+        var persistence = new RecordingPersistence();
+        var deferring = new DelegateStage(
+            IngestionStageNames.Embeddings,
+            ctx => ctx.DeferredStages.Add(IngestionStageNames.Embeddings));
+        var processor = new VideoPipelineProcessor(persistence, [deferring]);
+        var context = CreateContext();
+
+        await processor.ProcessAsync(context, CancellationToken.None);
+
+        Assert.False(context.StageFailed);
+        Assert.Equal(
+            [(IngestionStageNames.Embeddings, IngestionStageStatuses.Deferred)],
+            persistence.StageStatuses);
     }
 
     // ── Idempotency guard ────────────────────────────────────────────────────────
@@ -401,6 +425,7 @@ public sealed class TranscriptAndEmbeddingsStageTests
         var reprocess = Assert.Single(context.PendingEvents, e => e.EventType == DomainEventTypeCatalog.EmbeddingReprocessQueued);
         Assert.Equal("info", reprocess.Severity);
         Assert.Contains(context.Warnings, w => w.Contains("deferred", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(IngestionStageNames.Embeddings, context.DeferredStages);
         store.VerifyNoOtherCalls(); // nothing stored while unready
     }
 

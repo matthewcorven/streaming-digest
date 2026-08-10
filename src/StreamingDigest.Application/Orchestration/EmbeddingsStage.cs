@@ -33,6 +33,7 @@ public sealed class EmbeddingsStageHandler(
         if (!embeddingsReady)
         {
             context.Warnings.Add("embeddings: embedding capability unready; deferred");
+            context.DeferredStages.Add(StageName);
             context.PendingEvents.Add(StageNotification.CapabilityUnready(
                 ModelCapabilities.Embeddings, StageName, "embedding storage deferred", context));
             context.PendingEvents.Add(new DomainEvent
