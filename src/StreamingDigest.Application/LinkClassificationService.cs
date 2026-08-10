@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using StreamingDigest.Domain;
 
 namespace StreamingDigest.Application;
 
@@ -43,17 +44,25 @@ public sealed class LinkClassificationService : ILinkClassificationService
     private readonly MeaiChatClientWrapper? _chatClientWrapper;
     private readonly ILogger<LinkClassificationService>? _logger;
     private readonly bool _llmEnabled;
+    private readonly IModelReadinessGuard? _modelReadinessGuard;
+    private readonly IModelReadinessNotifier? _modelReadinessNotifier;
 
     public LinkClassificationService()
         : this(null, null)
     {
     }
 
-    public LinkClassificationService(MeaiChatClientWrapper? chatClientWrapper, ILogger<LinkClassificationService>? logger = null)
+    public LinkClassificationService(
+        MeaiChatClientWrapper? chatClientWrapper,
+        ILogger<LinkClassificationService>? logger = null,
+        IModelReadinessGuard? modelReadinessGuard = null,
+        IModelReadinessNotifier? modelReadinessNotifier = null)
     {
         _chatClientWrapper = chatClientWrapper;
         _logger = logger;
         _llmEnabled = ResolveLlmEnabled();
+        _modelReadinessGuard = modelReadinessGuard;
+        _modelReadinessNotifier = modelReadinessNotifier;
     }
 
     public LinkClassificationResult Classify(string? url) => Classify(url, (IReadOnlyList<LinkClassificationExample>?)null);
@@ -127,6 +136,25 @@ public sealed class LinkClassificationService : ILinkClassificationService
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Local LLM classification failed for {Url}; falling back to rules", url);
+
+            // WS-7 S5: surface a one-time notified degrade when the LLM is unreachable/unready
+            // instead of only a silent heuristic/rule fallback.
+            if (_modelReadinessGuard is not null && _modelReadinessNotifier is not null)
+            {
+                try
+                {
+                    var readiness = _modelReadinessGuard.CheckAsync(RuntimeRole.LLM, CancellationToken.None).GetAwaiter().GetResult();
+                    _modelReadinessNotifier.ReportDegraded(
+                        "S5",
+                        readiness,
+                        "LLM link classification skipped; rule-based classification used");
+                }
+                catch (Exception guardEx)
+                {
+                    _logger?.LogDebug(guardEx, "Model readiness guard check failed during S5 degrade handling.");
+                }
+            }
+
             return null;
         }
     }

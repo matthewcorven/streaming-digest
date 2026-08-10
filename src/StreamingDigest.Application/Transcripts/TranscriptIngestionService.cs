@@ -18,7 +18,8 @@ public sealed class TranscriptIngestionService(
     IVideoMediaSourceResolver? mediaFileResolver = null,
     ISearchDocumentGenerator? searchDocumentGenerator = null,
     ISearchDocumentEmbeddingStore? searchDocumentEmbeddingStore = null,
-    ILogger<TranscriptIngestionService>? logger = null) : ITranscriptIngestionService
+    ILogger<TranscriptIngestionService>? logger = null,
+    IModelReadinessNotifier? modelReadinessNotifier = null) : ITranscriptIngestionService
 {
     private readonly IAudioToTextProvider? _audioToTextProvider = audioToTextProvider;
     private readonly ITemporaryMediaManager? _temporaryMediaManager = temporaryMediaManager;
@@ -26,6 +27,7 @@ public sealed class TranscriptIngestionService(
     private readonly ISearchDocumentGenerator? _searchDocumentGenerator = searchDocumentGenerator;
     private readonly ISearchDocumentEmbeddingStore? _searchDocumentEmbeddingStore = searchDocumentEmbeddingStore;
     private readonly ILogger<TranscriptIngestionService>? _logger = logger;
+    private readonly IModelReadinessNotifier? _modelReadinessNotifier = modelReadinessNotifier;
 
     public async Task<TranscriptIngestionResult> IngestAsync(Guid videoId, CancellationToken ct)
     {
@@ -330,6 +332,22 @@ public sealed class TranscriptIngestionService(
         }
         catch (Exception)
         {
+           // WS-7 S6: whisper transcription failed (service down/unreachable/model unready) and the
+           // caller degrades to 'unavailable_captions'. Verify reachability and surface one notified
+           // degrade instead of only a silent null.
+           _modelReadinessNotifier?.ReportDegraded(
+               "S6",
+               new ModelReadiness(
+                   RuntimeRole.Audio,
+                   ModelProvider.Whisper.ToString().ToLowerInvariant(),
+                   "whisper",
+                   IsReady: false,
+                   Status: ModelRuntimeStatuses.Error,
+                   Reason: $"Whisper transcription failed for video '{videoId}'."),
+               "Transcription degraded to 'unavailable_captions' (no local whisper transcript)",
+               dbContext: context,
+               entityType: "video",
+               entityId: videoId);
            return null;
         }
         finally

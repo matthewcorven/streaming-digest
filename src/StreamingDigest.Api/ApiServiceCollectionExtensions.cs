@@ -1,6 +1,7 @@
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
@@ -58,9 +59,11 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<AppReadinessStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+        services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), sp.GetRequiredService<IConfiguration>()));
+        services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
         services.AddSingleton<FirstUserSetupService>();
         services.AddSingleton<ModelDiscoveryService>();
-        services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+        services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<IModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
         services.AddSingleton<ISearchCorpusSearcher>(sp => new PostgresSearchCorpusSearcher(connectionString));
         services.AddSingleton<SearchUiService>(sp => new SearchUiService(
             sp.GetRequiredService<IRecentSearchStore>(),
@@ -86,7 +89,7 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);
-        services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+        services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<IModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
         services.AddSingleton<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
         services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
         services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
@@ -97,7 +100,8 @@ internal static class ApiServiceCollectionExtensions
             sp.GetService<IEmbeddingService>(),
             sp.GetService<ITranscriptIngestionService>(),
             sp.GetService<ISearchDocumentRegenerationService>(),
-            sp.GetService<IAudioToTextProvider>()));
+            sp.GetService<IAudioToTextProvider>(),
+            sp.GetService<IModelReadinessGuard>()));
         services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
         services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
         services.AddScoped<IChannelRepository, ChannelRepository>();

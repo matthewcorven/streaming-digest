@@ -131,6 +131,8 @@ builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNp
 builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
 builder.Services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+builder.Services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), builder.Configuration));
+builder.Services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
@@ -156,16 +158,20 @@ builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
 builder.Services.AddTranscriptIngestionPipeline(builder.Configuration);
-builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+builder.Services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<IModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
 builder.Services.AddScoped<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
 builder.Services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
 builder.Services.AddScoped<ILinkClassificationService, LinkClassificationService>(sp =>
     new LinkClassificationService(
         sp.GetService<MeaiChatClientWrapper>(),
-        sp.GetRequiredService<ILogger<LinkClassificationService>>()));
-builder.Services.AddScoped(sp => ActivatorUtilities.CreateInstance<DeterministicTranscriptChunkingService>(
-    sp,
-    sp.GetService<MeaiChatClientWrapper>()));
+        sp.GetRequiredService<ILogger<LinkClassificationService>>(),
+        sp.GetService<IModelReadinessGuard>(),
+        sp.GetService<IModelReadinessNotifier>()));
+builder.Services.AddScoped(sp => new DeterministicTranscriptChunkingService(
+    sp.GetService<MeaiChatClientWrapper>(),
+    sp.GetService<ILogger<DeterministicTranscriptChunkingService>>(),
+    sp.GetService<IModelReadinessGuard>(),
+    sp.GetService<IModelReadinessNotifier>()));
 builder.Services.AddHttpClient<MatrixNotificationClient>();
 builder.Services.AddSingleton(sp =>
 {

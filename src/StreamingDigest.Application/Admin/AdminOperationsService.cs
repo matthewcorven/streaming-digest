@@ -7,6 +7,7 @@ using Npgsql;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.AudioToText;
+using StreamingDigest.Domain;
 
 namespace StreamingDigest.Application.Admin;
 
@@ -20,6 +21,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly ITranscriptIngestionService? _transcriptIngestionService;
     private readonly ISearchDocumentRegenerationService? _searchDocumentRegenerationService;
     private readonly IAudioToTextProvider? _audioToTextProvider;
+    private readonly IModelReadinessGuard? _modelReadinessGuard;
 
     public AdminOperationsService(
         ApplicationConfiguration? configuration = null,
@@ -28,7 +30,8 @@ public sealed class AdminOperationsService : IAdminOperationsService
         IEmbeddingService? embeddingService = null,
         ITranscriptIngestionService? transcriptIngestionService = null,
         ISearchDocumentRegenerationService? searchDocumentRegenerationService = null,
-        IAudioToTextProvider? audioToTextProvider = null)
+        IAudioToTextProvider? audioToTextProvider = null,
+        IModelReadinessGuard? modelReadinessGuard = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
         _contentRootPath = contentRootPath;
@@ -37,6 +40,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         _transcriptIngestionService = transcriptIngestionService;
         _searchDocumentRegenerationService = searchDocumentRegenerationService;
         _audioToTextProvider = audioToTextProvider;
+        _modelReadinessGuard = modelReadinessGuard;
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
@@ -170,6 +174,23 @@ public sealed class AdminOperationsService : IAdminOperationsService
 
     public async Task<AdminActionResult> TestEmbeddingServiceAsync(CancellationToken cancellationToken = default)
     {
+        // WS-7 S7: route through the shared model-readiness guard so the admin embedding test
+        // reports a truthful unready reason instead of only a raw connection error.
+        if (_modelReadinessGuard is not null)
+        {
+            var readiness = await _modelReadinessGuard.CheckAsync(RuntimeRole.Embedding, cancellationToken);
+            if (!readiness.IsReady)
+            {
+                return await CreateResultAsync(
+                    "test.embeddings",
+                    null,
+                    "failed",
+                    $"Embedding service not ready: {readiness.Reason}",
+                    "error",
+                    cancellationToken);
+            }
+        }
+
         try
         {
             var sampleText = "The quick brown fox jumps over the lazy dog.";
