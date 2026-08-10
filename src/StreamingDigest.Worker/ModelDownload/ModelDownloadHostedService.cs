@@ -128,7 +128,7 @@ public sealed class ModelDownloadHostedService : BackgroundService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await FailAsync(command, startedAt, $"Model pull failed: {ex.Message}", cancellationToken);
+            await FailAsync(command, startedAt, $"Model pull failed: {ex.Message}", CancellationToken.None);
             return;
         }
 
@@ -140,17 +140,20 @@ public sealed class ModelDownloadHostedService : BackgroundService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await FailAsync(command, startedAt, $"Model presence check failed after pull: {ex.Message}", cancellationToken);
+            await FailAsync(command, startedAt, $"Model presence check failed after pull: {ex.Message}", CancellationToken.None);
             return;
         }
 
         var presence = installed.FirstOrDefault(model => ModelIdMatches(model.ModelId, command.ModelId));
         if (presence is null)
         {
-            await FailAsync(command, startedAt, $"Model '{command.ModelId}' did not appear in the Ollama runtime after the pull completed.", cancellationToken);
+            await FailAsync(command, startedAt, $"Model '{command.ModelId}' did not appear in the Ollama runtime after the pull completed.", CancellationToken.None);
             return;
         }
 
+        // Terminal-state writes are host-lifecycle-critical: use CancellationToken.None so a
+        // StopAsync racing these writes cannot cancel them mid-flight and let the shutdown
+        // handler clobber the real outcome with "worker shut down".
         var completedAt = DateTimeOffset.UtcNow;
         await UpsertStateAsync(
             command,
@@ -163,7 +166,7 @@ public sealed class ModelDownloadHostedService : BackgroundService
                 ["digest"] = presence.Digest,
                 ["sizeBytes"] = presence.SizeInBytes
             },
-            cancellationToken);
+            CancellationToken.None);
         await PersistOperationTransitionAsync(
             command,
             "completed",
@@ -171,10 +174,10 @@ public sealed class ModelDownloadHostedService : BackgroundService
             completedAt: completedAt,
             errorSummary: null,
             summary: BuildSummary(command, "ready", presence.Digest, presence.SizeInBytes),
-            cancellationToken);
+            CancellationToken.None);
 
         // Readiness projection: only real verified presence may mark the step succeeded (WS-4 / §4.1).
-        await ProjectReadinessAsync(command, presence, cancellationToken);
+        await ProjectReadinessAsync(command, presence, CancellationToken.None);
 
         _logger.LogInformation(
             "Model download completed (operation {OperationId}, {Provider}/{ModelId}, digest {Digest}).",

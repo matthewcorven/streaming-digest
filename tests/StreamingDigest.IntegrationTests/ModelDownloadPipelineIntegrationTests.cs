@@ -154,6 +154,10 @@ public sealed class ModelDownloadPipelineIntegrationTests : IAsyncLifetime
             var state = await stateRepository.GetByProviderAndModelIdAsync("ollama", "bge-m3");
             return state?.Status == "failed";
         });
+        // Grace window: WaitForAsync can observe the state-row write while the rest of the
+        // terminal transition (operations row, notification) is still in flight. Let the
+        // pipeline settle before stopping the host so StopAsync cannot race the write.
+        await Task.Delay(250);
         await service.StopAsync(CancellationToken.None);
 
         var finalState = await stateRepository.GetByProviderAndModelIdAsync("ollama", "bge-m3");
