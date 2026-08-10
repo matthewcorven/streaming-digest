@@ -104,6 +104,15 @@ internal static class ApiStartupRuntime
             return new MemoryStorage();
         }
 
+        // Hangfire.PostgreSql's PostgreSqlObjectsInstaller static constructor resolves a logger
+        // through Hangfire's process-global LogProvider. Hangfire.NetCore's AspNetCoreLogProvider
+        // captures the ILoggerFactory of the FIRST host that configured it; once that host is
+        // disposed (WebApplicationFactory teardown in integration tests) the cctor throws
+        // ObjectDisposedException and the failed type initializer is cached for the whole
+        // process, silently forcing every later host onto MemoryStorage. Installing a no-op
+        // provider before storage creation keeps the installer cctor from ever touching a
+        // disposed factory. The API's real logging is unaffected (it flows through ILogger).
+        Hangfire.Logging.LogProvider.SetCurrentLogProvider(new NoOpHangfireLogProvider());
         try
         {
             return new PostgreSqlStorage(connectionString);
@@ -117,5 +126,19 @@ internal static class ApiStartupRuntime
 }
 
 internal sealed record ApiStartupState(string ConnectionString, DatabaseStatus DatabaseStatus, JobStorage HangfireStorage);
+
+/// <summary>
+/// No-op Hangfire log provider used to isolate PostgreSqlObjectsInstaller's static constructor
+/// from a disposed ILoggerFactory held by Hangfire.NetCore's AspNetCoreLogProvider.
+/// </summary>
+internal sealed class NoOpHangfireLogProvider : Hangfire.Logging.ILogProvider
+{
+    public Hangfire.Logging.ILog GetLogger(string name) => new NoOpHangfireLog();
+
+    private sealed class NoOpHangfireLog : Hangfire.Logging.ILog
+    {
+        public bool Log(Hangfire.Logging.LogLevel logLevel, Func<string>? messageFunc, Exception? exception = null) => true;
+    }
+}
 
 public sealed record DatabaseStatus(bool Connected, string DatabaseName, string ServerVersion);

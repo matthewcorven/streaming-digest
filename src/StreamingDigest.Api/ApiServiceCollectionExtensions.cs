@@ -1,6 +1,7 @@
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
@@ -52,6 +53,10 @@ internal static class ApiServiceCollectionExtensions
         });
         services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
         services.AddHangfire(config => config.UseStorage(hangfireStorage));
+        // Register the resolved JobStorage singleton explicitly so the download endpoint can
+        // inspect the real per-app storage (not the process-global JobStorage.Current, which
+        // is shared across co-hosted test factories and misreports in those contexts).
+        services.AddSingleton(hangfireStorage);
         services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
         services.AddSingleton<BootstrapAdminUserService>();
@@ -59,9 +64,13 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<AppReadinessStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+        services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), sp.GetRequiredService<IConfiguration>()));
+        services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
         // Single in-process broadcaster shared by every publisher and SSE subscriber.
         services.AddSingleton<IModelLifecycleEventBroadcaster, ModelLifecycleEventBroadcaster>();
         services.AddSingleton<Application.ModelRuntimeReconcileService>();
+        // WS-5: durable operation persistence for the model download handoff.
+        services.AddSingleton<IOperationStore>(sp => new PostgresOperationStore(connectionString));
         services.AddSingleton<FirstUserSetupService>();
         // Verify rewrite (WS-4): the discovery service probes real runtimes (Ollama tags /
         // whisper /health) and persists truth to model_runtime_state + app_readiness_checks.
@@ -74,7 +83,7 @@ internal static class ApiServiceCollectionExtensions
             new PostgresModelRuntimeStateRepository(connectionString),
             sp.GetService<IAudioToTextProvider>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<ModelDiscoveryService>>()));
-        services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+        services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<IModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
         services.AddSingleton<ISearchCorpusSearcher>(sp => new PostgresSearchCorpusSearcher(connectionString));
         services.AddSingleton<SearchUiService>(sp => new SearchUiService(
             sp.GetRequiredService<IRecentSearchStore>(),
@@ -100,7 +109,7 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
         services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
         services.AddTranscriptIngestionPipeline(configuration);
-        services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
+        services.AddScoped<ISearchDocumentEmbeddingStore>(sp => new PostgresSearchDocumentEmbeddingStore(connectionString, sp.GetRequiredService<IEmbeddingService>(), sp.GetRequiredService<IModelReadinessGuard>(), sp.GetRequiredService<IModelReadinessNotifier>()));
         services.AddSingleton<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
         services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
         services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
@@ -111,12 +120,28 @@ internal static class ApiServiceCollectionExtensions
             sp.GetService<IEmbeddingService>(),
             sp.GetService<ITranscriptIngestionService>(),
             sp.GetService<ISearchDocumentRegenerationService>(),
-            sp.GetService<IAudioToTextProvider>()));
+            sp.GetService<IAudioToTextProvider>(),
+            sp.GetService<IModelReadinessGuard>()));
         services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
         services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
         services.AddScoped<IChannelRepository, ChannelRepository>();
         services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
         services.AddScoped<IIngestionItemRepository, IngestionItemRepository>();
+
+        // WS-7 S5/S4 (review Fix 1): register the link-classification and transcript-chunking
+        // seams with the shared readiness guard + notifier so the API process never runs them
+        // with a null guard and silently degrades. Mirrors the Worker host wiring.
+        services.AddScoped<ILinkClassificationService, LinkClassificationService>(sp =>
+            new LinkClassificationService(
+                sp.GetService<MeaiChatClientWrapper>(),
+                sp.GetService<ILogger<LinkClassificationService>>(),
+                sp.GetService<IModelReadinessGuard>(),
+                sp.GetService<IModelReadinessNotifier>()));
+        services.AddScoped(sp => new DeterministicTranscriptChunkingService(
+            sp.GetService<MeaiChatClientWrapper>(),
+            sp.GetService<ILogger<DeterministicTranscriptChunkingService>>(),
+            sp.GetService<IModelReadinessGuard>(),
+            sp.GetService<IModelReadinessNotifier>()));
 
         return services;
     }

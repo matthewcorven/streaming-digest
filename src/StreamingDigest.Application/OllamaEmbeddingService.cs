@@ -65,7 +65,7 @@ public sealed class OllamaEmbeddingService : IEmbeddingService
         return ResolveConfigurationValue(
             ["embedding:model", "embeddings:model"],
             ["STREAMINGDIGEST_EMBEDDING_MODEL"])
-            ?? "nomic-embed-text";
+            ?? ModelResolutionDefaults.EmbeddingModel;
     }
 
     private int? ResolveExpectedDimensions()

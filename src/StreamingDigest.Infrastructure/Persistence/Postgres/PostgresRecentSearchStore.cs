@@ -5,6 +5,7 @@ using Npgsql;
 using Pgvector;
 using Pgvector.Npgsql;
 using StreamingDigest.Application;
+using StreamingDigest.Domain;
 
 namespace StreamingDigest.Infrastructure.Persistence;
 
@@ -14,13 +15,19 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly IEmbeddingService _embeddingService;
+    private readonly IModelReadinessGuard? _modelReadinessGuard;
+    private readonly IModelReadinessNotifier? _modelReadinessNotifier;
     private readonly JsonSerializerOptions _jsonSerializerOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
     private readonly EmbeddingErrorSink _embeddingErrors = new();
 
-    public PostgresRecentSearchStore(string connectionString, IEmbeddingService embeddingService)
+    public PostgresRecentSearchStore(
+        string connectionString,
+        IEmbeddingService embeddingService,
+        IModelReadinessGuard? modelReadinessGuard = null,
+        IModelReadinessNotifier? modelReadinessNotifier = null)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -28,6 +35,8 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
         }
 
         _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
+        _modelReadinessGuard = modelReadinessGuard;
+        _modelReadinessNotifier = modelReadinessNotifier;
 
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.UseVector();
@@ -53,16 +62,33 @@ public sealed class PostgresRecentSearchStore : IRecentSearchStore, IAsyncDispos
         // Interim model-readiness degrade (plan §6 D4 / WS-7): if the embedding service is
         // unavailable, persist the recent search without a query embedding and let the
         // ranking layer fall back to text-only. Never 500 because the model is down.
+        // WS-7 S2: preflight readiness through the shared guard so an unready model skips the
+        // doomed runtime call and surfaces a single notified degrade instead of a silent one.
         EmbeddingGenerationResult? embedding = null;
         Vector? vector = null;
-        try
+
+        var readiness = _modelReadinessGuard is null
+            ? null
+            : await _modelReadinessGuard.CheckAsync(RuntimeRole.Embedding, cancellationToken);
+
+        if (readiness is { IsReady: false })
         {
-            embedding = await _embeddingService.GenerateEmbeddingAsync(normalizedQuery, cancellationToken);
-            vector = new Vector(embedding.Values.Select(static value => (float)value).ToArray());
+            _modelReadinessNotifier?.ReportDegraded(
+                "S2",
+                readiness,
+                "Query embedding skipped; search persisted without vector (text-only ranking)");
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        else
         {
-            _embeddingErrors.Record(ex);
+            try
+            {
+                embedding = await _embeddingService.GenerateEmbeddingAsync(normalizedQuery, cancellationToken);
+                vector = new Vector(embedding.Values.Select(static value => (float)value).ToArray());
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _embeddingErrors.Record(ex);
+            }
         }
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);

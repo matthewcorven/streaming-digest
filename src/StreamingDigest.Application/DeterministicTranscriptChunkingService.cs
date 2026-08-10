@@ -24,6 +24,8 @@ public sealed class DeterministicTranscriptChunkingService
 
     private readonly MeaiChatClientWrapper? _chatClientWrapper;
     private readonly ILogger<DeterministicTranscriptChunkingService>? _logger;
+    private readonly IModelReadinessGuard? _modelReadinessGuard;
+    private readonly IModelReadinessNotifier? _modelReadinessNotifier;
 
     public DeterministicTranscriptChunkingService()
         : this(null, null)
@@ -32,10 +34,14 @@ public sealed class DeterministicTranscriptChunkingService
 
     public DeterministicTranscriptChunkingService(
         MeaiChatClientWrapper? chatClientWrapper = null,
-        ILogger<DeterministicTranscriptChunkingService>? logger = null)
+        ILogger<DeterministicTranscriptChunkingService>? logger = null,
+        IModelReadinessGuard? modelReadinessGuard = null,
+        IModelReadinessNotifier? modelReadinessNotifier = null)
     {
         _chatClientWrapper = chatClientWrapper;
         _logger = logger;
+        _modelReadinessGuard = modelReadinessGuard;
+        _modelReadinessNotifier = modelReadinessNotifier;
     }
 
     /// <summary>
@@ -274,6 +280,26 @@ public sealed class DeterministicTranscriptChunkingService
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Semantic refinement failed for transcript chunking generation {GenerationId}.", generation.Id);
+
+            // WS-7 S4: surface a one-time notified degrade when the LLM is unreachable/unready
+            // instead of only a silent deterministic fallback.
+            if (_modelReadinessGuard is not null && _modelReadinessNotifier is not null)
+            {
+                try
+                {
+                    var readiness = _modelReadinessGuard.CheckAsync(RuntimeRole.LLM, CancellationToken.None).GetAwaiter().GetResult();
+                    _modelReadinessNotifier.ReportDegraded(
+                        "S4",
+                        readiness,
+                        "Semantic transcript refinement skipped; deterministic chunking used",
+                        entityType: "video",
+                        entityId: video.Id);
+                }
+                catch (Exception guardEx)
+                {
+                    _logger?.LogDebug(guardEx, "Model readiness guard check failed during S4 degrade handling.");
+                }
+            }
         }
     }
 

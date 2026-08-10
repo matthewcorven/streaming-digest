@@ -1,6 +1,6 @@
 using StreamingDigest.Domain;
 
-namespace StreamingDigest.Infrastructure.Persistence.EntityFramework;
+namespace StreamingDigest.Application.Repositories;
 
 public interface IIngestionItemRepository
 {

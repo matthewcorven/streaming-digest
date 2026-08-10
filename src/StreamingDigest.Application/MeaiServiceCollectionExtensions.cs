@@ -12,8 +12,8 @@ namespace StreamingDigest.Application;
 /// </summary>
 public static class MeaiServiceCollectionExtensions
 {
-    private const string DefaultEmbeddingModel = "nomic-embed-text";
-    private const string DefaultLlmModel = "llama2";
+    private const string DefaultEmbeddingModel = ModelResolutionDefaults.EmbeddingModel;
+    private const string DefaultLlmModel = ModelResolutionDefaults.LlmModel;
     private const string DefaultOllamaHost = "http://localhost:11434";
 
     /// <summary>

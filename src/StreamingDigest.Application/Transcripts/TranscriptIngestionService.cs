@@ -18,7 +18,9 @@ public sealed class TranscriptIngestionService(
     IVideoMediaSourceResolver? mediaFileResolver = null,
     ISearchDocumentGenerator? searchDocumentGenerator = null,
     ISearchDocumentEmbeddingStore? searchDocumentEmbeddingStore = null,
-    ILogger<TranscriptIngestionService>? logger = null) : ITranscriptIngestionService
+    ILogger<TranscriptIngestionService>? logger = null,
+    IModelReadinessNotifier? modelReadinessNotifier = null,
+    IModelReadinessGuard? modelReadinessGuard = null) : ITranscriptIngestionService
 {
     private readonly IAudioToTextProvider? _audioToTextProvider = audioToTextProvider;
     private readonly ITemporaryMediaManager? _temporaryMediaManager = temporaryMediaManager;
@@ -26,6 +28,8 @@ public sealed class TranscriptIngestionService(
     private readonly ISearchDocumentGenerator? _searchDocumentGenerator = searchDocumentGenerator;
     private readonly ISearchDocumentEmbeddingStore? _searchDocumentEmbeddingStore = searchDocumentEmbeddingStore;
     private readonly ILogger<TranscriptIngestionService>? _logger = logger;
+    private readonly IModelReadinessNotifier? _modelReadinessNotifier = modelReadinessNotifier;
+    private readonly IModelReadinessGuard? _modelReadinessGuard = modelReadinessGuard;
 
     public async Task<TranscriptIngestionResult> IngestAsync(Guid videoId, CancellationToken ct)
     {
@@ -330,6 +334,18 @@ public sealed class TranscriptIngestionService(
         }
         catch (Exception)
         {
+           // WS-7 S6: whisper transcription failed (service down/unreachable/model unready) and the
+           // caller degrades to 'unavailable_captions'. Consult the shared guard so the emitted event
+           // reports the truthful status ('missing' when whisper is unconfigured, 'error' when the
+           // endpoint is configured but the transcription faulted) instead of always 'error'.
+           var readiness = await ResolveAudioReadinessAsync(videoId);
+           _modelReadinessNotifier?.ReportDegraded(
+               "S6",
+               readiness,
+               "Transcription degraded to 'unavailable_captions' (no local whisper transcript)",
+               dbContext: context,
+               entityType: "video",
+               entityId: videoId);
            return null;
         }
         finally
@@ -383,6 +399,36 @@ public sealed class TranscriptIngestionService(
         }
 
         return await _mediaFileResolver.ResolveAsync(videoId, ct);
+    }
+
+    // WS-7 S6 (review Fix 3): ask the shared guard for whisper readiness so the degrade event
+    // distinguishes a missing/unconfigured runtime from a genuine transcription error. The guard
+    // is documented to never throw for an unready model, but any infrastructure fault falls back
+    // to a truthful hand-built 'error' record so the notification is still emitted.
+    private async Task<ModelReadiness> ResolveAudioReadinessAsync(Guid videoId)
+    {
+        if (_modelReadinessGuard is not null)
+        {
+           try
+           {
+               return await _modelReadinessGuard.CheckAsync(RuntimeRole.Audio, CancellationToken.None);
+           }
+           catch (Exception guardException)
+           {
+               _logger?.LogWarning(
+                   guardException,
+                   "Model readiness guard faulted while checking whisper for video {VideoId}; falling back to a hand-built 'error' readiness record.",
+                   videoId);
+           }
+        }
+
+        return new ModelReadiness(
+           RuntimeRole.Audio,
+           ModelProvider.Whisper.ToString().ToLowerInvariant(),
+           "whisper",
+           IsReady: false,
+           Status: ModelRuntimeStatuses.Error,
+           Reason: $"Whisper transcription failed for video '{videoId}'.");
     }
 
     internal static CaptionTrackInfo? SelectPreferredTrack(IReadOnlyList<CaptionTrackInfo> tracks)
