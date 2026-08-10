@@ -879,6 +879,9 @@ Canonical `event_type` values (the code-level catalog lives in `src/StreamingDig
 - `embedding_reprocess_failed`
 - `notification_dispatch_outcome`
 - `digest_assembled`
+- `model_capability_unready`
+- `stage_fallback_applied`
+- `ingestion_stage_failed`
 
 Any change that writes a new domain-event kind must add its `event_type` to this catalog and to the code-level catalog in the same change.
 

@@ -14,6 +14,7 @@ using Npgsql;
 using StreamingDigest.Application;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Observability;
+using StreamingDigest.Application.Orchestration;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Screenshots;
 using StreamingDigest.Application.Transcripts;
@@ -225,6 +226,25 @@ builder.Services.AddSingleton<IMetadataAdapterSelector>(sp =>
     // YouTube API adapter is optional; if API key is missing, it will be marked as unconfigured
     return new MetadataAdapterSelector(ytDlpAdapter, youtubeApiAdapter, appConfig, logger);
 });
+
+// ── Ingestion Orchestrator + Stage Handlers (App A2, #211) ───────────────────────
+builder.Services.AddScoped<IChannelRepository, ChannelRepository>();
+builder.Services.AddSingleton<IModelReadinessGuard, InterimModelReadinessGuard>();
+builder.Services.AddSingleton<IVideoLinkExtractionService, VideoLinkExtractionService>();
+builder.Services.AddSingleton<AuthorChapterSegmentationService>();
+builder.Services.AddSingleton<IRepositoryMetadataService>(sp =>
+    new RepositoryMetadataService(new RepositoryHostDetectionService(), sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(RepositoryMetadataService))));
+builder.Services.AddScoped<IVideoPipelinePersistence, EfVideoPipelinePersistence>();
+builder.Services.AddScoped<IWebsiteScraper, WorkerWebsiteScraper>();
+builder.Services.AddScoped<IVideoStageHandler, TranscriptStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, SegmentsStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, ScreenshotsStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, LinksStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, ReposStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, WebsitesStageHandler>();
+builder.Services.AddScoped<IVideoStageHandler, EmbeddingsStageHandler>();
+builder.Services.AddScoped<VideoPipelineProcessor>();
+builder.Services.AddScoped<IIngestionOrchestrator, IngestionOrchestrator>();
 
 var host = builder.Build();
 var environmentName = builder.Environment.EnvironmentName;
