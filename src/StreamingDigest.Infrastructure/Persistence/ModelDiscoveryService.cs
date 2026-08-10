@@ -22,15 +22,20 @@ public sealed class ModelDiscoveryService
 
     public IReadOnlyList<ModelOptionDefinition> GetSupportedModels() => SupportedModels.ToList();
 
-    public async Task<ModelDownloadResult> QueueDownloadAsync(string connectionString, string? modelKind, string? modelId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Resolves a catalog model for a download request, rejecting anything that is not a
+    /// downloadable Ollama model. Kept side-effect free; durable persistence and enqueueing
+    /// happen in the API endpoint before it returns 202 (WS-5).
+    /// </summary>
+    public ModelOptionDefinition ResolveDownloadableModel(string? modelKind, string? modelId)
     {
         var model = ResolveModel(modelKind, modelId);
-        var operationId = Guid.NewGuid();
-        var statusUrl = $"/api/admin/operations/{operationId}";
+        if (!model.Downloadable || model.Provider != ModelProvider.Ollama)
+        {
+            throw new ArgumentException($"The requested model '{model.Id}' is verify-only and cannot be downloaded.", nameof(modelId));
+        }
 
-        await RecordReadinessVerificationAsync(connectionString, model, cancellationToken, "queued");
-
-        return new ModelDownloadResult("queued", model.Family, model.Id, operationId, statusUrl);
+        return model;
     }
 
     public async Task<ModelVerificationResult> VerifyModelAsync(string connectionString, string? modelKind, string? modelId, CancellationToken cancellationToken = default)
@@ -46,21 +51,31 @@ public sealed class ModelDiscoveryService
         var normalizedKind = Normalize(modelKind);
         var normalizedModelId = Normalize(modelId);
 
+        if (!string.IsNullOrWhiteSpace(normalizedModelId))
+        {
+            var byId = SupportedModels.FirstOrDefault(model => string.Equals(model.Id, normalizedModelId, StringComparison.OrdinalIgnoreCase));
+            if (byId is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(normalizedKind)
+                    && !string.Equals(byId.Family, normalizedKind, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException(
+                        $"The requested model '{normalizedModelId}' does not belong to the '{normalizedKind}' model kind.",
+                        nameof(modelId));
+                }
+
+                return byId;
+            }
+
+            throw new ArgumentException($"The requested model '{normalizedModelId}' is not currently supported.", nameof(modelId));
+        }
+
         if (!string.IsNullOrWhiteSpace(normalizedKind))
         {
             var byKind = SupportedModels.FirstOrDefault(model => string.Equals(model.Family, normalizedKind, StringComparison.OrdinalIgnoreCase));
             if (byKind is not null)
             {
                 return byKind;
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedModelId))
-        {
-            var byId = SupportedModels.FirstOrDefault(model => string.Equals(model.Id, normalizedModelId, StringComparison.OrdinalIgnoreCase));
-            if (byId is not null)
-            {
-                return byId;
             }
         }
 
@@ -121,7 +136,5 @@ public sealed record ModelOptionDefinition(
     bool Downloadable,
     string? InstallCommand = null,
     string? MountPath = null);
-
-public sealed record ModelDownloadResult(string Status, string ModelKind, string ModelId, Guid OperationId, string StatusUrl);
 
 public sealed record ModelVerificationResult(string Status, string ModelKind, string ModelId, bool Verified, string Message);

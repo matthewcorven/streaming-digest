@@ -147,6 +147,48 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         Assert.Equal("queued", downloadPayload.Status);
         Assert.Equal("llm", downloadPayload.ModelKind);
         Assert.Equal("llama3.1:8b", downloadPayload.ModelId);
+
+        // WS-5 durable handoff: the operation row and model_runtime_state=queued row must
+        // exist (with a hangfire_job_id) before the API returned 202.
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await using var operationCommand = new NpgsqlCommand(
+            "SELECT status, operation_type, hangfire_job_id FROM public.operations WHERE id = @id",
+            connection);
+        operationCommand.Parameters.AddWithValue("id", downloadPayload.OperationId);
+        await using (var reader = await operationCommand.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync(), "Expected a persisted operations row for the download.");
+            Assert.Equal("queued", reader.GetString(0));
+            Assert.Equal("model.download", reader.GetString(1));
+            Assert.False(reader.IsDBNull(2));
+            Assert.False(string.IsNullOrWhiteSpace(reader.GetString(2)));
+        }
+
+        await using var stateCommand = new NpgsqlCommand(
+            "SELECT status, current_operation_id FROM public.model_runtime_state WHERE provider = 'ollama' AND model_id = 'llama3.1:8b'",
+            connection);
+        await using (var reader = await stateCommand.ExecuteReaderAsync())
+        {
+            Assert.True(await reader.ReadAsync(), "Expected a persisted model_runtime_state row for the download.");
+            Assert.Equal("queued", reader.GetString(0));
+            Assert.Equal(downloadPayload.OperationId, reader.GetGuid(1));
+        }
+    }
+
+    [Fact]
+    public async Task ModelDownloadEndpoint_RejectsVerifyOnlyModels()
+    {
+        using var client = CreateClient();
+        using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
+        Assert.True(loginResponse.IsSuccessStatusCode);
+
+        using var downloadRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
+        downloadRequest.Content = JsonContent.Create(new { modelKind = "embedding", modelId = "text-embedding-3-small" });
+        using var downloadResponse = await client.SendAsync(downloadRequest);
+
+        Assert.Equal(HttpStatusCode.BadRequest, downloadResponse.StatusCode);
     }
 
     [Fact]
@@ -497,6 +539,8 @@ public sealed class ModelDownloadResponse
     public string? Status { get; set; }
     public string? ModelKind { get; set; }
     public string? ModelId { get; set; }
+    public Guid OperationId { get; set; }
+    public string? StatusUrl { get; set; }
 }
 
 public sealed class ModelVerificationResponse

@@ -131,6 +131,21 @@ builder.Services.AddDbContext<StreamingDigestDbContext>(options => options.UseNp
 builder.Services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
 builder.Services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
 builder.Services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+// WS-5: model download execution pipeline. The Hangfire job (ModelDownloadJob) hands commands
+// to the bounded channel; the hosted service is the single reader, enforcing pull concurrency 1.
+builder.Services.AddSingleton<IOperationStore>(sp => new PostgresOperationStore(connectionString));
+builder.Services.AddSingleton<AppReadinessStateService>();
+builder.Services.AddSingleton<StreamingDigest.Worker.ModelDownload.ChannelModelDownloadQueue>();
+builder.Services.AddSingleton<StreamingDigest.Worker.ModelDownload.ModelDownloadJob>();
+builder.Services.AddHostedService(sp => new StreamingDigest.Worker.ModelDownload.ModelDownloadHostedService(
+    sp.GetRequiredService<StreamingDigest.Worker.ModelDownload.ChannelModelDownloadQueue>(),
+    sp.GetRequiredService<IModelRuntimeClient>(),
+    new PostgresModelRuntimeStateRepository(connectionString),
+    sp.GetRequiredService<IOperationStore>(),
+    sp.GetRequiredService<AppReadinessStateService>(),
+    connectionString,
+    sp,
+    sp.GetRequiredService<ILogger<StreamingDigest.Worker.ModelDownload.ModelDownloadHostedService>>()));
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
 builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
