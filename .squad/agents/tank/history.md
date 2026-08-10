@@ -27,3 +27,8 @@ Submitted revision commit 80c983e on PR #179 ([Task 12.2] Implement vector searc
 - Branch `squad/199-model-runtime-client` reached maintainer-ready state after one revision cycle.
 - Morpheus first-pass feedback was applied in commit `aecce5d`; independent adversarial re-review approved the final artifact at 95%.
 - Coordinator later confirmed the initial `z-ai/glm-5.2` runtime was a spawn-schema footgun (`create_session.model` at top level); the fix is `kickoff.model`, not a Tank-specific routing problem.
+
+## 2026-08-10 — PR #238 merge conflict resolved (issue #200)
+
+- Merged origin/main (7de6448, post-#237) into `squad/200-sse-events`; resolved 2 trivial-union conflicts: `ApiServiceCollectionExtensions.cs` (kept both WS-7 guard registrations + SSE broadcaster singleton) and `ModelsEndpoints.cs` (using-block union incl. Hangfire + Domain).
+- No CS0104/ambiguity surfaced; no behavior changes. Validation: build 0 errors; unit 528/528; integration 87 pass / 18 env-skipped; CI `test` pass (3m31s). New head: c47cfd3. PR MERGEABLE, left open per instructions.
