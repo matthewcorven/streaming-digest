@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using StreamingDigest.Application;
 using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Application.Models;
@@ -22,17 +23,20 @@ public sealed class ModelDiscoveryService
     private readonly IModelRuntimeClient? _modelRuntimeClient;
     private readonly IModelRuntimeStateRepository? _runtimeStateRepository;
     private readonly IAudioToTextProvider? _audioToTextProvider;
+    private readonly ILogger<ModelDiscoveryService>? _logger;
 
     public ModelDiscoveryService(
         AppReadinessStateService readinessStateService,
         IModelRuntimeClient? modelRuntimeClient = null,
         IModelRuntimeStateRepository? runtimeStateRepository = null,
-        IAudioToTextProvider? audioToTextProvider = null)
+        IAudioToTextProvider? audioToTextProvider = null,
+        ILogger<ModelDiscoveryService>? logger = null)
     {
         _readinessStateService = readinessStateService;
         _modelRuntimeClient = modelRuntimeClient;
         _runtimeStateRepository = runtimeStateRepository;
         _audioToTextProvider = audioToTextProvider;
+        _logger = logger;
     }
 
     public IReadOnlyList<ModelOptionDefinition> GetSupportedModels() => SupportedModels.ToList();
@@ -117,9 +121,14 @@ public sealed class ModelDiscoveryService
         }
 
         var health = await _audioToTextProvider.CheckHealthAsync(cancellationToken);
+        // /health proves the whisper *service* is reachable, not that the configured model is
+        // loaded — say so precisely rather than implying model readiness (unlike the Ollama tag
+        // list, which does prove model presence).
         return health.IsHealthy
-            ? new ModelProbeResult(true, false, health.Reason)
-            : new ModelProbeResult(false, false, health.Reason);
+            ? new ModelProbeResult(true, false,
+                $"Whisper service is reachable at {health.Endpoint} (health probe passed). Model load is verified on first transcription.",
+                ProbeKind: "service_health")
+            : new ModelProbeResult(false, false, health.Reason, ProbeKind: "service_health");
     }
 
     // Ollama reports installed models with an implicit ":latest" tag when the tag was not
@@ -164,6 +173,7 @@ public sealed class ModelDiscoveryService
                 modelKind = model.Family,
                 modelLabel = model.Label,
                 probe = "verify",
+                probeKind = probe.ProbeKind,
                 verified = probe.Verified,
                 message = probe.Message,
                 probedAt = now
@@ -199,14 +209,22 @@ public sealed class ModelDiscoveryService
                         ["modelKind"] = model.Family,
                         ["modelLabel"] = model.Label,
                         ["probe"] = "verify",
+                        ["probeKind"] = probe.ProbeKind,
                         ["verified"] = probe.Verified,
                         ["requestedAt"] = DateTimeOffset.UtcNow
                     }),
                 cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort onboarding state updates are not required for the model discovery flow to proceed.
+            // Best-effort onboarding state updates are not required for the model discovery flow to
+            // proceed, but per the 2026-08-01 directive we signal rather than silently degrade:
+            // model_runtime_state was persisted, app_readiness_checks was not.
+            _logger?.LogWarning(
+                ex,
+                "Readiness projection for step {StepKey} failed after verify of model {ModelId}; model_runtime_state was persisted but app_readiness_checks was not updated.",
+                stepKey,
+                model.Id);
         }
     }
 
@@ -263,9 +281,15 @@ public sealed class ModelDiscoveryService
                     }),
                 cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort onboarding state updates are not required for the model discovery flow to proceed.
+            // Best-effort onboarding state updates are not required for the model discovery flow to
+            // proceed, but per the 2026-08-01 directive we signal rather than silently degrade.
+            _logger?.LogWarning(
+                ex,
+                "Readiness verification for step {StepKey} failed while queueing model {ModelId}; app_readiness_checks was not updated.",
+                stepKey,
+                model.Id);
         }
     }
 
@@ -279,7 +303,7 @@ public sealed class ModelDiscoveryService
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private sealed record ModelProbeResult(bool Verified, bool PresentInRuntime, string Message);
+    private sealed record ModelProbeResult(bool Verified, bool PresentInRuntime, string Message, string? ProbeKind = null);
 }
 
 public sealed record ModelOptionDefinition(

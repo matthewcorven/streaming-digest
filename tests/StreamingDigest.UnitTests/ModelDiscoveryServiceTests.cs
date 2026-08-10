@@ -199,6 +199,9 @@ public sealed class ModelDiscoveryServiceTests
         var result = await service.VerifyModelAsync(string.Empty, "audio", "whisper");
 
         Assert.True(result.Verified);
+        // The message must say "service reachable", not imply the model is loaded.
+        Assert.Contains("reachable", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Model load is verified on first transcription", result.Message, StringComparison.OrdinalIgnoreCase);
         var state = Assert.Single(repository.States);
         Assert.Equal("whisper", state.Provider);
         Assert.Equal("audio", state.RuntimeRole);
@@ -206,6 +209,7 @@ public sealed class ModelDiscoveryServiceTests
         Assert.NotNull(state.LastVerifiedAt);
         // Health probes do not observe a runtime tag list, so last_seen_in_runtime_at stays null.
         Assert.Null(state.LastSeenInRuntimeAt);
+        Assert.Contains("service_health", state.DetailsJson, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

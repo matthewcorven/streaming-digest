@@ -68,7 +68,8 @@ internal static class ApiServiceCollectionExtensions
             sp.GetRequiredService<AppReadinessStateService>(),
             sp.GetService<Application.IModelRuntimeClient>(),
             new PostgresModelRuntimeStateRepository(connectionString),
-            sp.GetService<IAudioToTextProvider>()));
+            sp.GetService<IAudioToTextProvider>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<ModelDiscoveryService>>()));
         services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
         services.AddSingleton<ISearchCorpusSearcher>(sp => new PostgresSearchCorpusSearcher(connectionString));
         services.AddSingleton<SearchUiService>(sp => new SearchUiService(
