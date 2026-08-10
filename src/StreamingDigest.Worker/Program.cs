@@ -154,6 +154,7 @@ builder.Services.AddHttpClient("ollama-runtime")
 // with SetHandlerLifetime so DNS refreshes for containerized Ollama.
 builder.Services.AddTransient<IModelRuntimeClient>(sp =>
     new OllamaModelRuntimeClient(sp.GetRequiredService<IHttpClientFactory>(), builder.Configuration));
+builder.Services.AddSingleton<ModelRuntimeReconcileService>();
 builder.Services.AddSingleton<IEffectiveValueService, EffectiveValueService>();
 builder.Services.AddSingleton<ISearchDocumentGenerationService, SearchDocumentGenerationService>();
 builder.Services.AddSingleton<IScreenshotGenerationService, ScreenshotGenerationService>();
@@ -285,6 +286,11 @@ else
 var modelRuntimeStateSchemaGuard = host.Services.GetRequiredService<IModelRuntimeStateSchemaGuard>();
 await modelRuntimeStateSchemaGuard.EnsureSchemaAsync(connectionString);
 
+// WS-3 startup reconcile (S10): hydrate model_runtime_state from the runtime /api/tags so
+// bootstrap-installed models show `ready` without a manual verify. Failures signal instead of
+// silently degrading; startup never blocks on the runtime.
+await ReconcileModelRuntimeStateAtStartupAsync(startupLogger, startupServiceScope.ServiceProvider);
+
 await host.RunAsync();
 
 static async Task<DatabaseStatus> EnsureDatabaseConnectivityAsync(ILogger logger, string connectionString)
@@ -380,6 +386,48 @@ static ScraperStartupDependency ResolveScraperStartupDependency(string? configur
     }
 
     return new ScraperStartupDependency(baseUri, configuredBaseUrl, null);
+}
+
+static async Task ReconcileModelRuntimeStateAtStartupAsync(ILogger logger, IServiceProvider serviceProvider)
+{
+    try
+    {
+        var reconcileService = serviceProvider.GetRequiredService<ModelRuntimeReconcileService>();
+        var repository = serviceProvider.GetRequiredService<IModelRuntimeStateRepository>();
+
+        var result = await reconcileService.ReconcileAsync(repository);
+        if (!result.RuntimeReachable)
+        {
+            await SignalStartupDependencyIssueAsync(
+                logger,
+                serviceProvider,
+                $"Worker startup degraded: model runtime reconcile could not reach /api/tags ({result.ErrorSummary}). Models will not show ready until the runtime is reachable and the worker restarts.");
+            return;
+        }
+
+        if (!result.Succeeded)
+        {
+            await SignalStartupDependencyIssueAsync(
+                logger,
+                serviceProvider,
+                $"Worker startup degraded: model runtime reconcile reached /api/tags but failed to persist state ({result.ErrorSummary}).");
+            return;
+        }
+
+        logger.LogInformation(
+            "Model runtime startup reconcile completed: {PresentCount} present, {ReadyCount} marked ready, {InFlightCount} in-flight refreshed, {SkippedCount} skipped.",
+            result.PresentCount,
+            result.MarkedReadyCount,
+            result.RefreshedInFlightCount,
+            result.SkippedCount);
+    }
+    catch (Exception ex)
+    {
+        await SignalStartupDependencyIssueAsync(
+            logger,
+            serviceProvider,
+            $"Worker startup degraded: model runtime reconcile failed unexpectedly ({ex.Message}).");
+    }
 }
 
 static async Task SignalStartupDependencyIssueAsync(

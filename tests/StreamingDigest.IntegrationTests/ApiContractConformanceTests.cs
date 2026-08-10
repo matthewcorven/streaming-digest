@@ -186,8 +186,11 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ModelVerificationEndpoint_ReturnsVerifiedState()
+    public async Task ModelVerificationEndpoint_WithoutReachableRuntime_ReportsHonestFailure()
     {
+        // WS-4 (#203): verify runs a real runtime probe and must not report success when the
+        // runtime is unreachable. The harness container has no Ollama, so the probe fails and
+        // the response must be a truthful failure, not an optimistic "verified".
         using var client = CreateClient();
         using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
         Assert.True(loginResponse.IsSuccessStatusCode);
@@ -199,7 +202,9 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
         var verifyPayload = await verifyResponse.Content.ReadFromJsonAsync<ModelVerificationResponse>();
         Assert.NotNull(verifyPayload);
-        Assert.True(verifyPayload.Verified);
+        Assert.False(verifyPayload.Verified);
+        Assert.Equal("failed", verifyPayload.Status);
+        Assert.False(string.IsNullOrWhiteSpace(verifyPayload.Message));
         Assert.Equal("embedding", verifyPayload.ModelKind);
         Assert.Equal("bge-m3", verifyPayload.ModelId);
     }
