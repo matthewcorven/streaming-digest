@@ -51,6 +51,10 @@ internal static class ApiServiceCollectionExtensions
         });
         services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
         services.AddHangfire(config => config.UseStorage(hangfireStorage));
+        // Register the resolved JobStorage singleton explicitly so the download endpoint can
+        // inspect the real per-app storage (not the process-global JobStorage.Current, which
+        // is shared across co-hosted test factories and misreports in those contexts).
+        services.AddSingleton(hangfireStorage);
         services.AddDbContext<StreamingDigestDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IStreamingDigestDbContext>(sp => sp.GetRequiredService<StreamingDigestDbContext>());
         services.AddSingleton<BootstrapAdminUserService>();
@@ -59,6 +63,8 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
         services.AddSingleton<Application.ModelRuntimeReconcileService>();
+        // WS-5: durable operation persistence for the model download handoff.
+        services.AddSingleton<IOperationStore>(sp => new PostgresOperationStore(connectionString));
         services.AddSingleton<FirstUserSetupService>();
         // Verify rewrite (WS-4): the discovery service probes real runtimes (Ollama tags /
         // whisper /health) and persists truth to model_runtime_state + app_readiness_checks.
