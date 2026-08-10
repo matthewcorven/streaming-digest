@@ -6,6 +6,7 @@ using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Application.Models;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
@@ -58,6 +59,8 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<AppReadinessStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
+        // Single in-process broadcaster shared by every publisher and SSE subscriber.
+        services.AddSingleton<IModelLifecycleEventBroadcaster, ModelLifecycleEventBroadcaster>();
         services.AddSingleton<FirstUserSetupService>();
         services.AddSingleton<ModelDiscoveryService>();
         services.AddSingleton<IRecentSearchStore>(sp => new PostgresRecentSearchStore(connectionString, sp.GetRequiredService<IEmbeddingService>()));
