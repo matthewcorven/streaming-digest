@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 
 namespace StreamingDigest.Application.Models;
 
@@ -14,14 +15,21 @@ public sealed class ModelLifecycleEventBroadcaster : IModelLifecycleEventBroadca
 {
     private const int SubscriberBufferCapacity = 256;
 
+    private readonly ILogger<ModelLifecycleEventBroadcaster> _logger;
     private readonly object _gate = new();
     private readonly List<Channel<ModelLifecycleEvent>> _subscribers = [];
+
+    public ModelLifecycleEventBroadcaster(ILogger<ModelLifecycleEventBroadcaster> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     /// <summary>
     /// Number of active subscribers. Exposed for tests that must wait until the SSE endpoint
     /// has registered before publishing; the broadcaster has no replay and no other
     /// "subscribed" signal.
     /// </summary>
+    /// <remarks>Test-only introspection; not part of the public contract.</remarks>
     public int SubscriberCount
     {
         get
@@ -52,6 +60,9 @@ public sealed class ModelLifecycleEventBroadcaster : IModelLifecycleEventBroadca
                 // resynchronizes through the status snapshot endpoint.
                 subscriber.Writer.TryComplete();
                 RemoveSubscriber(subscriber);
+                _logger.LogWarning(
+                    "SSE model-lifecycle subscriber dropped after falling behind the {Capacity}-event buffer; client must reconcile via /api/models/status.",
+                    SubscriberBufferCapacity);
             }
         }
     }

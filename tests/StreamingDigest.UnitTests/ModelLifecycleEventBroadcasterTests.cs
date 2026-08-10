@@ -1,4 +1,5 @@
 using StreamingDigest.Application.Models;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace StreamingDigest.UnitTests;
 
@@ -7,7 +8,7 @@ public sealed class ModelLifecycleEventBroadcasterTests
     [Fact]
     public async Task Subscriber_receives_one_ordered_event_per_publish()
     {
-        var broadcaster = new ModelLifecycleEventBroadcaster();
+        var broadcaster = new ModelLifecycleEventBroadcaster(NullLogger<ModelLifecycleEventBroadcaster>.Instance);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var received = new List<ModelLifecycleEvent>();
@@ -45,7 +46,7 @@ public sealed class ModelLifecycleEventBroadcasterTests
     [Fact]
     public async Task Each_subscriber_receives_its_own_copy_in_publish_order()
     {
-        var broadcaster = new ModelLifecycleEventBroadcaster();
+        var broadcaster = new ModelLifecycleEventBroadcaster(NullLogger<ModelLifecycleEventBroadcaster>.Instance);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var firstSubscriber = new List<ModelLifecycleEvent>();
@@ -92,7 +93,7 @@ public sealed class ModelLifecycleEventBroadcasterTests
     [Fact]
     public async Task Events_published_before_subscription_are_not_replayed()
     {
-        var broadcaster = new ModelLifecycleEventBroadcaster();
+        var broadcaster = new ModelLifecycleEventBroadcaster(NullLogger<ModelLifecycleEventBroadcaster>.Instance);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         broadcaster.Publish(new ModelLifecycleEvent("model.status", "{\"status\":\"queued\"}", DateTimeOffset.UtcNow));
@@ -123,7 +124,7 @@ public sealed class ModelLifecycleEventBroadcasterTests
     [Fact]
     public async Task Cancelled_subscription_stops_receiving_events()
     {
-        var broadcaster = new ModelLifecycleEventBroadcaster();
+        var broadcaster = new ModelLifecycleEventBroadcaster(NullLogger<ModelLifecycleEventBroadcaster>.Instance);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         using var subscriberCts = new CancellationTokenSource();
 
@@ -152,7 +153,7 @@ public sealed class ModelLifecycleEventBroadcasterTests
     [Fact]
     public async Task Disposed_subscription_is_removed_from_the_broadcaster()
     {
-        var broadcaster = new ModelLifecycleEventBroadcaster();
+        var broadcaster = new ModelLifecycleEventBroadcaster(NullLogger<ModelLifecycleEventBroadcaster>.Instance);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         using var subscriberCts = new CancellationTokenSource();
 

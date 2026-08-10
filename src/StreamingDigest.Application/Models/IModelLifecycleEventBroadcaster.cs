@@ -7,6 +7,16 @@ namespace StreamingDigest.Application.Models;
 /// Events are not replayed to late subscribers — reconnecting clients reconcile through
 /// <c>GET /api/models/status</c> per the implementation plan's SSE fallback rule (D5).
 /// </summary>
+/// <remarks>
+/// The broadcaster is deliberately <b>in-process only</b>. The API and the worker run as
+/// separate processes, so events published inside the worker process never reach API-hosted
+/// SSE subscribers. The cross-process source of truth is the persisted
+/// <c>model_runtime_state</c> table together with the <c>GET /api/models/status</c> snapshot
+/// endpoint (D5); SSE is a best-effort, same-process notification channel. A worker-side
+/// publisher that resolves this interface in its own process will publish successfully but
+/// reach no SSE clients — cross-process fan-out (e.g. Postgres LISTEN/NOTIFY bridging into
+/// the API host) is an explicit follow-up if real-time worker events are required.
+/// </remarks>
 public interface IModelLifecycleEventBroadcaster
 {
     /// <summary>
