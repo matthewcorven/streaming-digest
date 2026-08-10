@@ -108,6 +108,21 @@ internal static class ApiServiceCollectionExtensions
         services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
         services.AddScoped<IIngestionItemRepository, IngestionItemRepository>();
 
+        // WS-7 S5/S4 (review Fix 1): register the link-classification and transcript-chunking
+        // seams with the shared readiness guard + notifier so the API process never runs them
+        // with a null guard and silently degrades. Mirrors the Worker host wiring.
+        services.AddScoped<ILinkClassificationService, LinkClassificationService>(sp =>
+            new LinkClassificationService(
+                sp.GetService<MeaiChatClientWrapper>(),
+                sp.GetService<ILogger<LinkClassificationService>>(),
+                sp.GetService<IModelReadinessGuard>(),
+                sp.GetService<IModelReadinessNotifier>()));
+        services.AddScoped(sp => new DeterministicTranscriptChunkingService(
+            sp.GetService<MeaiChatClientWrapper>(),
+            sp.GetService<ILogger<DeterministicTranscriptChunkingService>>(),
+            sp.GetService<IModelReadinessGuard>(),
+            sp.GetService<IModelReadinessNotifier>()));
+
         return services;
     }
 }

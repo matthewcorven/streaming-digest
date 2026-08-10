@@ -77,12 +77,12 @@ public sealed class ModelReadinessGuard : IModelReadinessGuard
                 ModelProvider.Ollama.ToString().ToLowerInvariant(),
                 ResolveConfigurationValue(
                     ["embedding:model", "embeddings:model"],
-                    ["STREAMINGDIGEST_EMBEDDING_MODEL"]) ?? "bge-m3"),
+                    ["STREAMINGDIGEST_EMBEDDING_MODEL"]) ?? ModelResolutionDefaults.EmbeddingModel),
             RuntimeRole.LLM => (
                 ModelProvider.Ollama.ToString().ToLowerInvariant(),
                 ResolveConfigurationValue(
                     ["llm:model"],
-                    ["STREAMINGDIGEST_LLM_MODEL", "OLLAMA_MODEL"]) ?? "llama3.1:8b"),
+                    ["STREAMINGDIGEST_LLM_MODEL", "OLLAMA_MODEL"]) ?? ModelResolutionDefaults.LlmModel),
             _ => (
                 ModelProvider.Ollama.ToString().ToLowerInvariant(),
                 "unknown")

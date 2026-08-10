@@ -143,6 +143,51 @@ public sealed class ModelReadinessGuardTests
         Assert.Equal("whisper", readiness.ModelId);
     }
 
+    // WS-7 review Fix 2: the guard must resolve the same fallback model a seam would actually
+    // call when nothing is configured. Both sides reference ModelResolutionDefaults so the two
+    // cannot silently diverge (guard checking bge-m3 while the seam calls nomic-embed-text).
+    [Fact]
+    public async Task Embedding_default_matches_seam_default()
+    {
+        var repo = new FakeModelRuntimeStateRepository(new ModelRuntimeState
+        {
+            Id = Guid.NewGuid(),
+            Provider = "ollama",
+            ModelId = ModelResolutionDefaults.EmbeddingModel,
+            RuntimeRole = "Embedding",
+            Status = "ready",
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        var guard = new ModelReadinessGuard(repo, BuildConfig(new Dictionary<string, string?>()));
+
+        var readiness = await guard.CheckAsync(RuntimeRole.Embedding);
+
+        Assert.True(readiness.IsReady);
+        Assert.Equal(ModelResolutionDefaults.EmbeddingModel, readiness.ModelId);
+        Assert.Equal(ModelResolutionDefaults.EmbeddingModel, repo.LastModelId);
+    }
+
+    [Fact]
+    public async Task Llm_default_matches_seam_default()
+    {
+        var repo = new FakeModelRuntimeStateRepository(new ModelRuntimeState
+        {
+            Id = Guid.NewGuid(),
+            Provider = "ollama",
+            ModelId = ModelResolutionDefaults.LlmModel,
+            RuntimeRole = "LLM",
+            Status = "ready",
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        var guard = new ModelReadinessGuard(repo, BuildConfig(new Dictionary<string, string?>()));
+
+        var readiness = await guard.CheckAsync(RuntimeRole.LLM);
+
+        Assert.True(readiness.IsReady);
+        Assert.Equal(ModelResolutionDefaults.LlmModel, readiness.ModelId);
+        Assert.Equal(ModelResolutionDefaults.LlmModel, repo.LastModelId);
+    }
+
     private sealed class FakeModelRuntimeStateRepository : IModelRuntimeStateRepository
     {
         private readonly ModelRuntimeState? _state;
