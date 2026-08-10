@@ -14,6 +14,17 @@ public sealed class ChannelRepository(
     public async Task<Channel?> GetByYoutubeChannelIdAsync(string youtubeChannelId, CancellationToken cancellationToken = default)
         => await context.Channels.FirstOrDefaultAsync(channel => channel.YoutubeChannelId == youtubeChannelId, cancellationToken);
 
+    public async Task<List<Channel>> GetAllAsync(bool excludePaused = false, CancellationToken cancellationToken = default)
+    {
+        var query = context.Channels.AsQueryable();
+        if (excludePaused)
+        {
+            query = query.Where(c => !c.IsPaused);
+        }
+
+        return await query.OrderBy(c => c.NameOriginal).ToListAsync(cancellationToken);
+    }
+
     public async Task AddAsync(Channel channel, CancellationToken cancellationToken = default)
     {
         await context.Channels.AddAsync(channel, cancellationToken);
