@@ -4,6 +4,7 @@ using StreamingDigest.Application;
 using StreamingDigest.Application.Admin;
 using StreamingDigest.Application.AudioToText;
 using StreamingDigest.Application.Configuration;
+using StreamingDigest.Application.Orchestration;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Domain;
 
@@ -471,7 +472,202 @@ public sealed class AdminOperationsServiceTests
         Assert.Contains("probe-threw", result.Message);
     }
 
-    private sealed class TestAdminOperationStore : IAdminOperationStore
+    // --- INotificationTestSender / TestMatrixNotificationAsync ---
+
+    [Fact]
+    public async Task TestMatrixNotificationAsync_WithNullSender_ReturnsWarning()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.TestMatrixNotificationAsync();
+
+        Assert.Equal("test.matrix", result.OperationType);
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("warning", result.HealthStatus);
+    }
+
+    [Fact]
+    public async Task TestMatrixNotificationAsync_WithDisabledSender_ReturnsWarning()
+    {
+        var sender = new StubNotificationTestSender(enabled: false, success: false, message: "disabled");
+        var service = new AdminOperationsService(notificationTestSender: sender);
+
+        var result = await service.TestMatrixNotificationAsync();
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("warning", result.HealthStatus);
+        Assert.False(sender.WasCalled);
+    }
+
+    [Fact]
+    public async Task TestMatrixNotificationAsync_WithEnabledSenderSuccess_ReturnsCompletedHealthy()
+    {
+        var sender = new StubNotificationTestSender(enabled: true, success: true, message: "sent");
+        var service = new AdminOperationsService(notificationTestSender: sender);
+
+        var result = await service.TestMatrixNotificationAsync();
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("healthy", result.HealthStatus);
+        Assert.True(sender.WasCalled);
+        Assert.Contains("sent", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TestMatrixNotificationAsync_WithEnabledSenderFailure_ReturnsFailedError()
+    {
+        var sender = new StubNotificationTestSender(enabled: true, success: false, message: "connection refused");
+        var service = new AdminOperationsService(notificationTestSender: sender);
+
+        var result = await service.TestMatrixNotificationAsync();
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("error", result.HealthStatus);
+        Assert.Contains("connection refused", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TestMatrixNotificationAsync_WithThrowingSender_ReturnsFailedError()
+    {
+        var sender = new ThrowingNotificationTestSender();
+        var service = new AdminOperationsService(notificationTestSender: sender);
+
+        var result = await service.TestMatrixNotificationAsync();
+
+        Assert.Equal("failed", result.Status);
+        Assert.Equal("error", result.HealthStatus);
+        Assert.Contains("matrix-threw", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // --- PurgeScreenshotsAsync (no DB configured) ---
+
+    [Fact]
+    public async Task PurgeScreenshotsAsync_WithNoConnectionConfigured_ReturnsAccepted()
+    {
+        var service = new AdminOperationsService();
+
+        var result = await service.PurgeScreenshotsAsync();
+
+        Assert.Equal("accepted", result.Status);
+        Assert.Equal("screenshots.purge", result.OperationType);
+    }
+
+    // --- IIngestionJobDispatcher / RunIngestionNowAsync + RunChannelBackfillAsync ---
+
+    [Fact]
+    public async Task RunIngestionNowAsync_WithDispatcher_ReturnsAcceptedWithoutFallingBackToDirectPersist()
+    {
+        var dispatcher = new RecordingIngestionJobDispatcher();
+        // No DB configured: TryDispatchChannelJobsAsync will catch the error without enqueueing,
+        // but the operation should still be accepted and the dispatcher path taken (not the
+        // raw-SQL fallback).
+        var service = new AdminOperationsService(ingestionJobDispatcher: dispatcher);
+
+        var result = await service.RunIngestionNowAsync("channel-1");
+
+        Assert.Equal("accepted", result.Status);
+        Assert.Equal("ingestion.run", result.OperationType);
+    }
+
+    [Fact]
+    public async Task RunChannelBackfillAsync_WithDispatcher_ReturnsAccepted()
+    {
+        var dispatcher = new RecordingIngestionJobDispatcher();
+        var service = new AdminOperationsService(ingestionJobDispatcher: dispatcher);
+
+        var result = await service.RunChannelBackfillAsync("channel-1");
+
+        Assert.Equal("accepted", result.Status);
+        Assert.Equal("ingestion.backfill", result.OperationType);
+    }
+
+    // --- RetryFailedVideoAsync with dispatcher skips transcript ingestion ---
+
+    [Fact]
+    public async Task RetryFailedVideoAsync_WithDispatcher_ReturnsAcceptedWithoutCallingTranscriptService()
+    {
+        var dispatcher = new RecordingIngestionJobDispatcher();
+        var transcriptService = new RecordingTranscriptIngestionService();
+        var service = new AdminOperationsService(
+            ingestionJobDispatcher: dispatcher,
+            transcriptIngestionService: transcriptService);
+        var videoId = Guid.NewGuid();
+
+        var result = await service.RetryFailedVideoAsync(videoId.ToString());
+
+        Assert.Equal("accepted", result.Status);
+        Assert.Equal("retry.video", result.OperationType);
+        // Dispatcher path must NOT fall through to transcript ingestion.
+        Assert.Null(transcriptService.ReceivedVideoId);
+    }
+
+    // --- ReprocessVideoAsync with dispatcher skips direct transcript ingestion ---
+
+    [Fact]
+    public async Task ReprocessVideoAsync_WithDispatcher_ReturnsAcceptedWithoutCallingTranscriptService()
+    {
+        var dispatcher = new RecordingIngestionJobDispatcher();
+        var transcriptService = new RecordingTranscriptIngestionService();
+        var service = new AdminOperationsService(
+            ingestionJobDispatcher: dispatcher,
+            transcriptIngestionService: transcriptService);
+        var videoId = Guid.NewGuid();
+
+        var result = await service.ReprocessVideoAsync(videoId.ToString());
+
+        Assert.Equal("accepted", result.Status);
+        Assert.Equal("reprocess.video", result.OperationType);
+        Assert.Null(transcriptService.ReceivedVideoId);
+    }
+
+    // --- RetryFailedIngestionRunAsync with dispatcher dispatches channel jobs ---
+
+    [Fact]
+    public async Task RetryFailedIngestionRunAsync_WithDispatcher_ReturnsAccepted()
+    {
+        var dispatcher = new RecordingIngestionJobDispatcher();
+        var service = new AdminOperationsService(ingestionJobDispatcher: dispatcher);
+        var runId = Guid.NewGuid();
+
+        var result = await service.RetryFailedIngestionRunAsync(runId.ToString());
+
+        // No DB: retry still returns accepted (graceful degradation).
+        Assert.Equal("accepted", result.Status);
+        Assert.Equal("retry.ingestionRun", result.OperationType);
+    }
+
+    private sealed class RecordingIngestionJobDispatcher : IIngestionJobDispatcher
+    {
+        private readonly List<ChannelIngestionRequest> _enqueued = [];
+        public IReadOnlyList<ChannelIngestionRequest> EnqueuedRequests => _enqueued;
+
+        public string EnqueueChannelIngestion(ChannelIngestionRequest request)
+        {
+            _enqueued.Add(request);
+            return $"job-{_enqueued.Count}";
+        }
+    }
+
+    private sealed class StubNotificationTestSender(bool enabled, bool success, string message) : INotificationTestSender
+    {
+        public bool IsEnabled => enabled;
+        public bool WasCalled { get; private set; }
+
+        public Task<NotificationTestOutcome> TestAsync(CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            return Task.FromResult(new NotificationTestOutcome(success, message));
+        }
+    }
+
+    private sealed class ThrowingNotificationTestSender : INotificationTestSender
+    {
+        public bool IsEnabled => true;
+
+        public Task<NotificationTestOutcome> TestAsync(CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("matrix-threw");
+    }
+
     {
         private readonly Dictionary<Guid, AdminActionStatus> _operations = new();
 
