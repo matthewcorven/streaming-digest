@@ -3,9 +3,14 @@
 
 @using System.Net.Http.Json
 @using System.Text.Json
+@using StreamingDigest.Web.Models
 @using StreamingDigest.Web.Pages
+@using StreamingDigest.Web.Services
 
 @inject SearchUiSessionService SearchUiSessionService
+@inject ModelStatusService ModelStatusService
+
+@implements IAsyncDisposable
 
 <PageTitle>Admin</PageTitle>
 
@@ -72,23 +77,92 @@
             </ul>
         </article>
 
-        <article class="card">
+        <article class="card models-card">
             <div class="card-header">
                 <h2>Models</h2>
-                <span class="status-pill status-neutral">@(_models.Count) available</span>
+                <div class="card-header-meta">
+                    @if (ModelStatusService.ActiveOperationsCount > 0)
+                    {
+                        <span class="status-pill status-info" aria-live="polite">@ModelStatusService.ActiveOperationsCount @(ModelStatusService.ActiveOperationsCount == 1 ? "operation" : "operations") in progress</span>
+                    }
+                    <span class="status-pill @GetConnectionStripCssClass()" aria-live="polite">@GetConnectionStripLabel()</span>
+                </div>
             </div>
-            <ul class="stack-list">
-                @foreach (var model in _models)
+            @if (ModelStatusService.ConnectionState == SseConnectionState.Paused)
+            {
+                <div class="connection-notice connection-notice--paused">
+                    <span>Live updates paused — reconnection stopped after repeated failures.</span>
+                    <button class="secondary-button compact" type="button" @onclick="RefreshModelsAsync">Refresh all</button>
+                </div>
+            }
+            else if (ModelStatusService.ConnectionState == SseConnectionState.Reconnecting)
+            {
+                <div class="connection-notice connection-notice--reconnecting">
+                    <span>Reconnecting to live updates…</span>
+                    <button class="secondary-button compact" type="button" @onclick="RefreshModelsAsync">Refresh all</button>
+                </div>
+            }
+            <ul class="stack-list model-rows" aria-label="Models">
+                @foreach (var model in ModelStatusService.Models)
                 {
-                    <li>
+                    <li class="model-row" data-model-id="@model.Id" data-state="@model.RowState.ToString().ToLowerInvariant()">
                         <div class="list-title-row">
                             <strong>@model.Label</strong>
-                            <span class="status-pill @GetStatusClass(model.Status)">@model.Status</span>
+                            <span class="status-pill @model.BadgeCssModifier" aria-live="polite">@model.BadgeText</span>
                         </div>
                         <div class="meta-row">
-                            <span>@model.Family · @model.Id</span>
-                            <button class="secondary-button compact" type="button" disabled="@_isBusy" @onclick="() => QueueModelDownloadAsync(model)">Queue download</button>
+                            <span class="model-meta">@model.Provider · @model.Family · @model.Id</span>
+                            @if (!model.Downloadable)
+                            {
+                                <span class="model-external-hint">Managed externally</span>
+                            }
                         </div>
+                        @if (!string.IsNullOrWhiteSpace(model.ErrorMessage))
+                        {
+                            <p class="model-error" role="alert">@model.ErrorMessage</p>
+                        }
+                        <div class="model-actions">
+                            @* Download CTA — Ollama only *@
+                            @if (model.ShowDownloadCta && !model.ShowRetryDownload)
+                            {
+                                <button class="action-button compact" type="button"
+                                        disabled="@model.IsActionBusy"
+                                        @onclick="() => HandleDownloadAsync(model)">
+                                    Queue download
+                                </button>
+                            }
+                            @if (model.ShowRetryDownload)
+                            {
+                                <button class="secondary-button compact" type="button"
+                                        disabled="@model.IsActionBusy"
+                                        @onclick="() => HandleDownloadAsync(model)">
+                                    Retry download
+                                </button>
+                            }
+                            @* Verify CTA *@
+                            @if (model.ShowVerifyCta)
+                            {
+                                <button class="secondary-button compact" type="button"
+                                        disabled="@model.IsActionBusy"
+                                        @onclick="() => HandleVerifyAsync(model)">
+                                    @model.VerifyCtaLabel
+                                </button>
+                            }
+                            @* Refresh secondary CTA *@
+                            @if (model.ShowRefreshCta)
+                            {
+                                <button class="secondary-button compact" type="button"
+                                        @onclick="RefreshModelsAsync">
+                                    Refresh
+                                </button>
+                            }
+                        </div>
+                    </li>
+                }
+                @if (!ModelStatusService.Models.Any() && !_isLoading)
+                {
+                    <li class="model-row model-row--empty">
+                        <span>No models loaded. <button class="link-button" @onclick="RefreshModelsAsync">Refresh</button> to reload.</span>
                     </li>
                 }
             </ul>
@@ -117,7 +191,6 @@
 @code {
     private bool _isLoading;
     private bool _isSaving;
-    private bool _isBusy;
     private string _statusMessage = "Connecting to the admin API…";
     private string _statusTone = "neutral";
     private bool _observabilityEnabled;
@@ -126,11 +199,23 @@
     private string _runtimeEnvironment = "—";
     private string _deployMode = "—";
     private IReadOnlyList<string> _features = Array.Empty<string>();
-    private IReadOnlyList<ModelOption> _models = Array.Empty<ModelOption>();
 
     protected override async Task OnInitializedAsync()
     {
+        // Subscribe to model state changes so the page re-renders when rows update.
+        ModelStatusService.Changed += OnModelStateChanged;
         await ReloadAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        ModelStatusService.Changed -= OnModelStateChanged;
+        await ModelStatusService.DisposeAsync();
+    }
+
+    private void OnModelStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
     }
 
     private async Task ReloadAsync()
@@ -145,7 +230,6 @@
 
             var settings = await SearchUiSessionService.GetAuthenticatedJsonAsync<AdminSettingsResponse>("/api/settings");
             var runtime = await SearchUiSessionService.GetAuthenticatedJsonAsync<RuntimeSettingsResponse>("/api/config/runtime");
-            var models = await SearchUiSessionService.GetAuthenticatedJsonAsync<ModelsResponse>("/api/models/options");
 
             var values = settings?.Values ?? new Dictionary<string, JsonElement>();
             _observabilityEnabled = ReadBool(values, "observability.enabled", false);
@@ -155,7 +239,9 @@
             _runtimeEnvironment = runtime?.Environment ?? "unknown";
             _deployMode = runtime?.DeployMode ?? "unknown";
             _features = runtime?.Features ?? Array.Empty<string>();
-            _models = (models?.Models ?? Array.Empty<ModelOption>()).ToList();
+
+            // Initialize the per-row model state machine + SSE subscription.
+            await ModelStatusService.InitializeAsync();
 
             _statusMessage = "Admin data loaded from the live API.";
             _statusTone = "success";
@@ -171,6 +257,22 @@
         }
     }
 
+    private async Task RefreshModelsAsync()
+    {
+        await ModelStatusService.RefreshAsync();
+        StateHasChanged();
+    }
+
+    private async Task HandleDownloadAsync(ModelRowViewModel model)
+    {
+        await ModelStatusService.Download(model);
+    }
+
+    private async Task HandleVerifyAsync(ModelRowViewModel model)
+    {
+        await ModelStatusService.Verify(model);
+    }
+
     private async Task ToggleObservabilityAsync(ChangeEventArgs args)
     {
         var enabled = args.Value is bool value
@@ -179,7 +281,7 @@
 
         _isSaving = true;
         _statusTone = "neutral";
-        _statusMessage = enabled ? "Saving observability settings…" : "Saving observability settings…";
+        _statusMessage = "Saving observability settings…";
 
         try
         {
@@ -210,45 +312,29 @@
         }
     }
 
-    private async Task QueueModelDownloadAsync(ModelOption model)
-    {
-        var modelId = model.Id ?? "model";
-        _isBusy = true;
-        _statusTone = "neutral";
-        _statusMessage = $"Queueing {modelId} download…";
-
-        try
-        {
-            await EnsureApiSessionAsync();
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
-            request.Content = JsonContent.Create(new { modelKind = model.Family, modelId });
-
-            using var response = await SearchUiSessionService.SendAuthenticatedRequestAsync(request);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new InvalidOperationException($"The admin API rejected the request with {(int)response.StatusCode}.");
-            }
-
-            var payload = await response.Content.ReadFromJsonAsync<ModelDownloadResponse>();
-            _statusMessage = payload?.Status is "queued"
-                ? $"Queued {modelId} for download."
-                : $"Requested {modelId} download.";
-            _statusTone = "success";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"Unable to queue the model download: {ex.Message}";
-            _statusTone = "error";
-        }
-        finally
-        {
-            _isBusy = false;
-        }
-    }
-
     private Task EnsureApiSessionAsync()
         => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
+
+    // ── Connection strip helpers ───────────────────────────────────────────────────────────
+
+    private string GetConnectionStripLabel() => ModelStatusService.ConnectionState switch
+    {
+        SseConnectionState.Connected => "Live updates connected",
+        SseConnectionState.Connecting => "Connecting…",
+        SseConnectionState.Reconnecting => "Reconnecting…",
+        SseConnectionState.Paused => "Live updates paused",
+        _ => "Live updates off"
+    };
+
+    private string GetConnectionStripCssClass() => ModelStatusService.ConnectionState switch
+    {
+        SseConnectionState.Connected => "status-success",
+        SseConnectionState.Connecting or SseConnectionState.Reconnecting => "status-warning",
+        SseConnectionState.Paused or SseConnectionState.Disconnected => "status-neutral",
+        _ => "status-neutral"
+    };
+
+    // ── General helpers ───────────────────────────────────────────────────────────────────
 
     private static bool ReadBool(IReadOnlyDictionary<string, JsonElement> values, string key, bool fallback)
     {
@@ -291,6 +377,8 @@
             _ => "status-neutral"
         };
 
+    // ── Response types ─────────────────────────────────────────────────────────────────────
+
     private sealed class AdminSettingsResponse
     {
         public Dictionary<string, JsonElement>? Values { get; set; }
@@ -302,27 +390,5 @@
         public string? DeployMode { get; set; }
         public string[]? Features { get; set; }
     }
-
-    private sealed class ModelsResponse
-    {
-        public ModelOption[]? Models { get; set; }
-    }
-
-    private sealed class ModelOption
-    {
-        public string? Id { get; set; }
-        public string? Family { get; set; }
-        public string? Status { get; set; }
-        public string? Label { get; set; }
-    }
-
-    private sealed class CsrfResponse
-    {
-        public string? Token { get; set; }
-    }
-
-    private sealed class ModelDownloadResponse
-    {
-        public string? Status { get; set; }
-    }
 }
+

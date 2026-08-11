@@ -15,5 +15,6 @@ builder.Services.AddSingleton<DashboardSummaryService>();
 builder.Services.AddScoped<AuthenticationService>();
 builder.Services.AddScoped<SearchUiSessionService>();
 builder.Services.AddScoped<CorpusReadinessService>();
+builder.Services.AddScoped<ModelStatusService>();
 
 await builder.Build().RunAsync();
