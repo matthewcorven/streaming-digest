@@ -6,7 +6,7 @@ public interface IMatrixNotificationService
 {
     bool IsEnabled { get; }
 
-    Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, CancellationToken cancellationToken = default);
+    Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, string? roomOverride = null, CancellationToken cancellationToken = default);
 
     Task<MatrixSendResult> SendTestNotificationAsync(CancellationToken cancellationToken = default);
 }
@@ -15,7 +15,7 @@ public sealed class MatrixNotificationService(MatrixNotificationClient client, M
 {
     public bool IsEnabled => options.IsEnabled;
 
-    public async Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, CancellationToken cancellationToken = default)
+    public async Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, string? roomOverride = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(digest);
 
@@ -31,7 +31,7 @@ public sealed class MatrixNotificationService(MatrixNotificationClient client, M
 
         var payload = DigestPayloadSerializer.Deserialize(digest.PayloadJson);
         var message = BuildDigestMessage(digest, payload);
-        return await client.SendTextMessageAsync(message, cancellationToken);
+        return await client.SendTextMessageAsync(message, roomOverride, cancellationToken);
     }
 
     public Task<MatrixSendResult> SendTestNotificationAsync(CancellationToken cancellationToken = default)

@@ -140,11 +140,18 @@ public sealed class NotificationDispatchService(
 
                     try
                     {
+                        // Pass the stored target as a room override; "matrix" is the sentinel
+                        // written when no per-call target was specified — treat it as the default.
+                        var roomOverride = string.IsNullOrWhiteSpace(notification.Target)
+                            || string.Equals(notification.Target, "matrix", StringComparison.OrdinalIgnoreCase)
+                            ? null
+                            : notification.Target;
+
                         var sendResult = await matrixNotificationService.SendDigestSummaryAsync(new Digest(notification.IngestionRunId ?? Guid.Empty, "standard")
                         {
                             Id = digestIdFromPayload(message.PayloadJson) ?? Guid.Empty,
                             PayloadJson = payloadJsonFromPayload(message.PayloadJson)
-                        }, cancellationToken);
+                        }, roomOverride, cancellationToken);
 
                         if (sendResult.Success)
                         {
