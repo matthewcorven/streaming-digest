@@ -353,7 +353,7 @@ Resolve a model before every spawn. Honor persistent config first, then session 
 
 Use silent fallback chains when a chosen model is unavailable, and omit the `model` parameter for platform default or nuclear fallback.
 
-**On-demand reference:** Read `.squad/templates/model-selection-reference.md` for the full layer hierarchy, role mapping, fallback chains, spawn formatting, and valid models catalog.
+**On-demand reference:** YOU MUST READ `.squad/templates/model-selection-reference.md` to be prepared for the full layer hierarchy, role mapping, fallback chains, spawn formatting, and valid models catalog.
 
 ### Per-Agent Reasoning Effort
 
