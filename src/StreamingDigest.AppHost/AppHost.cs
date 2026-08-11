@@ -14,14 +14,10 @@ const string ollamaDataVolumeName = "streamingdigest-ollama-data";
 // Whisper (audio-to-text) runtime — issue #210.
 // The whisper service is an OPTIONAL runtime: caption-less videos need it; captioned
 // ingestion proceeds with a warning when it is absent (PRD §2.4). For that reason api/worker
-// do NOT WaitFor(whisper). The image/tag are parameterized so the model-download plan can
-// swap in the verified community whisper.cpp HTTP image without touching this wiring.
-// TODO(model-download-implementation-plan): replace placeholder image with the verified
-// community whisper.cpp HTTP server image once acquisition/verification lands.
-const string whisperImage = "ghcr.io/fedir/whisper-cpp-server";
-// Pinned to a concrete tag (not :latest) so the compose artifact is reproducible until
-// the model-download plan swaps in the verified image.
-const string whisperImageTag = "1.5.4";
+// do NOT WaitFor(whisper). Uses locally built MLX Whisper image (see issue #210 for Dockerfile.whisper creation).
+// TODO: Add Dockerfile.whisper to repository and document build steps for Apple Silicon.
+const string whisperImage = "streaming-digest-whisper";
+const string whisperImageTag = "latest";
 const int whisperPort = 8080;
 
 var postgresUsername = builder.AddParameterFromConfiguration(
@@ -188,10 +184,8 @@ var ollamaBootstrap = builder.AddContainer("ollama-bootstrap", "ollama/ollama")
 
 // Whisper audio-to-text runtime (issue #210). Optional: api/worker do NOT WaitFor this so
 // captioned ingestion proceeds with a warning when whisper is absent (PRD §2.4).
-// TODO(model-download-implementation-plan): swap placeholder image for verified image.
-// NOTE: WithHttpHealthCheck("/health") assumes the placeholder image exposes a /health
-// endpoint; that contract is unverified pending the model-download image swap, so a probe
-// failure here is not yet guaranteed to be meaningful.
+// Uses verified community whisper-cpp-server image (ghcr.io/fedir/whisper-cpp-server:1.5.4).
+// TODO(model-download-implementation-plan): swap for MLX-optimized whisper.cpp if verified image becomes available.
 var whisper = builder.AddContainer("whisper", whisperImage)
     .WithImageTag(whisperImageTag)
     .WithHttpEndpoint(targetPort: whisperPort, port: whisperPort, name: "http")
