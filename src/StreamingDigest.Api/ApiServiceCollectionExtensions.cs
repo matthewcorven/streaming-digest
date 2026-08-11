@@ -1,3 +1,5 @@
+extern alias StreamingDigestWorker;
+
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
@@ -10,6 +12,7 @@ using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Models;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Transcripts;
+using StreamingDigest.Api.Admin;
 using StreamingDigest.Domain;
 using StreamingDigest.Infrastructure;
 using StreamingDigest.Infrastructure.AudioToText;
@@ -113,6 +116,11 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
         services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
         services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
+        services.AddSingleton<StreamingDigest.Application.Orchestration.IIngestionJobScheduler>(sp =>
+            new StreamingDigestWorker::StreamingDigest.Worker.Scheduling.HangfireIngestionJobScheduler(
+                sp.GetRequiredService<IBackgroundJobClient>(),
+                sp.GetRequiredService<IRecurringJobManager>()));
+        services.AddScoped<INotificationTestSender, MatrixNotificationTestBridge>();
         services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(
             applicationConfiguration,
             environment.ContentRootPath,
@@ -121,7 +129,9 @@ internal static class ApiServiceCollectionExtensions
             sp.GetService<ITranscriptIngestionService>(),
             sp.GetService<ISearchDocumentRegenerationService>(),
             sp.GetService<IAudioToTextProvider>(),
-            sp.GetService<IModelReadinessGuard>()));
+            sp.GetService<IModelReadinessGuard>(),
+            sp.GetRequiredService<StreamingDigest.Application.Orchestration.IIngestionJobScheduler>(),
+            sp.GetRequiredService<INotificationTestSender>()));
         services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
         services.AddScoped<StreamingDigest.Application.Orchestration.IDigestAssemblyService, DigestAssemblyService>();
         services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();

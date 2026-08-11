@@ -24,6 +24,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly IAudioToTextProvider? _audioToTextProvider;
     private readonly IModelReadinessGuard? _modelReadinessGuard;
     private readonly IIngestionJobScheduler? _ingestionJobScheduler;
+    private readonly INotificationTestSender? _notificationTestSender;
 
     public AdminOperationsService(
         ApplicationConfiguration? configuration = null,
@@ -34,7 +35,8 @@ public sealed class AdminOperationsService : IAdminOperationsService
         ISearchDocumentRegenerationService? searchDocumentRegenerationService = null,
         IAudioToTextProvider? audioToTextProvider = null,
         IModelReadinessGuard? modelReadinessGuard = null,
-        IIngestionJobScheduler? ingestionJobScheduler = null)
+        IIngestionJobScheduler? ingestionJobScheduler = null,
+        INotificationTestSender? notificationTestSender = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
         _contentRootPath = contentRootPath;
@@ -45,6 +47,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         _audioToTextProvider = audioToTextProvider;
         _modelReadinessGuard = modelReadinessGuard;
         _ingestionJobScheduler = ingestionJobScheduler;
+        _notificationTestSender = notificationTestSender;
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
@@ -84,6 +87,13 @@ public sealed class AdminOperationsService : IAdminOperationsService
 
         var result = await CreateAcceptedResultAsync("retry.ingestionRun", runId, $"Retry queued for ingestion run '{runId}'.", cancellationToken);
         await TryRetryFailedRunAsync(result.OperationId, parsedRunId, cancellationToken);
+
+        if (_ingestionJobScheduler is not null)
+        {
+            // Dispatch channel jobs so the pending items set above are actually processed.
+            await TryDispatchRunRetryJobsAsync(parsedRunId, cancellationToken);
+        }
+
         return result;
     }
 
@@ -92,6 +102,16 @@ public sealed class AdminOperationsService : IAdminOperationsService
         if (!Guid.TryParse(videoId, out var parsedVideoId))
         {
             return await CreateResultAsync("retry.video", videoId, "failed", $"Video id '{videoId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        if (_ingestionJobScheduler is not null)
+        {
+            // Mark failed/deferred items as pending (ADR-0002: retry re-executes failed/deferred work only),
+            // then dispatch the orchestrator to pick them up.
+            var result = await CreateAcceptedResultAsync("retry.video", videoId, $"Retry queued for video '{videoId}'.", cancellationToken);
+            await TryRetryFailedEntityAsync(result.OperationId, "retry.video", "video", parsedVideoId, videoId, cancellationToken);
+            await TryDispatchVideoChannelJobAsync(parsedVideoId, "manual", cancellationToken);
+            return result;
         }
 
         return await RunTranscriptIngestionAsync(
@@ -131,6 +151,15 @@ public sealed class AdminOperationsService : IAdminOperationsService
         if (!Guid.TryParse(videoId, out var parsedVideoId))
         {
             return await CreateResultAsync("reprocess.video", videoId, "failed", $"Video id '{videoId}' is not a valid GUID.", "error", cancellationToken);
+        }
+
+        if (_ingestionJobScheduler is not null)
+        {
+            // Reprocess bypasses the idempotency guard and resets budgets (ADR-0002/0014:
+            // full pipeline for a completed entity, scrape-exclusion policy re-evaluated).
+            var result = await CreateAcceptedResultAsync("reprocess.video", videoId, $"Reprocess queued for video '{videoId}'.", cancellationToken);
+            await TryDispatchVideoChannelJobAsync(parsedVideoId, "reprocess", cancellationToken);
+            return result;
         }
 
         return await RunTranscriptIngestionAsync(
@@ -185,10 +214,107 @@ public sealed class AdminOperationsService : IAdminOperationsService
     }
 
     public async Task<AdminActionResult> PurgeScreenshotsAsync(string? target = null, CancellationToken cancellationToken = default)
-        => await CreateAcceptedResultAsync("screenshots.purge", target, "Screenshot purge has been queued.", cancellationToken);
+    {
+        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
+        if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
+        {
+            return await CreateAcceptedResultAsync("screenshots.purge", target, "Screenshot purge has been queued (no database connection configured).", cancellationToken);
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+            var filePaths = new List<string>();
+            var selectSql = string.IsNullOrWhiteSpace(target)
+                ? "SELECT file_path FROM public.screenshots WHERE file_path IS NOT NULL"
+                : "SELECT file_path FROM public.screenshots WHERE file_path IS NOT NULL AND (video_id::text = @target OR segment_id::text = @target)";
+
+            await using (var selectCmd = new NpgsqlCommand(selectSql, connection, transaction))
+            {
+                if (!string.IsNullOrWhiteSpace(target))
+                {
+                    selectCmd.Parameters.AddWithValue("target", target.Trim());
+                }
+                await using var reader = await selectCmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    if (!reader.IsDBNull(0))
+                    {
+                        filePaths.Add(reader.GetString(0));
+                    }
+                }
+            }
+
+            var deleteSql = string.IsNullOrWhiteSpace(target)
+                ? "DELETE FROM public.screenshots"
+                : "DELETE FROM public.screenshots WHERE video_id::text = @target OR segment_id::text = @target";
+
+            int deletedRows;
+            await using (var deleteCmd = new NpgsqlCommand(deleteSql, connection, transaction))
+            {
+                if (!string.IsNullOrWhiteSpace(target))
+                {
+                    deleteCmd.Parameters.AddWithValue("target", target.Trim());
+                }
+                deletedRows = await deleteCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+
+            var deletedFiles = 0;
+            foreach (var filePath in filePaths)
+            {
+                try
+                {
+                    if (File.Exists(filePath))
+                    {
+                        File.Delete(filePath);
+                        deletedFiles++;
+                    }
+                }
+                catch
+                {
+                    // File deletion failures are best-effort; the metadata rows are already removed.
+                }
+            }
+
+            var scopeDescription = string.IsNullOrWhiteSpace(target) ? "all targets" : $"target '{target}'";
+            var message = $"Screenshot purge completed for {scopeDescription}. Deleted {deletedRows} metadata row(s) and {deletedFiles} file(s).";
+            return await CreateCompletedResultAsync("screenshots.purge", target, message, "healthy", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return await CreateResultAsync("screenshots.purge", target, "failed", $"Screenshot purge failed: {ex.Message}", "error", cancellationToken);
+        }
+    }
 
     public async Task<AdminActionResult> TestMatrixNotificationAsync(CancellationToken cancellationToken = default)
-        => await CreateCompletedResultAsync("test.matrix", null, "Matrix test notification completed successfully.", "healthy", cancellationToken);
+    {
+        if (_notificationTestSender is null)
+        {
+            return await CreateCompletedResultAsync("test.matrix", null, "Matrix notification test skipped: no notification sender is registered.", "warning", cancellationToken);
+        }
+
+        if (!_notificationTestSender.IsEnabled)
+        {
+            return await CreateCompletedResultAsync("test.matrix", null, "Matrix notifications are disabled; test skipped.", "warning", cancellationToken);
+        }
+
+        try
+        {
+            var outcome = await _notificationTestSender.TestAsync(cancellationToken);
+            return outcome.Success
+                ? await CreateCompletedResultAsync("test.matrix", null, $"Matrix test notification sent successfully: {outcome.Message}", "healthy", cancellationToken)
+                : await CreateResultAsync("test.matrix", null, "failed", $"Matrix test notification failed: {outcome.Message}", "error", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return await CreateResultAsync("test.matrix", null, "failed", $"Matrix test notification threw an unexpected exception: {ex.Message}", "error", cancellationToken);
+        }
+    }
 
     public async Task<AdminActionResult> TestEmbeddingServiceAsync(CancellationToken cancellationToken = default)
     {
@@ -751,6 +877,88 @@ public sealed class AdminOperationsService : IAdminOperationsService
         return Path.GetFullPath(Path.Combine(_contentRootPath ?? Directory.GetCurrentDirectory(), configuredPath));
     }
 
+    private async Task TryDispatchVideoChannelJobAsync(
+        Guid videoId,
+        string runType,
+        CancellationToken cancellationToken)
+    {
+        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
+        if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var cmd = new NpgsqlCommand(
+                "SELECT channel_id FROM public.videos WHERE id = @id",
+                connection);
+            cmd.Parameters.AddWithValue("id", videoId);
+            var scalar = await cmd.ExecuteScalarAsync(cancellationToken);
+
+            if (scalar is not Guid channelId)
+            {
+                return;
+            }
+
+            _ingestionJobScheduler!.EnqueueOnDemandRun(channelId, runType, "admin");
+        }
+        catch
+        {
+            // Keep operation responses available even when dispatch fails.
+        }
+    }
+
+    private async Task TryDispatchRunRetryJobsAsync(
+        Guid runId,
+        CancellationToken cancellationToken)
+    {
+        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
+        if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            // Resolve distinct channels associated with this run via videos in the items.
+            var channelIds = new HashSet<Guid>();
+            await using (var cmd = new NpgsqlCommand("""
+                SELECT DISTINCT v.channel_id
+                FROM public.ingestion_items ii
+                JOIN public.videos v ON v.id = ii.item_id
+                WHERE ii.ingestion_run_id = @run_id
+                  AND ii.item_type = 'video'
+                """, connection))
+            {
+                cmd.Parameters.AddWithValue("run_id", runId);
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    if (!reader.IsDBNull(0))
+                    {
+                        channelIds.Add(reader.GetGuid(0));
+                    }
+                }
+            }
+
+            foreach (var channelId in channelIds)
+            {
+                _ingestionJobScheduler!.EnqueueOnDemandRun(channelId, "manual", "admin");
+            }
+        }
+        catch
+        {
+            // Keep operation responses available even when dispatch fails.
+        }
+    }
+
     private async Task TryPersistIngestionRunAsync(Guid operationId, string runType, string? target, CancellationToken cancellationToken)
     {
         var connectionString = _configuration.ConnectionStrings.StreamingDigest;
@@ -1147,7 +1355,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
 
     private static async Task<List<(Guid ChannelId, string ExternalKey)>> LoadRunChannelsAsync(
         NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
+        NpgsqlTransaction? transaction,
         string? target,
         CancellationToken cancellationToken)
     {

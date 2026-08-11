@@ -66,3 +66,9 @@ Independent reviewer Switch completed re-review of PR #180 ([Task 11.4] Store em
 - Confirmed good: genuine waiting state, [0,1] clamping, one-cluster-per-video, HNSW/IVFFlat deferral rationale, AuthFlow fixture override, and fixture corpus retained only for tests/recall.
 - Final outcome: Neo revised PR #230 per Morpheus's spec; Morpheus re-reviewed and approved the final merged result at commit `8590eb3` on `feat/application-truth`.
 - Artifacts: `session files/completeness_after_any_fixes.txt` (92), `files/review_change_specifications.md`.
+
+## 2026-08-10 — PR #244 (issue #205, WS-8 Settings UI) — NEEDS-CHANGES (88)
+- Reviewed head 273f500. Reproduced all claims: build 0 errors, Web.UnitTests 82/82, UnitTests 528/528, CI pass, scope clean.
+- Key findings: (1) DownloadedNeedsVerify unreachable in production — server persists "ready" on pull completion (WS-5 contract), ApplyDownloadCompleted() dead in src/; tests cover a transition that can't fire live. (2) Dead Verify CTA in LiveUpdatesPaused (ShowVerifyCta/TryBeginVerify mismatch vs §7.2). (3) Ack badge "Queued" vs plan §7.3 literal "Queued for download".
+- Verified D5 hint-only SSE is genuine; client contracts match shipped payloads exactly. Noted: no SSE publishers exist on main (in-process broadcaster; cross-process fan-out is a follow-up).
+- Artifacts at worktree root (completeness_after_any_fixes.txt, review_change_specifications.md); verdict sent to Ralph coordinator session. No merge/close/push.
