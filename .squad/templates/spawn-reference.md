@@ -29,7 +29,7 @@ When `create_session` is available, spawn commit-producing agents as **sub-sessi
 - **`notify_on_idle`**: `"once"` (coordinator gets notified when agent finishes)
 - **`kickoff.prompt`**: The full agent prompt (same as task prompt below)
 - **`kickoff.mode`**: `"autopilot"` (agents work autonomously)
-- **`kickoff.model`**: `"{resolved_model}"` — **MUST be a full prefixed ID** for `create_session` (e.g. `b311631e-.../anthropic/claude-sonnet-5`). Bare/short IDs (`claude-sonnet-4.6`, `z-ai/glm-5.2`) fail with *"model provider not found"*. Resolve the live catalog and normalize to prefixed form per `.squad/templates/model-selection-reference.md` "Resolving valid model IDs"
+- **`model` (top-level)**: `"{resolved_model}"` — **NOT inside `kickoff`**. For third-party models (e.g. `moonshotai/kimi-k3`), must be a full UUID-prefixed ID (e.g. `b311631e-.../moonshotai/kimi-k3`). First-party bare IDs (`claude-sonnet-4.6`, `z-ai/glm-5.2`) work at top level. Resolve via `.squad/templates/model-selection-reference.md` HARD GATE (run `__discover__` at top-level `model` param).
 
 **Constraints:**
 - **Max depth:** 1 — no sub-sub-sessions. If an agent needs to delegate, it uses `task` tool.
@@ -43,10 +43,10 @@ create_session({
   name: "{Name} {verb}ing {noun}",
   coordinate_with_creator: true,
   notify_on_idle: "once",
+  model: "{resolved_model — resolved per config.json agentModelOverrides + model-selection-reference.md HARD GATE}",
   kickoff: {
     prompt: "{full agent prompt — see template below}",
     mode: "autopilot",
-    model: "{resolved_model — FULL PREFIXED ID, resolved per model-selection-reference.md}",
     reasoning_effort: "{resolved_effort}"
   }
 })

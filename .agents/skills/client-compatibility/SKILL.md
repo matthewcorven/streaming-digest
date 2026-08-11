@@ -16,13 +16,24 @@ Squad runs on multiple Copilot surfaces (CLI, VS Code, JetBrains, GitHub.com). T
 
 Before spawning agents, determine the platform by checking available tools:
 
-1. **CLI mode** — `task` tool is available → full spawning control. Use `task` with `agent_type`, `mode`, `model`, `description`, `prompt` parameters. Collect results via `read_agent`.
+1. **CLI mode** — `task` tool is available → full spawning control. Use `task` with `agent_type`, `mode`, `model`, `description`, `prompt` parameters. Resolve model from `.squad/config.json` `agentModelOverrides.{agentName}` (Layer 0), falling back to `defaultModel`, then charter preferences, then task-aware auto-selection per `.squad/templates/model-selection-reference.md`. Collect results via `read_agent`.
 
-2. **VS Code mode** — `runSubagent` or `agent` tool is available → conditional behavior. Use `runSubagent` with the task prompt. Drop `agent_type`, `mode`, and `model` parameters. Multiple subagents in one turn run concurrently (equivalent to background mode). Results return automatically — no `read_agent` needed.
+2. **App mode (sub-sessions)** — `create_session` tool is available → full spawning control for commit-producing work. Use `create_session` with `model` at the **top level** (parallel to `project_id`, NOT inside `kickoff`). Resolve model from `.squad/config.json` `agentModelOverrides.{agentName}` (Layer 0), falling back to `defaultModel`, then charter preferences, then task-aware auto-selection per `.squad/templates/model-selection-reference.md`. Third-party model IDs require full UUID-prefixed form (`{uuid}/provider/model`).
+
+3. **VS Code mode** — `runSubagent` or `agent` tool is available → conditional behavior. Use `runSubagent` with the task prompt. Drop `agent_type`, `mode`, and `model` parameters. Multiple subagents in one turn run concurrently (equivalent to background mode). Results return automatically — no `read_agent` needed.
 
 3. **Fallback mode** — neither `task` nor `runSubagent`/`agent` available → work inline. Do not apologize or explain the limitation. Execute the task directly.
 
 If both `task` and `runSubagent` are available, prefer `task` (richer parameter surface).
+
+### App Mode (Sub-Sessions) Spawn Adaptations
+
+When in App mode, the coordinator changes behavior in these ways:
+
+- **Spawning tool:** Use `create_session` for commit-producing agents; `task` for read-only analysis.
+- **Model at top level:** Pass `model` at the **top level** of `create_session` (parallel to `project_id`, `name`), NOT inside `kickoff`. A model inside `kickoff` is silently ignored. Resolve from `config.json` `agentModelOverrides.{agentName}` per `.squad/templates/model-selection-reference.md`. Third-party IDs need full UUID prefix (`{uuid}/provider/model`).
+- **Parallelism:** Spawn all concurrent agents in a SINGLE turn. Collect results via cross-session notification when `notify_on_idle: "once"` fires.
+- **Scribe:** Fire-and-forget via `task` tool (background mode).
 
 ### VS Code Spawn Adaptations
 
@@ -30,7 +41,7 @@ When in VS Code mode, the coordinator changes behavior in these ways:
 
 - **Spawning tool:** Use `runSubagent` instead of `task`. The prompt is the only required parameter — pass the full agent prompt (charter, identity, task, hygiene, response order) exactly as you would on CLI.
 - **Parallelism:** Spawn ALL concurrent agents in a SINGLE turn. They run in parallel automatically. This replaces `mode: "background"` + `read_agent` polling.
-- **Model selection:** Accept the session model. Do NOT attempt per-spawn model selection or fallback chains — they only work on CLI. In Phase 1, all subagents use whatever model the user selected in VS Code's model picker.
+- **Model selection:** Accept the session model. Do NOT attempt per-spawn model selection or fallback chains — they only work on CLI and App mode. In Phase 1, all subagents use whatever model the user selected in VS Code's model picker.
 - **Scribe:** Cannot fire-and-forget. Batch Scribe as the LAST subagent in any parallel group. Scribe is light work (file ops only), so the blocking is tolerable.
 - **Launch table:** Skip it. Results arrive with the response, not separately. By the time the coordinator speaks, the work is already done.
 - **`read_agent`:** Skip entirely. Results return automatically when subagents complete.

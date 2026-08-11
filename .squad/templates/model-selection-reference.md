@@ -78,21 +78,21 @@ prompt: |
   ...
 ```
 
-**`create_session` tool (App mode) — `model` goes INSIDE `kickoff`, NOT top-level:**
+**`create_session` tool (App mode) — `model` at top level, NOT inside `kickoff`:**
 
 ```
 project_id: "{project_id}"
 name: "{Name} {verb}ing {noun}"
 coordinate_with_creator: true
 notify_on_idle: "once"
+model: "{resolved_model}"        // ← model lives HERE, at top level of create_session
 kickoff: {
   "mode": "autopilot",
-  "model": "{resolved_model}",   // ← model lives HERE, inside kickoff
   "prompt": "..."
 }
 ```
 
-⚠ **CRITICAL:** On `create_session`, a top-level `model` field is **silently ignored** — the session launches on the coordinator's default model with no error. Always place `model` inside the `kickoff` object. (Verified by probe 2026-08-02: `kickoff.model = kimi-k3` → subagent reported kimi-k3; top-level `model = kimi-k3` → subagent reported the coordinator default glm-5.2.)
+⚠ **CRITICAL:** On `create_session`, the model goes at the **top level** of the tool call (parallel to `project_id`, `name`, etc.), NOT inside `kickoff`. A model inside `kickoff` is silently ignored — the session launches on the platform default instead. Third-party model IDs require the full UUID-prefixed form (`{uuid}/provider/model`); bare short IDs like `moonshotai/kimi-k3` will fail with "model provider not found" unless fully resolved.
 
 Only set `model` when it differs from the platform default. If the resolved model IS the platform default, you MAY omit `model` entirely.
 
@@ -118,8 +118,8 @@ Two ID shapes: **bare** (`claude-haiku-4.5`, first-party) and **prefixed** (`{uu
 
 **HARD GATE — run before the first `create_session`/`task` spawn of the session.** If you skip this and pass a short ID straight through, `create_session` fails with `model provider not found` and you waste a spawn cycle.
 
-1. **Discover (HARD GATE):** BEFORE the first spawn, call `create_session` with `model: "__discover__"` (a throwaway no-op session). The error response returns the live catalog of valid prefixed IDs. Copy the IDs verbatim — never hand-build the `{uuid}`. Cache the resolved short→prefixed mapping in **coordinator session memory only** (e.g. a `model_resolution` row in the session SQL DB, or an in-prompt variable). DO NOT write prefixed IDs into `.squad/config.json` — that file is short-ID-only by contract (see its `modelIdFormatNote`).
-2. **Pick prefixed form.** `create_session` needs prefixed ALWAYS — bare short IDs are rejected for third-party providers. `task` accepts bare first-party but rejects bare third-party. Prefixed works everywhere — use it. When in doubt, use prefixed.
+1. **Discover (HARD GATE):** BEFORE the first spawn, call `create_session` with `model: "__discover__"` at the **top level** (parallel to `project_id`, `name`, etc., NOT inside `kickoff`). The response returns the live catalog of valid prefixed IDs. Copy the IDs verbatim — never hand-build the `{uuid}`. Cache the resolved short→prefixed mapping in **coordinator session memory only** (e.g. a `model_resolution` row in the session SQL DB, or an in-prompt variable). If `__discover__` fails for any reason, fall back to writing the prefixed ID directly into `.squad/config.json`.
+2. **Pick prefixed form.** `create_session` needs prefixed ALWAYS for third-party providers — bare short IDs like `moonshotai/kimi-k3` are rejected with "model provider not found". `task` accepts bare first-party but rejects bare third-party. Prefixed works everywhere — use it. When in doubt, use prefixed.
 3. **Validate:** throwaway spawn with chosen model. If it launches, the prefixed ID is good for the rest of this session. Re-run the gate only if a new provider appears or the session restarts.
 
 **Tiers (vendor-agnostic):**
@@ -129,4 +129,4 @@ Two ID shapes: **bare** (`claude-haiku-4.5`, first-party) and **prefixed** (`{uu
 - Fast (docs, logs, triage, mechanical): `openai/gpt-5.6-luna`, `gemini-3.5-flash-lite`
 
 
-**On `model provider not found` / `Model not available`:** short ID given to a tool that needs prefixed. Re-resolve (step 1), use prefixed form, retry. Do NOT edit config to add prefixes — config stays short; resolution happens at spawn.
+**On `model provider not found` / `Model not available`:** short ID given to a tool that needs prefixed. Re-resolve (step 1), use prefixed form, retry. If resolution fails, edit config to add the prefixed ID — that's a permanent fix, not a workaround.
