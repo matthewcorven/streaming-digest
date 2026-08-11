@@ -45,7 +45,7 @@ public sealed class DigestAssemblyService(
         }
         else if (notificationService is not null)
         {
-            await notificationService.SendDigestSummaryAsync(digestEntity, cancellationToken);
+            await notificationService.SendDigestSummaryAsync(digestEntity, request.NotificationTarget, cancellationToken);
         }
 
         return digestEntity;

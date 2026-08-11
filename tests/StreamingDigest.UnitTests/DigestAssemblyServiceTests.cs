@@ -283,7 +283,7 @@ public sealed class DigestAssemblyServiceTests
 
         public bool IsEnabled => true;
 
-        public Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, CancellationToken cancellationToken = default)
+        public Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, string? roomOverride = null, CancellationToken cancellationToken = default)
         {
             _attempts++;
             if (_attempts < successOnAttempt)

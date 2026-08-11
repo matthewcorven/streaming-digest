@@ -63,7 +63,9 @@ public sealed class IngestionOrchestrator(
             run.ChannelsChecked = 1;
             if (channel.IsPaused)
             {
-                return await CompleteRunAsync(run, "completed", $"Channel '{channel.YoutubeChannelId}' is paused; nothing to do.", cancellationToken);
+                var pausedRun = await CompleteRunAsync(run, "completed", $"Channel '{channel.YoutubeChannelId}' is paused; nothing to do.", cancellationToken);
+                await AssembleDigestBestEffortAsync(pausedRun, request, [], cancellationToken);
+                return pausedRun;
             }
 
             var publishedAfter = VideoIngestionFilter.ComputePublishedAfterCutoff(
@@ -142,7 +144,7 @@ public sealed class IngestionOrchestrator(
                 : "completed";
             var completedRun = await CompleteRunAsync(run, terminal, null, cancellationToken);
 
-            await AssembleDigestBestEffortAsync(completedRun, request, outcomes, newVideos, cancellationToken);
+            await AssembleDigestBestEffortAsync(completedRun, request, outcomes, cancellationToken);
 
             return completedRun;
         }
@@ -308,7 +310,6 @@ public sealed class IngestionOrchestrator(
         IngestionRun run,
         ChannelIngestionRequest request,
         VideoRunResult[] outcomes,
-        List<Video> processedVideos,
         CancellationToken cancellationToken)
     {
         if (digestAssemblyService is null)

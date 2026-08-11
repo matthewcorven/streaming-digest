@@ -263,6 +263,50 @@ public sealed class IngestionOrchestratorIntegrationTests : IAsyncLifetime
         Assert.Equal("matrix", notification.Provider);
     }
 
+    [Fact(Skip = "Requires PostgreSQL infrastructure; runs locally only")]
+    public async Task RunChannelIngestion_paused_channel_assembles_empty_digest_and_enqueues_outbox()
+    {
+        var channelId = Guid.NewGuid();
+        await using (var seed = new StreamingDigestDbContext(_options!))
+        {
+            seed.Channels.Add(new Channel
+            {
+                Id = channelId,
+                YoutubeChannelId = "UC_a8_paused_test",
+                NameOriginal = "A8 Paused Channel",
+                ProfileUrl = "https://www.youtube.com/channel/UC_a8_paused_test",
+                IsPaused = true,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        const string youtubeVideoId = "a8pausedvid1";
+        var (services, _, _) = BuildServiceProvider(youtubeVideoId);
+
+        var orchestrator = services.GetRequiredService<IIngestionOrchestrator>();
+        var run = await orchestrator.RunChannelIngestionAsync(
+            new ChannelIngestionRequest { ChannelId = channelId, RunType = "scheduled", TriggeredBy = "integration-test" });
+
+        // Paused channel: run completes as normal (no videos processed).
+        Assert.Equal("completed", run.Status);
+
+        await using var db = new StreamingDigestDbContext(_options!);
+
+        // A8 Change 1: paused run must still produce a Digest row (ADR-0006).
+        var digest = await db.Digests.SingleAsync(d => d.IngestionRunId == run.Id);
+        Assert.Equal(run.Id, digest.IngestionRunId);
+        Assert.Equal("scheduled", digest.RunType);
+
+        var payload = StreamingDigest.Domain.DigestPayloadSerializer.Deserialize(digest.PayloadJson);
+        Assert.Empty(payload.NewVideos);
+        Assert.Empty(payload.FailedItems);
+
+        // A8 Change 1: outbox is enqueued even for the no-op paused run.
+        var outbox = await db.OutboxMessages.SingleAsync(m => m.AggregateType == "Notification");
+        Assert.NotNull(outbox);
+        Assert.Equal("matrix_notification", outbox.MessageType);
+    }
+
     // ── Composition root ─────────────────────────────────────────────────────────
 
     private (ServiceProvider Services, LogCapture Capture, StreamingDigestDbContext SeedDb) BuildServiceProvider(string youtubeVideoId)
