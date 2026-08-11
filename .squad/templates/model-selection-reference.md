@@ -130,3 +130,45 @@ Two ID shapes: **bare** (`claude-haiku-4.5`, first-party) and **prefixed** (`{uu
 
 
 **On `model provider not found` / `Model not available`:** short ID given to a tool that needs prefixed. Re-resolve (step 1), use prefixed form, retry. If resolution fails, edit config to add the prefixed ID — that's a permanent fix, not a workaround.
+
+---
+
+### Handling Model Override Directives
+
+When the user says "use model X for agent Y" or "make Morpheus use kimi-k3", this is a **model override directive**. Follow this process:
+
+1. **Capture the directive** — Acknowledge immediately: `"📌 Captured. {agent} will use {model}."`
+
+2. **Validate the model ID** — The `task` tool and `create_session` reject bare short IDs for third-party providers. The user may give:
+   - Prefixed form: `b311631e-.../moonshotai/kimi-k3` → ✅ Use as-is
+   - Short form: `moonshotai/kimi-k3` → ❌ Must resolve to prefixed
+   - Casual name: `Ornith 9B` → ❌ Must resolve to prefixed
+
+3. **Resolve to prefixed form** — Run the HARD GATE probe ONCE per session:
+   ```
+   create_session({ model: "__discover__", ... })  // at TOP LEVEL, not inside kickoff
+   ```
+   This returns the full catalog. Map short IDs to prefixed forms. Cache this mapping in session memory.
+
+4. **Update config.json** — Edit `.squad/config.json` atomically:
+   - Read the file
+   - Set `agentModelOverrides.{agentName}` to the prefixed ID
+   - Write back (preserve formatting, don't truncate)
+
+5. **Log the change** — Append to orchestration log:
+   ```
+   ## {timestamp} — Model Override Directive
+   - **By:** {user name}
+   - **Agent:** {agent name}
+   - **Model:** {prefixed ID} ({human-readable name if known})
+   - **Previous:** {old value or "none"}
+   ```
+
+6. **Confirm** — Tell the user: `"✅ {agent} now uses {prefixed ID}."`
+
+**Edge cases:**
+- If the user gives a casual name (e.g., "Ornith 9B"), acknowledge but explain: `"Model 'Ornith 9B' not in catalog. Use exact name 'Ornith-1.0-9B-mlx-8bit' or prefixed form."`
+- If the model doesn't exist in the catalog, reject: `"Model '{X}' not available. Available: {list top 5}"`
+- If config.json doesn't exist, create it with default structure
+
+**One probe per session:** Run `__discover__` once at session start or first directive. Cache the short→prefixed mapping. Don't re-probe unless a new provider appears.
