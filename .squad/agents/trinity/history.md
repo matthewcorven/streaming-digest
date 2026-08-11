@@ -55,3 +55,28 @@ Frontend work should assume no SSR and should support desktop and mobile admin u
 - Focused unit tests: digest ordering, links, actions, route resolution, session mode tracking
 
 **Status:** ✅ Complete — Issue closed on GitHub.
+
+---
+
+## Issue #217 — [App A9] Docs reconciliation (2026-08-10)
+
+**Branch:** matthewcorven-squad-217-docs-reconciliation
+**Scope:** Reconcile PRD.md / ARCHITECTURE.md / API_SPEC.md with shipped behavior from PRs #233–#243. Verified every claim against source; docs-only change.
+
+**What shipped → doc edits:**
+- **API_SPEC.md**
+  - §7: added missing admin ops `POST /api/admin/operations/screenshots/purge` (query `target`), `…/embeddings/test`, `…/audio-to-text/test`; documented the shared response envelope (200/500/202 + `statusUrl`).
+  - §7 (new "Internal read-model endpoints"): `GET /api/internal/dashboard`, `GET /api/internal/ingestion-runs` (limit 1–200, default 25), `…/{id}`, `…/{id}/notifications` — real DB projections, no fixture fallback (#211/#215).
+  - §14: replaced non-existent `DELETE /api/videos/{id}/screenshots` + `…/channels/{id}/screenshots` with the shipped `POST /api/admin/operations/screenshots/purge?target=` and marked the old routes not-implemented.
+  - §19: rewrote Matrix section — shipped dispatch is in-process `INotificationDispatchService` (Notification row + transactional outbox → `IMatrixNotificationService`), documented `ingestion_summary` payload, `target="matrix"` sentinel/override, plain-text rendered body, 5-min retry cadence; kept `send-ingestion-summary` as logical contract.
+- **ARCHITECTURE.md**
+  - §2.5.2 (new): ModelRuntimeReconcileService (startup `/api/tags` reconcile), IModelReadinessGuard (per-stage preflight; whisper = endpoint-configured), ModelLifecycleEventBroadcaster + `GET /api/models/events` (256-event SSE buffer, reconcile via status snapshot).
+  - §2.2 worker: recurring scheduler ownership, digest assembly, readiness preflight, outbox notification.
+  - §4.1 ingestion flow: readiness preflight + terminal digest assembly/notification steps.
+  - §4.7 Matrix flow: outbox write + 5-min retry; §2.7 notifier corrected to in-process component.
+  - §5.3 Hangfire: `ingestion.scheduled` recurring job, daily cron from `ingestion.scheduler.scheduleHour/Minute` (default 06:00 local), disabled/invalid config removes job, `IIngestionJobScheduler` abstraction, 503 on MemoryStorage for download.
+- **PRD.md** — verified: no stale status tables/feature lists; no edits needed.
+
+**Verification:** `dotnet build` → 0 errors (2 pre-existing warnings). Did NOT document the unimplemented MVP+ `activate-*-model` endpoints as shipped (kept "not yet implemented" tags).
+
+**Status:** PR opened (not self-merged).

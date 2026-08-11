@@ -711,6 +711,8 @@ Returns application-owned operation status. The current admin operation surface 
 }
 ```
 
+All `POST /api/admin/operations/**` responses use this envelope. The HTTP status reflects the outcome: `200 OK` when the operation completes synchronously (`status` of `completed`/`ok`), `500` when it fails outright (`status` of `failed`/`error`, RFC 7807 problem details), and `202 Accepted` for queued/long-running work with `statusUrl` `/api/admin/operations/{operationId}`.
+
 ### POST `/api/admin/operations/ingestion/run`
 
 Start manual ingestion for all active channels.
@@ -751,6 +753,18 @@ Re-runs the pipeline for a canonical resource.
 
 Queues bulk reprocessing of embeddings for the requested scope.
 
+### POST `/api/admin/operations/screenshots/purge`
+
+Purges screenshot rows and files for the requested scope. Accepts an optional `target` query parameter (video id, channel id, or omit for the whole corpus). This is the shipped replacement for the previously-specced per-video/per-channel `DELETE` screenshot endpoints (see §14).
+
+### POST `/api/admin/operations/embeddings/test`
+
+Runs an embedding-service health/probe operation against the configured embedding runtime and reports the truthful outcome in the standard operation envelope.
+
+### POST `/api/admin/operations/audio-to-text/test`
+
+Runs an audio-to-text (whisper) health/probe operation against the configured service endpoint (`STREAMINGDIGEST_WHISPER_BASE_URL` / `whisper:baseUrl`) and reports the truthful outcome in the standard operation envelope. Mirrors the behavior documented for `POST /api/admin/test-audio-to-text` in §17; when whisper is unconfigured the operation completes with `healthStatus: "warning"` (degrade), not a fault.
+
 ### POST `/api/admin/operations/notifications/matrix/test`
 
 Queues a Matrix notification test operation.
@@ -786,6 +800,30 @@ Queues full-pipeline reprocessing for multiple succeeded entities (videos, exter
 ### POST `/api/batch/delete`
 
 Queues or performs deletion for multiple supported entities. Destructive batch deletes require explicit confirmation and should return per-item rejections for unsafe entities.
+
+### Internal read-model endpoints
+
+The dashboard and ingestion-run UI screens read from a set of internal, cookie-authenticated endpoints under `/api/internal`. These return the real stored projection of the database — there is no fixture/fallback path. They are consumed by the Blazor WASM client and are not part of the stable public contract.
+
+#### GET `/api/internal/dashboard`
+
+Returns the dashboard summary read model for the home screen: corpus counts, the latest ingestion run and its stored digest, failed/deferred item counts, the search launchpad, pending-action inbox items, and the waiting/corpus state used to render onboarding guidance. Assembled by the API from live channel/video/run/digest data.
+
+#### GET `/api/internal/ingestion-runs`
+
+Returns recent ingestion runs as summary cards (id, title, subtitle, status text), newest first.
+
+Query params:
+
+- `limit` (optional, integer 1–200, default `25`) — maximum runs to return; values are clamped into range.
+
+#### GET `/api/internal/ingestion-runs/{ingestionRunId}`
+
+Returns the full run detail view model: frozen run outcome (captured at completion), live rollup derived from current ingestion-item state, per-stage rollups, per-item details with retry metadata and per-item link/repository/website counts, active deferments, and deep links (Hangfire, notifications). Returns `404` when the run does not exist.
+
+#### GET `/api/internal/ingestion-runs/{ingestionRunId}/notifications`
+
+Returns the notification rows recorded for a run (digest summary / deferral notices), including provider, target room, status, attempt count, next retry time, provider message id, error summary, and timestamps. `retryable` is `true` for rows still in `pending`/`failed`.
 
 ## 8. Search endpoints
 
@@ -1231,13 +1269,19 @@ Returns model, dimensions, computed stale count, failed count, last reprocess ti
 
 Returns the WebP file. When the file is missing from the volume (or the row is marked failed), returns a stable placeholder image instead of a 404, so result cards keep a fixed layout; the missing file is recorded as a domain event and the row becomes retryable as an Enrichment Stage failure.
 
-### DELETE `/api/videos/{videoId}/screenshots`
+### Purging screenshots
 
-Purge screenshots for video. Response: accepted operation or immediate mutation depending implementation.
+Screenshot purges are performed through the admin operations surface, not per-entity `DELETE` endpoints:
 
-### DELETE `/api/channels/{channelId}/screenshots`
+### POST `/api/admin/operations/screenshots/purge`
 
-Purge screenshots for channel. Response: accepted operation.
+Purges screenshot rows and generated files for the requested scope. Query params:
+
+- `target` (optional): a video id or channel id to scope the purge; omit to purge the whole corpus.
+
+Response: accepted operation (track `/api/admin/operations/{operationId}`) or `200 OK` when the purge completes synchronously.
+
+The previously-specced `DELETE /api/videos/{videoId}/screenshots` and `DELETE /api/channels/{channelId}/screenshots` routes are **not implemented**; use this operation instead.
 
 ## 15. Repository endpoints
 
@@ -1448,11 +1492,13 @@ Applies allowed app/config/DB migrations when deployment compatibility checks pa
 
 Queues reprocessing of stale search documents, embeddings, aggregate vectors, or index rebuilds.
 
-## 19. Matrix notifier internal API
+## 19. Matrix notification dispatch (shipped: in-process)
 
-This API should be internal to the Compose network. MVP Matrix sends are not required to be E2EE; E2EE is MVP+.
+The shipped implementation dispatches Matrix notifications **in-process** from the worker/API via `INotificationDispatchService` (notification row + outbox message in PostgreSQL, dispatched to `IMatrixNotificationService`). It does not expose a separate HTTP internal Matrix service on the Compose network. The request/response contract below describes the logical ingestion-summary payload that is stored on the `Notification` row and rendered for Matrix; a future extraction to a standalone internal Matrix HTTP service would reuse this shape.
 
-### POST `/internal/matrix/send-ingestion-summary`
+The digest notification record written for a run is `notificationType = "ingestion_summary"`, `provider = "matrix"`. `target` is the literal string `"matrix"` when the default configured room is used, otherwise a room override id. The Matrix message body is a plain-text rendering of the stored run digest, e.g. `Streaming Digest {runType} run {runId:N}: 4 new videos, 2 new resources, 1 high-signal match, 0 failed items, 0 skipped items, 0 active deferrals`. Sends go through the transactional outbox; a failed or unconfigured send leaves the row `pending` and retries at 5-minute intervals, surfacing on the dashboard/notifications view rather than failing the run. MVP Matrix sends are not required to be E2EE; E2EE is MVP+.
+
+### POST `/internal/matrix/send-ingestion-summary` *(logical contract; in-process in MVP)*
 
 Request:
 

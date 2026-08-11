@@ -39,6 +39,7 @@ Responsibilities:
 Responsibilities:
 
 - Runs Hangfire jobs.
+- Owns the recurring ingestion schedule: registers/removes the `ingestion.scheduled` Hangfire recurring job at startup from `ingestion.scheduler.*` config (see §5.3), firing daily at the configured time (default 06:00 server local).
 - Performs channel/video ingestion.
 - Calls yt-dlp/YouTube adapters.
 - Calls transcript/audio-to-text services.
@@ -46,8 +47,9 @@ Responsibilities:
 - Calls browser scraper.
 - Calls repository adapters.
 - Generates screenshots.
+- Preflights model-consuming stages through `IModelReadinessGuard` before dispatch (see §4.1).
 - Writes ingestion events and search documents.
-- Queues Matrix notifications after manual/scheduled runs.
+- Assembles and stores a run-scoped Digest at each ingestion run's terminal state (ADR-0006) and queues the Matrix notification via the transactional outbox.
 
 ### 2.3 PostgreSQL: `streaming-digest-postgres`
 
@@ -110,6 +112,16 @@ When whisper is unavailable, `TranscriptIngestionService` degrades caption-less 
 
 An unconfigured whisper runtime (no `IAudioToTextProvider` registered) is the expected degrade state — semantically identical to `whisper-unconfigured` — so the admin test op returns `completed`/`warning` (HTTP 200) rather than `failed`/`error`; HTTP 500 is reserved for genuine probe exceptions. Per the issue's "captioned ingestion proceeds with a warning" wording, `TranscriptIngestionService` also emits an informational `LogWarning` on the captioned branch when `_audioToTextProvider` is null, so operators have a per-run signal that caption-less siblings would have degraded; ingestion success is unchanged.
 
+#### 2.5.2 Model lifecycle: reconcile, readiness, and live events
+
+Three Application-layer components track and enforce local-model lifecycle across the API and worker. State lives in the `model_runtime_state` table (statuses enumerated in API_SPEC §22.16).
+
+- **Startup reconcile (`ModelRuntimeReconcileService`).** Runs once at API and worker startup, hydrating `model_runtime_state` from the Ollama runtime's `/api/tags`. Models reported present are upserted to `ready` (with `last_verified_at`/`last_seen_in_runtime_at`); models in an in-flight state (`queued`/`running`/`downloading`) are never flipped — only `last_seen_in_runtime_at` is refreshed so a concurrent download is not clobbered. Models present in the runtime but absent from the catalog (user side-pulls) are recorded with `runtime_role="unknown"`. Non-Ollama providers are not reconciled (verify-only). The service never throws for an unreachable runtime; it returns a result summary so startup logs and continues.
+
+- **Readiness guard (`IModelReadinessGuard`).** Every model-consuming ingestion stage preflights through this guard before dispatch. For embedding and LLM it resolves the configured model from `embedding:model` / `llm:model` (env `STREAMINGDIGEST_EMBEDDING_MODEL`, `STREAMINGDIGEST_LLM_MODEL`/`OLLAMA_MODEL`) and reads its status from `model_runtime_state`, reporting ready only on `ready`. Whisper is an external verify-only service with no Ollama presence row, so its readiness is derived from whether a whisper base URL is configured. The guard never throws — an unreachable runtime reports unready. (The worker currently binds the interim always-ready guard pending full per-stage wiring; the API binds the real `ModelReadinessGuard`.)
+
+- **Lifecycle event stream (`ModelLifecycleEventBroadcaster` + `GET /api/models/events`).** Status transitions and operation progress publish in-process to an SSE stream consumed by the Blazor client. Each subscriber gets a bounded 256-event buffer; a stalled subscriber that falls behind is dropped and resynchronizes via the `GET /api/models/status` snapshot. The stream is a live hint — clients load and reconcile through the snapshot endpoint, not the stream alone (see API_SPEC §5).
+
 ### 2.6 Browser scraper: `streaming-digest-scraper`
 
 Responsibilities:
@@ -122,15 +134,14 @@ Responsibilities:
 
 This may be integrated into the worker container or kept separate. Prefer separate container if browser dependencies make the worker image too heavy.
 
-### 2.7 Matrix notifier: `streaming-digest-matrix-notifier`
+### 2.7 Matrix notifier
 
 Responsibilities:
 
-- Dedicated Matrix notification service.
 - Sends ingestion/digest notifications to the configured room ID so the user can open the web UI from Android over Tailscale.
 - E2EE, Matrix crypto/session persistence, and manual device verification are MVP+.
 
-Prefer a .NET implementation until features or stability require a non-.NET SDK/service. Keep this separate from the API/worker if Matrix dependencies or state isolation justify it.
+In the shipped MVP the notifier is an **in-process component** (`StreamingDigest.MatrixNotifier`, `IMatrixNotificationService`) hosted inside the API/worker, not a separately deployed container. The worker's `NotificationDispatchService` writes a `Notification` row plus a transactional outbox message in PostgreSQL and dispatches to Matrix, retrying a failed/unconfigured send at 5-minute intervals. Splitting it into a dedicated `streaming-digest-matrix-notifier` container remains an option if Matrix dependencies or crypto-state isolation later justify it.
 
 ### 2.8 Observability stack
 
@@ -175,12 +186,13 @@ Production should expose only the services intentionally reachable over Tailscal
 
 1. User adds or updates channel in Blazor admin UI.
 2. API validates and stores channel configuration.
-3. User triggers ingestion or scheduled Hangfire job starts.
+3. User triggers ingestion manually, or the `ingestion.scheduled` Hangfire recurring job fires (daily at the configured time, default 06:00 server local).
 4. Worker resolves channel metadata and videos using yt-dlp/adapter and optional YouTube API key.
 5. Worker filters regular long-form public videos within configured max age or backfill parameters.
 6. Worker skips already processed videos unless retry/reprocess is explicitly requested. A processed video URL should not be reprocessed during normal daily ingestion.
 7. Worker creates an ingestion run and per-video ingestion records.
-8. Worker processes each video with configurable concurrency.
+8. Worker processes each video with configurable concurrency. Before dispatching a model-consuming stage, the stage preflights through `IModelReadinessGuard` so an unready embedding/LLM capability degrades and notifies instead of dispatching against a missing model.
+9. At the run's terminal state the orchestrator assembles and stores a run-scoped Digest (ADR-0006) and queues the Matrix notification via the transactional outbox, which dispatches to Matrix at 5-minute retry cadence until sent.
 
 ### 4.2 Video processing flow
 
@@ -245,10 +257,10 @@ Production should expose only the services intentionally reachable over Tailscal
 
 1. Ingestion run completes or fails.
 2. Worker assembles and stores the run-scoped Digest (ADR-0006) — one assembly, two renderings.
-3. Worker queues notification request.
+3. `NotificationDispatchService` writes a `Notification` row (`notificationType = "ingestion_summary"`, `provider = "matrix"`, `target = "matrix"` for the default room or a room-override id) plus a transactional outbox message in PostgreSQL, then dispatches pending outbox messages.
 4. Matrix notifier renders the summary as an excerpt of the stored Digest, so Matrix and dashboard never disagree. One narrow exception (ADR-0006 amendment): the dashboard's Digest section re-derives the active-deferments subsection from live state at render time; Matrix keeps the stored snapshot, and all other Digest fields stay stored on both surfaces.
 5. Matrix notifier sends the message to the configured room ID (unencrypted in MVP; E2EE is MVP+).
-6. Notification event/status is stored on the user-visible Notification record; outbox messages are internal plumbing only.
+6. A failed or unconfigured send leaves the Notification/outbox `pending` and retries at 5-minute intervals; the user-visible Notification record carries status, attempt count, next retry time, provider message id, and error summary, while outbox messages remain internal plumbing.
 
 ### 4.8 Idempotency and retry flow
 
@@ -341,6 +353,10 @@ Use Hangfire with PostgreSQL storage for:
 - Matrix notification jobs.
 
 Hangfire dashboard is API-hosted and linked in the Blazor admin UI.
+
+**Recurring ingestion schedule.** The worker owns one recurring job, id `ingestion.scheduled`, registered at startup by `IngestionScheduleSetup` through the `IIngestionJobScheduler` abstraction (Application layer). The daily cron is built from schema-validated config: `ingestion.scheduler.scheduleHour` (0–23, default `6`) and `ingestion.scheduler.scheduleMinute` (0–59, default `0`) → cron `{minute} {hour} * * *`, interpreted in server local time (default 06:00). When `ingestion.scheduler.enabled` is `false`, or the configured hour/minute is out of range, `IngestionScheduleSetup.Apply()` removes the recurring job and logs a warning; on-demand enqueues are unaffected. These scheduler keys are deployment/runtime config, not user-facing app settings, so `PUT /api/settings` does not mutate the schedule — a schedule change is a config edit plus worker restart.
+
+**Storage dependency.** When Hangfire is on in-memory storage because PostgreSQL is unreachable, endpoints that must persist job state (e.g. `POST /api/models/download`) return `503` rather than enqueueing into a transient store.
 
 ### 5.4 Data access
 
