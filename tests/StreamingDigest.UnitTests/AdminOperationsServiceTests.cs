@@ -668,6 +668,7 @@ public sealed class AdminOperationsServiceTests
             => throw new InvalidOperationException("matrix-threw");
     }
 
+    private sealed class TestAdminOperationStore : IAdminOperationStore
     {
         private readonly Dictionary<Guid, AdminActionStatus> _operations = new();
 
