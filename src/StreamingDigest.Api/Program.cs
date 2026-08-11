@@ -144,6 +144,7 @@ app.MapChannelEndpoints();
 app.MapHealthEndpoints(databaseStatus);
 app.MapAdminOperationEndpoints(applicationConfiguration, builder.Environment.ContentRootPath);
 app.MapIngestionRunEndpoints();
+app.MapDashboardEndpoints();
 app.MapTranscriptEndpoints();
 app.MapOverrideEndpoints();
 app.MapAuthEndpoints(connectionString, useSecureCookies, jsonOptions, app.Logger);

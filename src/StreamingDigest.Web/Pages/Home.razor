@@ -1,7 +1,6 @@
 @page "/"
 @page "/dashboard"
 @inject DashboardSummaryService DashboardSummaryService
-@inject CorpusReadinessService CorpusReadinessService
 @inject SearchUiSessionService SearchUiSessionService
 @inject NavigationManager NavigationManager
 
@@ -267,13 +266,24 @@
     protected override async Task OnInitializedAsync()
     {
         SearchUiSessionService.RememberSelectedMode("/dashboard");
-        _summary = string.IsNullOrWhiteSpace(Fixture)
-            ? DashboardSummaryService.GetSummary("empty")
-            : DashboardSummaryService.GetSummary(Fixture);
 
-        if (!string.IsNullOrWhiteSpace(Fixture) || (await CorpusReadinessService.GetReadinessAsync()).HasSearchableCorpus)
+        if (!string.IsNullOrWhiteSpace(Fixture))
         {
+            // ?fixture= demo path: render from the in-memory fixture service.
             _summary = DashboardSummaryService.GetSummary(Fixture);
+        }
+        else
+        {
+            // Real path: fetch from the persisted-run read model.
+            try
+            {
+                var live = await SearchUiSessionService.GetAuthenticatedJsonAsync<DashboardSummary>("/api/internal/dashboard");
+                _summary = live ?? DashboardSummaryService.GetSummary("empty");
+            }
+            catch
+            {
+                _summary = DashboardSummaryService.GetSummary("empty");
+            }
         }
 
         _recentSearches.Clear();

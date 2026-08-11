@@ -17,4 +17,16 @@ public interface IOperationStore
 
     /// <summary>Stamps the Hangfire job id onto a persisted operation.</summary>
     Task UpdateHangfireJobIdAsync(Guid operationId, string hangfireJobId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns all operations of the given <paramref name="operationType"/> whose status
+    /// is <c>queued</c> or <c>running</c> (i.e. not yet in a terminal state).
+    /// </summary>
+    Task<List<OperationRecord>> GetActiveByTypeAsync(string operationType, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the most-recently-completed operation of the given
+    /// <paramref name="operationType"/>, or <c>null</c> when none exists.
+    /// </summary>
+    Task<OperationRecord?> GetLastCompletedByTypeAsync(string operationType, CancellationToken cancellationToken = default);
 }

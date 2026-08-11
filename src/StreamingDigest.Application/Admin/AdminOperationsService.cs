@@ -23,7 +23,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly ISearchDocumentRegenerationService? _searchDocumentRegenerationService;
     private readonly IAudioToTextProvider? _audioToTextProvider;
     private readonly IModelReadinessGuard? _modelReadinessGuard;
-    private readonly IIngestionJobDispatcher? _ingestionJobDispatcher;
+    private readonly IIngestionJobScheduler? _ingestionJobScheduler;
     private readonly INotificationTestSender? _notificationTestSender;
 
     public AdminOperationsService(
@@ -35,7 +35,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         ISearchDocumentRegenerationService? searchDocumentRegenerationService = null,
         IAudioToTextProvider? audioToTextProvider = null,
         IModelReadinessGuard? modelReadinessGuard = null,
-        IIngestionJobDispatcher? ingestionJobDispatcher = null,
+        IIngestionJobScheduler? ingestionJobScheduler = null,
         INotificationTestSender? notificationTestSender = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
@@ -46,37 +46,35 @@ public sealed class AdminOperationsService : IAdminOperationsService
         _searchDocumentRegenerationService = searchDocumentRegenerationService;
         _audioToTextProvider = audioToTextProvider;
         _modelReadinessGuard = modelReadinessGuard;
-        _ingestionJobDispatcher = ingestionJobDispatcher;
+        _ingestionJobScheduler = ingestionJobScheduler;
         _notificationTestSender = notificationTestSender;
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
     {
         var result = await CreateAcceptedResultAsync("ingestion.run", target, "Manual ingestion has been queued for the target scope.", cancellationToken);
-        if (_ingestionJobDispatcher is not null)
+        await TryPersistIngestionRunAsync(result.OperationId, "manual", target, cancellationToken);
+
+        if (_ingestionJobScheduler is not null)
         {
-            // Dispatch real orchestrator jobs — the orchestrator creates its own ingestion_run rows.
-            await TryDispatchChannelJobsAsync(result.OperationId, "manual", target, isReprocess: false, cancellationToken);
+            var channelId = TryParseChannelId(target);
+            _ingestionJobScheduler.EnqueueOnDemandRun(channelId, "manual", "admin");
         }
-        else
-        {
-            // Fallback: pre-seed rows so the status is visible even when Hangfire is unavailable.
-            await TryPersistIngestionRunAsync(result.OperationId, "manual", target, cancellationToken);
-        }
+
         return result;
     }
 
     public async Task<AdminActionResult> RunChannelBackfillAsync(string? channelId = null, CancellationToken cancellationToken = default)
     {
         var result = await CreateAcceptedResultAsync("ingestion.backfill", channelId, "Channel backfill has been queued.", cancellationToken);
-        if (_ingestionJobDispatcher is not null)
+        await TryPersistIngestionRunAsync(result.OperationId, "backfill", channelId, cancellationToken);
+
+        if (_ingestionJobScheduler is not null)
         {
-            await TryDispatchChannelJobsAsync(result.OperationId, "backfill", channelId, isReprocess: false, cancellationToken);
+            var parsedChannelId = TryParseChannelId(channelId);
+            _ingestionJobScheduler.EnqueueOnDemandRun(parsedChannelId, "backfill", "admin");
         }
-        else
-        {
-            await TryPersistIngestionRunAsync(result.OperationId, "backfill", channelId, cancellationToken);
-        }
+
         return result;
     }
 
@@ -90,10 +88,10 @@ public sealed class AdminOperationsService : IAdminOperationsService
         var result = await CreateAcceptedResultAsync("retry.ingestionRun", runId, $"Retry queued for ingestion run '{runId}'.", cancellationToken);
         await TryRetryFailedRunAsync(result.OperationId, parsedRunId, cancellationToken);
 
-        if (_ingestionJobDispatcher is not null)
+        if (_ingestionJobScheduler is not null)
         {
             // Dispatch channel jobs so the pending items set above are actually processed.
-            await TryDispatchRunRetryJobsAsync(result.OperationId, parsedRunId, cancellationToken);
+            await TryDispatchRunRetryJobsAsync(parsedRunId, cancellationToken);
         }
 
         return result;
@@ -106,13 +104,13 @@ public sealed class AdminOperationsService : IAdminOperationsService
             return await CreateResultAsync("retry.video", videoId, "failed", $"Video id '{videoId}' is not a valid GUID.", "error", cancellationToken);
         }
 
-        if (_ingestionJobDispatcher is not null)
+        if (_ingestionJobScheduler is not null)
         {
             // Mark failed/deferred items as pending (ADR-0002: retry re-executes failed/deferred work only),
             // then dispatch the orchestrator to pick them up.
             var result = await CreateAcceptedResultAsync("retry.video", videoId, $"Retry queued for video '{videoId}'.", cancellationToken);
             await TryRetryFailedEntityAsync(result.OperationId, "retry.video", "video", parsedVideoId, videoId, cancellationToken);
-            await TryDispatchVideoChannelJobAsync(result.OperationId, parsedVideoId, "manual", isReprocess: false, cancellationToken);
+            await TryDispatchVideoChannelJobAsync(parsedVideoId, "manual", cancellationToken);
             return result;
         }
 
@@ -155,12 +153,12 @@ public sealed class AdminOperationsService : IAdminOperationsService
             return await CreateResultAsync("reprocess.video", videoId, "failed", $"Video id '{videoId}' is not a valid GUID.", "error", cancellationToken);
         }
 
-        if (_ingestionJobDispatcher is not null)
+        if (_ingestionJobScheduler is not null)
         {
             // Reprocess bypasses the idempotency guard and resets budgets (ADR-0002/0014:
             // full pipeline for a completed entity, scrape-exclusion policy re-evaluated).
             var result = await CreateAcceptedResultAsync("reprocess.video", videoId, $"Reprocess queued for video '{videoId}'.", cancellationToken);
-            await TryDispatchVideoChannelJobAsync(result.OperationId, parsedVideoId, "reprocess", isReprocess: true, cancellationToken);
+            await TryDispatchVideoChannelJobAsync(parsedVideoId, "reprocess", cancellationToken);
             return result;
         }
 
@@ -879,48 +877,9 @@ public sealed class AdminOperationsService : IAdminOperationsService
         return Path.GetFullPath(Path.Combine(_contentRootPath ?? Directory.GetCurrentDirectory(), configuredPath));
     }
 
-    private async Task TryDispatchChannelJobsAsync(
-        Guid operationId,
-        string runType,
-        string? target,
-        bool isReprocess,
-        CancellationToken cancellationToken)
-    {
-        var connectionString = _configuration.ConnectionStrings.StreamingDigest;
-        if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("******", StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        try
-        {
-            await using var connection = new NpgsqlConnection(connectionString);
-            await connection.OpenAsync(cancellationToken);
-            var channels = await LoadRunChannelsAsync(connection, null, target, cancellationToken);
-
-            foreach (var channel in channels)
-            {
-                _ingestionJobDispatcher!.EnqueueChannelIngestion(new ChannelIngestionRequest
-                {
-                    ChannelId = channel.ChannelId,
-                    RunType = runType,
-                    TriggeredBy = "admin",
-                    IsReprocessRequest = isReprocess,
-                    OperationId = operationId
-                });
-            }
-        }
-        catch
-        {
-            // Keep operation responses available even when dispatch fails.
-        }
-    }
-
     private async Task TryDispatchVideoChannelJobAsync(
-        Guid operationId,
         Guid videoId,
         string runType,
-        bool isReprocess,
         CancellationToken cancellationToken)
     {
         var connectionString = _configuration.ConnectionStrings.StreamingDigest;
@@ -945,14 +904,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
                 return;
             }
 
-            _ingestionJobDispatcher!.EnqueueChannelIngestion(new ChannelIngestionRequest
-            {
-                ChannelId = channelId,
-                RunType = runType,
-                TriggeredBy = "admin",
-                IsReprocessRequest = isReprocess,
-                OperationId = operationId
-            });
+            _ingestionJobScheduler!.EnqueueOnDemandRun(channelId, runType, "admin");
         }
         catch
         {
@@ -961,7 +913,6 @@ public sealed class AdminOperationsService : IAdminOperationsService
     }
 
     private async Task TryDispatchRunRetryJobsAsync(
-        Guid operationId,
         Guid runId,
         CancellationToken cancellationToken)
     {
@@ -999,14 +950,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
 
             foreach (var channelId in channelIds)
             {
-                _ingestionJobDispatcher!.EnqueueChannelIngestion(new ChannelIngestionRequest
-                {
-                    ChannelId = channelId,
-                    RunType = "manual",
-                    TriggeredBy = "admin",
-                    IsReprocessRequest = false,
-                    OperationId = operationId
-                });
+                _ingestionJobScheduler!.EnqueueOnDemandRun(channelId, "manual", "admin");
             }
         }
         catch
@@ -1562,4 +1506,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         string Stage,
         int Attempt,
         int RetryCount);
+
+    private static Guid? TryParseChannelId(string? value)
+        => Guid.TryParse(value, out var id) ? id : null;
 }

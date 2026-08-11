@@ -552,16 +552,16 @@ public sealed class AdminOperationsServiceTests
         Assert.Equal("screenshots.purge", result.OperationType);
     }
 
-    // --- IIngestionJobDispatcher / RunIngestionNowAsync + RunChannelBackfillAsync ---
+    // --- IIngestionJobScheduler / RunIngestionNowAsync + RunChannelBackfillAsync ---
 
     [Fact]
     public async Task RunIngestionNowAsync_WithDispatcher_ReturnsAcceptedWithoutFallingBackToDirectPersist()
     {
-        var dispatcher = new RecordingIngestionJobDispatcher();
+        var dispatcher = new RecordingIngestionJobScheduler();
         // No DB configured: TryDispatchChannelJobsAsync will catch the error without enqueueing,
         // but the operation should still be accepted and the dispatcher path taken (not the
         // raw-SQL fallback).
-        var service = new AdminOperationsService(ingestionJobDispatcher: dispatcher);
+        var service = new AdminOperationsService(ingestionJobScheduler: dispatcher);
 
         var result = await service.RunIngestionNowAsync("channel-1");
 
@@ -572,8 +572,8 @@ public sealed class AdminOperationsServiceTests
     [Fact]
     public async Task RunChannelBackfillAsync_WithDispatcher_ReturnsAccepted()
     {
-        var dispatcher = new RecordingIngestionJobDispatcher();
-        var service = new AdminOperationsService(ingestionJobDispatcher: dispatcher);
+        var dispatcher = new RecordingIngestionJobScheduler();
+        var service = new AdminOperationsService(ingestionJobScheduler: dispatcher);
 
         var result = await service.RunChannelBackfillAsync("channel-1");
 
@@ -586,10 +586,10 @@ public sealed class AdminOperationsServiceTests
     [Fact]
     public async Task RetryFailedVideoAsync_WithDispatcher_ReturnsAcceptedWithoutCallingTranscriptService()
     {
-        var dispatcher = new RecordingIngestionJobDispatcher();
+        var dispatcher = new RecordingIngestionJobScheduler();
         var transcriptService = new RecordingTranscriptIngestionService();
         var service = new AdminOperationsService(
-            ingestionJobDispatcher: dispatcher,
+            ingestionJobScheduler: dispatcher,
             transcriptIngestionService: transcriptService);
         var videoId = Guid.NewGuid();
 
@@ -606,10 +606,10 @@ public sealed class AdminOperationsServiceTests
     [Fact]
     public async Task ReprocessVideoAsync_WithDispatcher_ReturnsAcceptedWithoutCallingTranscriptService()
     {
-        var dispatcher = new RecordingIngestionJobDispatcher();
+        var dispatcher = new RecordingIngestionJobScheduler();
         var transcriptService = new RecordingTranscriptIngestionService();
         var service = new AdminOperationsService(
-            ingestionJobDispatcher: dispatcher,
+            ingestionJobScheduler: dispatcher,
             transcriptIngestionService: transcriptService);
         var videoId = Guid.NewGuid();
 
@@ -625,8 +625,8 @@ public sealed class AdminOperationsServiceTests
     [Fact]
     public async Task RetryFailedIngestionRunAsync_WithDispatcher_ReturnsAccepted()
     {
-        var dispatcher = new RecordingIngestionJobDispatcher();
-        var service = new AdminOperationsService(ingestionJobDispatcher: dispatcher);
+        var dispatcher = new RecordingIngestionJobScheduler();
+        var service = new AdminOperationsService(ingestionJobScheduler: dispatcher);
         var runId = Guid.NewGuid();
 
         var result = await service.RetryFailedIngestionRunAsync(runId.ToString());
@@ -636,16 +636,17 @@ public sealed class AdminOperationsServiceTests
         Assert.Equal("retry.ingestionRun", result.OperationType);
     }
 
-    private sealed class RecordingIngestionJobDispatcher : IIngestionJobDispatcher
+    private sealed class RecordingIngestionJobScheduler : IIngestionJobScheduler
     {
-        private readonly List<ChannelIngestionRequest> _enqueued = [];
-        public IReadOnlyList<ChannelIngestionRequest> EnqueuedRequests => _enqueued;
+        private int _count;
 
-        public string EnqueueChannelIngestion(ChannelIngestionRequest request)
+        public string EnqueueOnDemandRun(Guid? channelId, string runType, string triggeredBy)
         {
-            _enqueued.Add(request);
-            return $"job-{_enqueued.Count}";
+            _count++;
+            return $"job-{_count}";
         }
+
+        public void SetRecurringJob(string? cronExpression) { }
     }
 
     private sealed class StubNotificationTestSender(bool enabled, bool success, string message) : INotificationTestSender

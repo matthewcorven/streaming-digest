@@ -27,6 +27,7 @@ using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Worker;
 using StreamingDigest.Worker.Scraping;
+using StreamingDigest.Worker.Scheduling;
 // Two distinct readiness-guard seams share the name IModelReadinessGuard: the WS-7 runtime
 // seam guard (StreamingDigest.Application, CheckAsync over RuntimeRole) and the A2 ingestion
 // pipeline preflight seam (StreamingDigest.Application.Orchestration, IsReadyAsync over a
@@ -213,6 +214,7 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
 builder.Services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+builder.Services.AddScoped<IDigestAssemblyService, DigestAssemblyService>();
 builder.Services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
 builder.Services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
 builder.Services.AddScoped<IIngestionItemRepository, IngestionItemRepository>();
@@ -273,6 +275,22 @@ builder.Services.AddScoped<IVideoStageHandler, EmbeddingsStageHandler>();
 builder.Services.AddScoped<VideoPipelineProcessor>();
 builder.Services.AddScoped<IIngestionOrchestrator, IngestionOrchestrator>();
 
+// ── A3 Hangfire scheduler (issue #213) ───────────────────────────────────────
+// IEmbeddingTransitionChecker: ADR-0011 pause/catch-up seam — reads the
+// operations table to detect an active embedding regeneration.
+builder.Services.AddSingleton<IEmbeddingTransitionChecker>(
+    sp => new PostgresEmbeddingTransitionChecker(new PostgresOperationStore(connectionString)));
+
+// IIngestionJobScheduler: thin Hangfire wrapper used by AdminOperationsService
+// and the catch-up path to enqueue on-demand runs without a direct Hangfire dep.
+builder.Services.AddSingleton<IIngestionJobScheduler>(sp =>
+    new HangfireIngestionJobScheduler(
+        sp.GetRequiredService<IBackgroundJobClient>(),
+        sp.GetRequiredService<IRecurringJobManager>()));
+
+// IngestionScheduleSetup: registers (or removes) the recurring job at startup.
+builder.Services.AddSingleton<IngestionScheduleSetup>();
+
 var host = builder.Build();
 var environmentName = builder.Environment.EnvironmentName;
 
@@ -330,6 +348,10 @@ await modelRuntimeStateSchemaGuard.EnsureSchemaAsync(connectionString);
 // bootstrap-installed models show `ready` without a manual verify. Failures signal instead of
 // silently degrading; startup never blocks on the runtime.
 await ReconcileModelRuntimeStateAtStartupAsync(startupLogger, startupServiceScope.ServiceProvider);
+
+// A3: apply the ingestion schedule (RecurringJob.AddOrUpdate or RemoveIfExists)
+// after Hangfire storage is fully initialised.
+host.Services.GetRequiredService<IngestionScheduleSetup>().Apply();
 
 await host.RunAsync();
 

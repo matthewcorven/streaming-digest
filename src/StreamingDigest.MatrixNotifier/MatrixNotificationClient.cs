@@ -25,7 +25,10 @@ public sealed class MatrixNotificationClient
         return $"[matrix] {video.DisplayTitle}: {message}";
     }
 
-    public async Task<MatrixSendResult> SendTextMessageAsync(string message, CancellationToken cancellationToken = default)
+    public Task<MatrixSendResult> SendTextMessageAsync(string message, CancellationToken cancellationToken)
+        => SendTextMessageAsync(message, null, cancellationToken);
+
+    public async Task<MatrixSendResult> SendTextMessageAsync(string message, string? roomOverride = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
 
@@ -33,9 +36,10 @@ public sealed class MatrixNotificationClient
             "matrix.send",
             async activity =>
             {
+                var effectiveRoomId = string.IsNullOrWhiteSpace(roomOverride) ? _options.RoomId : roomOverride;
                 activity?.SetTag("messaging.system", "matrix");
                 activity?.SetTag("messaging.operation", "send");
-                activity?.SetTag("messaging.destination", _options.RoomId);
+                activity?.SetTag("messaging.destination", effectiveRoomId);
                 activity?.SetTag("messaging.enabled", _options.IsEnabled.ToString());
 
                 if (!_options.IsEnabled)
@@ -45,7 +49,7 @@ public sealed class MatrixNotificationClient
 
                 ValidateOptions();
 
-                var requestUri = BuildSendMessageUri();
+                var requestUri = BuildSendMessageUri(effectiveRoomId);
                 var requestBody = new
                 {
                     msgtype = "m.text",
@@ -73,16 +77,16 @@ public sealed class MatrixNotificationClient
             new Dictionary<string, object?>
             {
                 ["messaging.system"] = "matrix",
-                ["messaging.destination"] = _options.RoomId,
+                ["messaging.destination"] = string.IsNullOrWhiteSpace(roomOverride) ? _options.RoomId : roomOverride,
                 ["messaging.enabled"] = _options.IsEnabled
             },
             ActivityKind.Client);
     }
 
     public Task<MatrixSendResult> SendTestMessageAsync(CancellationToken cancellationToken = default)
-        => SendTextMessageAsync("Streaming Digest Matrix notification test message.", cancellationToken);
+        => SendTextMessageAsync("Streaming Digest Matrix notification test message.", cancellationToken: cancellationToken);
 
-    private string BuildSendMessageUri()
+    private string BuildSendMessageUri(string roomId)
     {
         var homeserverBaseUrl = _options.HomeserverBaseUrl.Trim().TrimEnd('/');
         if (!Uri.TryCreate(homeserverBaseUrl, UriKind.Absolute, out var homeserverUri))
@@ -91,9 +95,9 @@ public sealed class MatrixNotificationClient
         }
 
         var transactionId = Guid.NewGuid().ToString("N");
-        var roomId = Uri.EscapeDataString(_options.RoomId).Replace("%21", "!");
+        var escapedRoomId = Uri.EscapeDataString(roomId).Replace("%21", "!");
         var path = homeserverUri.AbsolutePath.TrimEnd('/');
-        return $"{homeserverUri.Scheme}://{homeserverUri.Host}{(homeserverUri.IsDefaultPort ? string.Empty : $":{homeserverUri.Port}")}{path}/_matrix/client/v3/rooms/{roomId}/send/m.room.message/{transactionId}";
+        return $"{homeserverUri.Scheme}://{homeserverUri.Host}{(homeserverUri.IsDefaultPort ? string.Empty : $":{homeserverUri.Port}")}{path}/_matrix/client/v3/rooms/{escapedRoomId}/send/m.room.message/{transactionId}";
     }
 
     private void ValidateOptions()

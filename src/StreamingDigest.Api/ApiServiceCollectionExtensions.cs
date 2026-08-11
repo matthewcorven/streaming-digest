@@ -1,3 +1,5 @@
+extern alias StreamingDigestWorker;
+
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
@@ -114,7 +116,10 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IVideoClusterEmbeddingStore>(sp => new PostgresVideoClusterEmbeddingStore(connectionString));
         services.AddScoped<ISearchDocumentRegenerationService, SearchDocumentRegenerationService>();
         services.AddScoped<IAdminOperationStore, EfCoreAdminOperationStore>();
-        services.AddScoped<IIngestionJobDispatcher, HangfireIngestionJobDispatcher>();
+        services.AddSingleton<StreamingDigest.Application.Orchestration.IIngestionJobScheduler>(sp =>
+            new StreamingDigestWorker::StreamingDigest.Worker.Scheduling.HangfireIngestionJobScheduler(
+                sp.GetRequiredService<IBackgroundJobClient>(),
+                sp.GetRequiredService<IRecurringJobManager>()));
         services.AddScoped<INotificationTestSender, MatrixNotificationTestBridge>();
         services.AddScoped<IAdminOperationsService>(sp => new AdminOperationsService(
             applicationConfiguration,
@@ -125,9 +130,10 @@ internal static class ApiServiceCollectionExtensions
             sp.GetService<ISearchDocumentRegenerationService>(),
             sp.GetService<IAudioToTextProvider>(),
             sp.GetService<IModelReadinessGuard>(),
-            sp.GetRequiredService<IIngestionJobDispatcher>(),
+            sp.GetRequiredService<StreamingDigest.Application.Orchestration.IIngestionJobScheduler>(),
             sp.GetRequiredService<INotificationTestSender>()));
         services.AddScoped<INotificationDispatchService, NotificationDispatchService>();
+        services.AddScoped<StreamingDigest.Application.Orchestration.IDigestAssemblyService, DigestAssemblyService>();
         services.AddScoped<IRetentionCleanupService, RetentionCleanupService>();
         services.AddScoped<IChannelRepository, ChannelRepository>();
         services.AddScoped<IIngestionRunRepository, IngestionRunRepository>();
