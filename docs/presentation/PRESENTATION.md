@@ -315,7 +315,7 @@ CHECKLIST (step 6) — DESKTOP
 - `GET /api/onboarding/status` — step list, statuses, error summaries.
 - `POST /api/onboarding/steps/{stepKey}/verify` — run one check.
 - `POST /api/onboarding/complete-core-setup` — mark core setup done.
-- `GET /api/models/options`, `POST /api/models/download`, `POST /api/models/verify` — model steps.
+- `GET /api/models/options`, `GET /api/models/status`, `POST /api/models/download`, `POST /api/models/verify` — model steps; download progress tracked via `GET /api/models/events` SSE.
 - `POST /api/channels` — first channel step.
 - `PUT /api/settings` — schedule confirmation.
 - `POST /api/admin/test-matrix` — checklist Matrix test.
@@ -861,7 +861,7 @@ DESKTOP
 | Tab | Contents | Endpoints |
 |---|---|---|
 | **General** | Theme (Light/Dark/System), ingestion defaults (max-age, schedule, segment cap, screenshot offset), search weights, clear recent searches, notification toggles | `GET/PUT /api/settings`, `DELETE /api/recent-searches` |
-| **Models** | Active embedding/LLM/audio models with verify + test buttons; model options with download; activate-model flows with explicit regeneration confirmation (stale count shown before confirm); readiness checklist re-verify links | `GET /api/models/options`, `POST /api/models/download`, `POST /api/models/verify`, `POST /api/models/activate-*`, `POST /api/admin/test-embedding`, `POST /api/admin/test-audio-to-text` |
+| **Models** | Active embedding/LLM/audio models with verify + test buttons; model options with download; download progress tracked via SSE; activate-model flows with explicit regeneration confirmation (stale count shown before confirm, MVP+); readiness checklist re-verify links | `GET /api/models/options`, `GET /api/models/status`, `POST /api/models/download`, `POST /api/models/verify`, `GET /api/models/events` (SSE), `POST /api/admin/test-embedding`, `POST /api/admin/test-audio-to-text`, `POST /api/models/activate-*` (MVP+) |
 | **Matrix** | Room ID, bot status, notification toggles (manual/scheduled runs), test send | `PUT /api/settings`, `POST /api/admin/test-matrix` |
 | **Observability** | Links to Grafana/Prometheus/Loki/Tempo/Hangfire (rendered only when enabled, ARCHITECTURE §6.3); dependency health summary; retention policy display | `GET /api/admin/observability-links`, `GET /api/admin/health` |
 | **Backup** | Backup now button, backup list with verify, maintenance status (versions, compatibility, stale derived data), upgrade preview + apply-migrations | `POST /api/admin/backups`, `GET /api/admin/backups`, `GET /api/admin/maintenance/status`, `GET /api/admin/upgrade/preview`, `POST /api/admin/upgrade/apply-migrations` |
@@ -1131,7 +1131,7 @@ Badge hides at zero. Amber styling for warnings, red for failures, neutral other
 
 ### 6.1 Server-Sent Events (SSE)
 
-Real-time updates use **SSE, not polling**. Four streams. Polling is a fallback only.
+Real-time updates use **SSE, not polling**. Five streams. Polling is a fallback only.
 
 **Connection lifecycle:**
 
@@ -1139,7 +1139,7 @@ Real-time updates use **SSE, not polling**. Four streams. Polling is a fallback 
 2. On `error` / connection drop: exponential backoff reconnect (1s → 2s → 4s → 8s → max 30s, jittered).
 3. After **3 consecutive failed reconnects**, the client switches to **fallback polling** every 30s for the affected stream's underlying REST endpoint, and shows a subtle "Live updates paused — reconnecting…" pill in the top bar.
 4. When an SSE `open` succeeds again, polling stops and the pill clears.
-5. All four streams may be multiplexed over one endpoint (`/api/events`) with typed events, or exposed as four endpoints — the client treats them as four logical streams regardless of transport factoring.
+5. Streams ①–④ may be multiplexed over one endpoint (`/api/events`) with typed events, or exposed as four endpoints. Stream ⑤ (model lifecycle) is always a dedicated endpoint `GET /api/models/events`. The client treats them as five logical streams regardless of transport factoring.
 
 **Streams and event payloads:**
 
@@ -1198,6 +1198,10 @@ Terminal `operation.completed` / `operation.failed` → toast + invalidate affec
   "highSignalMatchCount": 2
 }
 ```
+
+**⑤ Model lifecycle** — drives Settings → Models tab live status and download progress. Served by `GET /api/models/events` (a dedicated endpoint, cookie-authenticated, WASM `EventSource`-compatible). Four named event types: `model.status`, `operation.status`, `operation.completed`, `operation.failed`. See API_SPEC §5 for full payload shapes.
+
+**D5 caveat — cross-process truth:** The model-lifecycle SSE stream is in-process (API only). For initial page load and post-reconnect reconciliation, call `GET /api/models/status` first, then subscribe to SSE for live updates. A stalled subscriber that falls behind the 256-event buffer is dropped; the client detects the completed stream and reconciles via `GET /api/models/status`.
 
 **How SSE updates UI state:** Each stream maps to a client-side state store slice. Events merge into the store; components bound to the store re-render automatically (Blazor `StateHasChanged` after async event dispatch on the synchronization context). SSE events never replace a full fetch on page load — they only patch already-loaded views. On reconnect after a gap, the client re-fetches the affected resource once (`Last-Event-ID` if supported, else simple refetch) to close any event gap.
 

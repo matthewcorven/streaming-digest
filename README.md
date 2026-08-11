@@ -247,25 +247,41 @@ PostgreSQL is internal by default.
 
 ## Local AI model support
 
-Streaming Digest uses local OSS AI services.
+Streaming Digest uses local OSS AI services managed through a hard-coded model catalog. Models can be downloaded and verified from the Settings → Models tab or via the API.
 
-Embeddings:
+**Embedding models:**
 
-- Microsoft Semantic Kernel talks to Ollama
-- `bge-m3` is preferred when available
-- `nomic-embed-text` is documented as a simpler alternative
+| ID | Provider | Downloadable |
+|---|---|---|
+| `bge-m3` | Ollama | ✓ (`ollama pull bge-m3`) |
+| `text-embedding-3-small` | OpenAI | verify-only (external) |
 
-Local LLM:
+`bge-m3` is the default local embedding model. `text-embedding-3-small` is in the catalog for deployments using the OpenAI API; no local download is required.
 
-- configurable Ollama model
-- recommended class: small local instruction model, such as Llama 3.1/3.2 8B-class or suitable Phi-class model depending on hardware
-- used for semantic segmentation and link classification
+**LLM models:**
 
-Audio-to-text:
+| ID | Provider | Downloadable |
+|---|---|---|
+| `llama3.1:8b` | Ollama | ✓ (`ollama pull llama3.1:8b`) |
+| `qwen2.5:7b` | Ollama | ✓ (`ollama pull qwen2.5:7b`) |
 
-- local CPU/GPU-capable engine
-- designed behind a Semantic Kernel-style abstraction
-- whisper.cpp is the preferred practical backend when compatible
+Used for semantic segmentation and link classification. Both are small local instruction models suitable for CPU/GPU hardware.
+
+**Audio-to-text:**
+
+| ID | Provider | Downloadable |
+|---|---|---|
+| `whisper` | Whisper | verify-only (runtime managed externally) |
+
+The Whisper runtime is managed outside Ollama. The API probes the audio-to-text service `/health` endpoint to verify presence.
+
+**Model lifecycle API:**
+
+- `GET /api/models/options` — catalog with download commands and mount hints.
+- `POST /api/models/download` — queues an Ollama model pull (202 Accepted + `operationId`).
+- `POST /api/models/verify` — real presence probe; writes `model_runtime_state`.
+- `GET /api/models/status` — cross-process authoritative runtime state for all models.
+- `GET /api/models/events` — SSE stream for live download progress (event types: `model.status`, `operation.status`, `operation.completed`, `operation.failed`).
 
 ## Security
 

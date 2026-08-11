@@ -321,11 +321,81 @@ Validates candidate non-secret config JSON and returns exact JSON-path errors.
 
 ### GET `/api/models/options`
 
-Returns supported installation/configuration options for embedding, LLM, and audio-to-text models, including displayed CLI download commands and mounted-path hints. MVP uses a hard-coded supported list rather than live hardware viability detection.
+Returns the hard-coded catalog of supported embedding, LLM, and audio models, including CLI download commands and mount-path hints for Ollama-managed models. Requires authentication.
+
+Response:
+
+```json
+{
+  "models": [
+    {
+      "id": "bge-m3",
+      "family": "embedding",
+      "provider": "ollama",
+      "runtimeRole": "embedding",
+      "downloadable": true,
+      "status": "available",
+      "label": "BAAI bge-m3",
+      "installCommand": "ollama pull bge-m3",
+      "mountPath": "/mnt/models/embedding"
+    },
+    {
+      "id": "text-embedding-3-small",
+      "family": "embedding",
+      "provider": "openai",
+      "runtimeRole": "embedding",
+      "downloadable": false,
+      "status": "available",
+      "label": "OpenAI text-embedding-3-small",
+      "installCommand": null,
+      "mountPath": null
+    },
+    {
+      "id": "llama3.1:8b",
+      "family": "llm",
+      "provider": "ollama",
+      "runtimeRole": "llm",
+      "downloadable": true,
+      "status": "available",
+      "label": "Llama 3.1 8B",
+      "installCommand": "ollama pull llama3.1:8b",
+      "mountPath": "/mnt/models/llm"
+    },
+    {
+      "id": "qwen2.5:7b",
+      "family": "llm",
+      "provider": "ollama",
+      "runtimeRole": "llm",
+      "downloadable": true,
+      "status": "available",
+      "label": "Qwen 2.5 7B",
+      "installCommand": "ollama pull qwen2.5:7b",
+      "mountPath": "/mnt/models/llm"
+    },
+    {
+      "id": "whisper",
+      "family": "audio",
+      "provider": "whisper",
+      "runtimeRole": "audio",
+      "downloadable": false,
+      "status": "available",
+      "label": "Whisper Base",
+      "installCommand": null,
+      "mountPath": null
+    }
+  ]
+}
+```
+
+Notes:
+
+- `downloadable: true` models are Ollama-managed. `downloadable: false` models (OpenAI, Whisper) are verify-only; the operator manages their runtime externally.
+- `provider` values: `"ollama"`, `"openai"`, `"whisper"`.
+- `runtimeRole` values: `"embedding"`, `"llm"`, `"audio"`.
 
 ### POST `/api/models/download`
 
-Queues model download/setup through an internal service.
+Queues an Ollama model download via Hangfire. Only `downloadable: true` catalog entries are accepted. Requires authentication.
 
 Request:
 
@@ -336,11 +406,40 @@ Request:
 }
 ```
 
-Response: accepted operation.
+Either `modelKind` (family, e.g. `"embedding"`) or `modelId` (e.g. `"bge-m3"`) may be provided; both are matched against the catalog. `modelKind` alone resolves the first matching family entry.
+
+Response (202 Accepted):
+
+```json
+{
+  "status": "queued",
+  "operationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "statusUrl": "/api/admin/operations/3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "modelKind": "embedding",
+  "modelId": "bge-m3"
+}
+```
+
+Error cases:
+
+- `400 Bad Request` — catalog entry not found, or model is `downloadable: false` (verify-only).
+- `503 Service Unavailable` — Hangfire is running on in-memory storage (PostgreSQL unavailable); the download cannot be durably persisted.
+
+Notes:
+
+- The 202 is only returned after the `operations` record and `model_runtime_state = queued` row are both persisted AND the Hangfire job is enqueued. There is no optimistic 202.
+- Track progress via `GET /api/admin/operations/{operationId}` or the SSE stream `GET /api/models/events`.
+- Download execution is worker-owned (pull concurrency 1). The API process never runs the Hangfire server.
 
 ### POST `/api/models/verify`
 
-Verifies the configured or provided model.
+Runs a real presence/health probe against the model runtime and projects onboarding readiness from the result. Requires authentication.
+
+- Ollama models: probed against `GET /api/tags` on the Ollama runtime.
+- Whisper: probed via the audio-to-text service `/health` endpoint.
+- OpenAI models: no local probe; returns a configuration advisory.
+
+Verified presence writes `model_runtime_state.status = "ready"` and updates `last_verified_at` and `last_seen_in_runtime_at`.
 
 Request:
 
@@ -351,9 +450,134 @@ Request:
 }
 ```
 
-### POST `/api/models/activate-embedding-model`
+Response (200 OK):
+
+```json
+{
+  "status": "verified",
+  "modelKind": "embedding",
+  "modelId": "bge-m3",
+  "verified": true,
+  "message": "Model bge-m3 is present in the Ollama runtime."
+}
+```
+
+On failure, `status` is `"failed"` and `verified` is `false`.
+
+### GET `/api/models/status`
+
+Returns the persisted `model_runtime_state` rows for all known models. This is the cross-process authoritative view of model lifecycle state. Requires authentication.
+
+Response:
+
+```json
+{
+  "models": [
+    {
+      "provider": "ollama",
+      "modelId": "bge-m3",
+      "runtimeRole": "embedding",
+      "status": "ready",
+      "currentOperationId": null,
+      "progressPercent": null,
+      "lastVerifiedAt": "2026-08-10T12:00:00Z",
+      "lastSeenInRuntimeAt": "2026-08-10T12:00:00Z",
+      "lastErrorSummary": null,
+      "detailsJson": null,
+      "updatedAt": "2026-08-10T12:00:00Z"
+    }
+  ]
+}
+```
+
+`status` values (see §22.16):
+
+- `queued` — download accepted, not yet executing.
+- `running` — download in progress.
+- `ready` — model present and verified in the runtime.
+- `failed` — download or verification failed; see `lastErrorSummary`.
+- `missing` — startup reconcile found no runtime record for a required model.
+- `error` — unexpected error outside the normal pipeline.
+- `verifying` — verify probe in flight.
+- `downloading` — pull streaming in progress.
+
+Notes:
+
+- Use this endpoint for the initial page load and after every SSE reconnect to close event gaps. The SSE stream (`GET /api/models/events`) is an in-process hint stream; this endpoint is the cross-process truth (plan D5).
+
+### GET `/api/models/events`
+
+SSE stream of model-lifecycle events. WASM-friendly native `EventSource` semantics: plain GET, cookie-authenticated, no custom headers required. Requires authentication.
+
+On connect, the server sends an initial `: connected` SSE comment before any events, so the client can confirm the connection is established.
+
+**SSE event types:**
+
+**`model.status`** — emitted on any `model_runtime_state` status transition except `ready` with an attached operation (which emits `operation.completed` instead) and `failed` with an attached operation (which emits `operation.failed` instead).
+
+```
+event: model.status
+data: {
+  "provider": "ollama",
+  "modelId": "bge-m3",
+  "runtimeRole": "embedding",
+  "status": "running",
+  "progressPercent": 42,
+  "currentOperationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "lastVerifiedAt": null,
+  "lastErrorSummary": null,
+  "updatedAt": "2026-08-10T12:05:00Z"
+}
+```
+
+**`operation.status`** — in-flight download progress update.
+
+```
+event: operation.status
+data: {
+  "operationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "provider": "ollama",
+  "modelId": "bge-m3",
+  "status": "running",
+  "progressPercent": 42,
+  "error": null
+}
+```
+
+**`operation.completed`** — download finished and model is `ready`.
+
+```
+event: operation.completed
+data: {
+  "operationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "provider": "ollama",
+  "modelId": "bge-m3"
+}
+```
+
+**`operation.failed`** — download or pipeline error.
+
+```
+event: operation.failed
+data: {
+  "operationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "provider": "ollama",
+  "modelId": "bge-m3",
+  "error": "Model pull failed: connection refused"
+}
+```
+
+Notes:
+
+- JSON fields with null values are omitted from the serialized `data:` payload.
+- The broadcaster is in-process (API process only). A stalled subscriber that falls behind the 256-event buffer is dropped; the client detects the closed stream and reconciles via `GET /api/models/status`.
+- **D5 caveat:** The SSE stream is an in-process hint. For initial load and post-reconnect reconciliation, always call `GET /api/models/status` first.
+
+### POST `/api/models/activate-embedding-model` *(MVP+)*
 
 Changes the Active Embedding Model only after explicit confirmation. The pointer flips immediately, old-model embeddings become stale by derivation (ADR-0001), and the system enters Embedding Transition (ADR-0008) until the queued bulk reprocess completes.
+
+Not yet implemented. Planned request shape:
 
 ```json
 {
@@ -363,25 +587,13 @@ Changes the Active Embedding Model only after explicit confirmation. The pointer
 }
 ```
 
-Response:
+### POST `/api/models/activate-llm-model` *(MVP+)*
 
-```json
-{
-  "status": "accepted",
-  "modelChanged": true,
-  "staleEmbeddingCount": 12492,
-  "operationId": "uuid",
-  "statusUrl": "/api/admin/operations/{operationId}"
-}
-```
+Sets the active local LLM model after verification. Not yet implemented.
 
-### POST `/api/models/activate-llm-model`
+### POST `/api/models/activate-audio-model` *(MVP+)*
 
-Sets the active local LLM model after verification.
-
-### POST `/api/models/activate-audio-model`
-
-Sets the active audio-to-text model/engine after verification.
+Sets the active audio-to-text model/engine after verification. Not yet implemented.
 
 ## 6. Channel endpoints
 
@@ -1497,6 +1709,19 @@ MVP search results are video-clustered. Segment/repository/link/note matches app
 
 - `asc`
 - `desc`
+
+### 22.16 Model runtime state statuses
+
+Written to `model_runtime_state.status` by the download pipeline (WS-2/WS-3/WS-4/WS-5) and read by the readiness guard (WS-7):
+
+- `queued` — download accepted and persisted; waiting for worker pickup.
+- `running` — Ollama pull streaming in progress; `progressPercent` is populated.
+- `ready` — model is present and verified in the runtime.
+- `failed` — download or post-pull presence check failed; `lastErrorSummary` is populated.
+- `missing` — startup reconcile found no record for a required model.
+- `error` — unexpected error outside the normal pipeline.
+- `verifying` — verify probe in flight.
+- `downloading` — pull in progress (alias used by some write paths).
 
 ## 23. Versioning
 
