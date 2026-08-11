@@ -463,6 +463,18 @@ public sealed class ModelDownloadHostedServiceTests
             return Task.CompletedTask;
         }
 
+        public Task<List<OperationRecord>> GetActiveByTypeAsync(string operationType, CancellationToken cancellationToken = default)
+            => Task.FromResult(_operations.Values
+                .Where(o => o.OperationType == operationType && o.Status is "queued" or "running")
+                .ToList());
+
+        public Task<OperationRecord?> GetLastCompletedByTypeAsync(string operationType, CancellationToken cancellationToken = default)
+            => Task.FromResult(_operations.Values
+                .Where(o => o.OperationType == operationType && o.Status == "completed")
+                .OrderByDescending(o => o.CompletedAt)
+                .Cast<OperationRecord?>()
+                .FirstOrDefault());
+
         public OperationRecord? Get(Guid id) => _operations.TryGetValue(id, out var operation) ? operation : null;
     }
 }

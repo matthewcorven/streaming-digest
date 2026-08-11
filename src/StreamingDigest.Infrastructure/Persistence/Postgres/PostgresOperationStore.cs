@@ -129,23 +129,7 @@ public sealed class PostgresOperationStore : IOperationStore
             return null;
         }
 
-        return new OperationRecord
-        {
-            Id = reader.GetGuid(0),
-            OperationType = reader.GetString(1),
-            Status = reader.GetString(2),
-            RiskLevel = reader.IsDBNull(3) ? null : reader.GetString(3),
-            RequestedBy = reader.IsDBNull(4) ? null : reader.GetString(4),
-            RelatedEntityType = reader.IsDBNull(5) ? null : reader.GetString(5),
-            RelatedEntityId = reader.IsDBNull(6) ? null : reader.GetGuid(6),
-            HangfireJobId = reader.IsDBNull(7) ? null : reader.GetString(7),
-            StartedAt = reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
-            CompletedAt = reader.IsDBNull(9) ? null : reader.GetFieldValue<DateTimeOffset>(9),
-            SummaryJson = reader.IsDBNull(10) ? null : reader.GetString(10),
-            ErrorSummary = reader.IsDBNull(11) ? null : reader.GetString(11),
-            CreatedAt = reader.GetFieldValue<DateTimeOffset>(12),
-            UpdatedAt = reader.GetFieldValue<DateTimeOffset>(13)
-        };
+        return ReadOperationRecord(reader);
     }
 
     public async Task UpdateHangfireJobIdAsync(Guid operationId, string hangfireJobId, CancellationToken cancellationToken = default)
@@ -170,4 +154,88 @@ public sealed class PostgresOperationStore : IOperationStore
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    public async Task<List<OperationRecord>> GetActiveByTypeAsync(string operationType, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationType);
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+                id, operation_type, status, risk_level, requested_by,
+                related_entity_type, related_entity_id, hangfire_job_id,
+                started_at, completed_at, summary_json::text, error_summary,
+                created_at, updated_at
+            FROM public.operations
+            WHERE operation_type = @operation_type
+              AND status IN ('queued', 'running')
+            ORDER BY created_at DESC;
+            """,
+            connection);
+
+        command.Parameters.AddWithValue("operation_type", operationType);
+
+        var results = new List<OperationRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(ReadOperationRecord(reader));
+        }
+
+        return results;
+    }
+
+    public async Task<OperationRecord?> GetLastCompletedByTypeAsync(string operationType, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationType);
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+                id, operation_type, status, risk_level, requested_by,
+                related_entity_type, related_entity_id, hangfire_job_id,
+                started_at, completed_at, summary_json::text, error_summary,
+                created_at, updated_at
+            FROM public.operations
+            WHERE operation_type = @operation_type
+              AND status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT 1;
+            """,
+            connection);
+
+        command.Parameters.AddWithValue("operation_type", operationType);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return ReadOperationRecord(reader);
+    }
+
+    private static OperationRecord ReadOperationRecord(NpgsqlDataReader reader) => new()
+    {
+        Id = reader.GetGuid(0),
+        OperationType = reader.GetString(1),
+        Status = reader.GetString(2),
+        RiskLevel = reader.IsDBNull(3) ? null : reader.GetString(3),
+        RequestedBy = reader.IsDBNull(4) ? null : reader.GetString(4),
+        RelatedEntityType = reader.IsDBNull(5) ? null : reader.GetString(5),
+        RelatedEntityId = reader.IsDBNull(6) ? null : reader.GetGuid(6),
+        HangfireJobId = reader.IsDBNull(7) ? null : reader.GetString(7),
+        StartedAt = reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
+        CompletedAt = reader.IsDBNull(9) ? null : reader.GetFieldValue<DateTimeOffset>(9),
+        SummaryJson = reader.IsDBNull(10) ? null : reader.GetString(10),
+        ErrorSummary = reader.IsDBNull(11) ? null : reader.GetString(11),
+        CreatedAt = reader.GetFieldValue<DateTimeOffset>(12),
+        UpdatedAt = reader.GetFieldValue<DateTimeOffset>(13)
+    };
 }

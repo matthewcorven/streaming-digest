@@ -146,6 +146,36 @@ public sealed class IngestionSettings
     /// Default: 30 days.
     /// </summary>
     public int DefaultMaxAgeDays { get; init; } = 30;
+
+    /// <summary>
+    /// Scheduler settings for the recurring ingestion job (ADR-0011, plan §4 D2).
+    /// </summary>
+    public SchedulerSettings Scheduler { get; init; } = new();
+}
+
+/// <summary>
+/// Controls the Hangfire recurring ingestion schedule (ADR-0011, plan §4 D2 / §10.3).
+/// The default schedule fires daily at 06:00 local server time.
+/// </summary>
+public sealed class SchedulerSettings
+{
+    /// <summary>
+    /// When <c>false</c>, the recurring job is removed from Hangfire at startup and no
+    /// scheduled runs fire. On-demand enqueues are unaffected.
+    /// </summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Hour of day (0–23) for the daily scheduled run, in server local time.
+    /// Default: 6 (6 AM).
+    /// </summary>
+    public int ScheduleHour { get; init; } = 6;
+
+    /// <summary>
+    /// Minute within the hour (0–59) for the daily scheduled run.
+    /// Default: 0.
+    /// </summary>
+    public int ScheduleMinute { get; init; } = 0;
 }
 
 

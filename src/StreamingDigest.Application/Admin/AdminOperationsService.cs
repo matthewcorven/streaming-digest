@@ -7,6 +7,7 @@ using Npgsql;
 using StreamingDigest.Application.Transcripts;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.AudioToText;
+using StreamingDigest.Application.Orchestration;
 using StreamingDigest.Domain;
 
 namespace StreamingDigest.Application.Admin;
@@ -22,6 +23,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
     private readonly ISearchDocumentRegenerationService? _searchDocumentRegenerationService;
     private readonly IAudioToTextProvider? _audioToTextProvider;
     private readonly IModelReadinessGuard? _modelReadinessGuard;
+    private readonly IIngestionJobScheduler? _ingestionJobScheduler;
 
     public AdminOperationsService(
         ApplicationConfiguration? configuration = null,
@@ -31,7 +33,8 @@ public sealed class AdminOperationsService : IAdminOperationsService
         ITranscriptIngestionService? transcriptIngestionService = null,
         ISearchDocumentRegenerationService? searchDocumentRegenerationService = null,
         IAudioToTextProvider? audioToTextProvider = null,
-        IModelReadinessGuard? modelReadinessGuard = null)
+        IModelReadinessGuard? modelReadinessGuard = null,
+        IIngestionJobScheduler? ingestionJobScheduler = null)
     {
         _configuration = configuration ?? new ApplicationConfiguration();
         _contentRootPath = contentRootPath;
@@ -41,12 +44,20 @@ public sealed class AdminOperationsService : IAdminOperationsService
         _searchDocumentRegenerationService = searchDocumentRegenerationService;
         _audioToTextProvider = audioToTextProvider;
         _modelReadinessGuard = modelReadinessGuard;
+        _ingestionJobScheduler = ingestionJobScheduler;
     }
 
     public async Task<AdminActionResult> RunIngestionNowAsync(string? target = null, CancellationToken cancellationToken = default)
     {
         var result = await CreateAcceptedResultAsync("ingestion.run", target, "Manual ingestion has been queued for the target scope.", cancellationToken);
         await TryPersistIngestionRunAsync(result.OperationId, "manual", target, cancellationToken);
+
+        if (_ingestionJobScheduler is not null)
+        {
+            var channelId = TryParseChannelId(target);
+            _ingestionJobScheduler.EnqueueOnDemandRun(channelId, "manual", "admin");
+        }
+
         return result;
     }
 
@@ -54,6 +65,13 @@ public sealed class AdminOperationsService : IAdminOperationsService
     {
         var result = await CreateAcceptedResultAsync("ingestion.backfill", channelId, "Channel backfill has been queued.", cancellationToken);
         await TryPersistIngestionRunAsync(result.OperationId, "backfill", channelId, cancellationToken);
+
+        if (_ingestionJobScheduler is not null)
+        {
+            var parsedChannelId = TryParseChannelId(channelId);
+            _ingestionJobScheduler.EnqueueOnDemandRun(parsedChannelId, "backfill", "admin");
+        }
+
         return result;
     }
 
@@ -1280,4 +1298,7 @@ public sealed class AdminOperationsService : IAdminOperationsService
         string Stage,
         int Attempt,
         int RetryCount);
+
+    private static Guid? TryParseChannelId(string? value)
+        => Guid.TryParse(value, out var id) ? id : null;
 }
