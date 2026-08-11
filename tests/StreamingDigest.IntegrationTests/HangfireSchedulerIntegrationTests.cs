@@ -34,6 +34,13 @@ public sealed class HangfireSchedulerIntegrationTests : IDisposable
 
     public HangfireSchedulerIntegrationTests()
     {
+        // Reset the Hangfire-global log provider to a no-op before touching any
+        // Hangfire internals. Without this, a stale AspNetCoreLogProvider (set by
+        // an earlier test that used the ASP.NET Core host) may reference a
+        // disposed LoggerFactory and throw ObjectDisposedException when
+        // RecurringJobManager / BackgroundJobClient log internally.
+        GlobalConfiguration.Configuration.UseLogProvider(new NoOpHangfireLogProvider());
+
         _storage = new MemoryStorage();
         // Use explicit-storage overloads so JobStorage.Current is never touched.
         _recurringJobManager = new RecurringJobManager(_storage);
@@ -122,6 +129,19 @@ public sealed class HangfireSchedulerIntegrationTests : IDisposable
             }
         }
     };
+
+    // ── Hangfire log plumbing ─────────────────────────────────────────────────
+
+    private sealed class NoOpHangfireLogProvider : Hangfire.Logging.ILogProvider
+    {
+        public Hangfire.Logging.ILog GetLogger(string name) => new NoOpLog();
+    }
+
+    private sealed class NoOpLog : Hangfire.Logging.ILog
+    {
+        public bool Log(Hangfire.Logging.LogLevel logLevel, Func<string>? messageFunc, Exception? exception = null)
+            => logLevel >= Hangfire.Logging.LogLevel.Error; // return true = "I can log this level"
+    }
 }
 
 [CollectionDefinition("HangfireScheduler", DisableParallelization = true)]
