@@ -8,7 +8,8 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
-builder.Services.AddSingleton<IIngestionRunDetailFixtureService, IngestionRunDetailFixtureService>();
+// IIngestionRunDetailFixtureService is kept for the ?fixture= demo path (IngestionRunDetail page)
+// but is NOT registered as a singleton — the real run-detail endpoint is the runtime path.
 builder.Services.AddScoped<UpgradeMaintenanceSnapshotService>();
 builder.Services.AddSingleton<DashboardSummaryService>();
 builder.Services.AddScoped<AuthenticationService>();
