@@ -4,8 +4,9 @@ using StreamingDigest.Web.Models;
 namespace StreamingDigest.Web.UnitTests;
 
 /// <summary>
-/// Unit tests for the per-row state machine (WS-8). Every transition in the diagram from
-/// §7.1 of the model-download implementation plan is covered here; no I/O is required.
+/// Unit tests for the per-row state machine (WS-8). Covers the implemented transitions;
+/// note that <see cref="ModelRowState.DownloadedNeedsVerify"/> from plan §7.1 is absent —
+/// see the <see cref="ModelRowViewModel"/> class remarks for the documented deviation.
 /// </summary>
 public sealed class ModelRowStateMachineTests
 {
@@ -144,20 +145,6 @@ public sealed class ModelRowStateMachineTests
         Assert.Contains("Downloading", row.BadgeText);
     }
 
-    // ── Running → DownloadedNeedsVerify ───────────────────────────────────────────────────
-
-    [Fact]
-    public void ApplyDownloadCompleted_TransitionsToDownloadedNeedsVerify()
-    {
-        var row = OllamaRow();
-        row.TryBeginDownload();
-        row.ApplyDownloadQueued(Guid.NewGuid());
-        row.ApplyRunning(100);
-        row.ApplyDownloadCompleted();
-        Assert.Equal(ModelRowState.DownloadedNeedsVerify, row.RowState);
-        Assert.Null(row.ProgressPercent);
-    }
-
     // ── Running → DownloadFailed ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -189,16 +176,6 @@ public sealed class ModelRowStateMachineTests
     public void TryBeginVerify_FromUnknown_Allowed()
     {
         var row = OllamaRow();
-        Assert.True(row.TryBeginVerify());
-        Assert.Equal(ModelRowState.Verifying, row.RowState);
-    }
-
-    [Fact]
-    public void TryBeginVerify_FromDownloadedNeedsVerify_Allowed()
-    {
-        var row = OllamaRow();
-        row.TryBeginDownload();
-        row.ApplyDownloadCompleted();
         Assert.True(row.TryBeginVerify());
         Assert.Equal(ModelRowState.Verifying, row.RowState);
     }
@@ -481,6 +458,31 @@ public sealed class ModelRowStateMachineTests
     {
         var row = ExternalRow();
         Assert.True(row.ShowVerifyCta);
+    }
+
+    /// <summary>
+    /// Fix 2 (adversarial review): Verify CTA must NOT render in LiveUpdatesPaused — §7.2
+    /// specifies Refresh as the only CTA in that state, and TryBeginVerify rejects it
+    /// (silent no-op). ShowVerifyCta must return false to prevent the orphaned button.
+    /// </summary>
+    [Fact]
+    public void ShowVerifyCta_LiveUpdatesPaused_IsFalse()
+    {
+        var row = OllamaRow();
+        row.ApplyRunning(50);
+        row.ApplySseDropped();
+        Assert.Equal(ModelRowState.LiveUpdatesPaused, row.RowState);
+        Assert.False(row.ShowVerifyCta);
+    }
+
+    [Fact]
+    public void TryBeginVerify_FromLiveUpdatesPaused_ReturnsFalse()
+    {
+        var row = OllamaRow();
+        row.ApplyRunning(50);
+        row.ApplySseDropped();
+        Assert.False(row.TryBeginVerify());
+        Assert.Equal(ModelRowState.LiveUpdatesPaused, row.RowState);
     }
 
     [Fact]

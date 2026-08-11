@@ -6,6 +6,16 @@ namespace StreamingDigest.Web.Models;
 /// to mutating <see cref="RowState"/>; all other properties reflect the most-recently
 /// reconciled runtime state.
 /// </summary>
+/// <remarks>
+/// <b>Deviation from plan §7.1</b>: The <c>DownloadedNeedsVerify</c> state described in
+/// plan §7.1 is not present in this implementation. The server worker confirms model
+/// presence via <c>GET /api/tags</c> immediately after the pull and only writes
+/// <c>model_runtime_state.status = "ready"</c> if the tag is present. There is therefore
+/// no intermediate "downloaded-but-not-yet-verified" status value that the status endpoint
+/// can emit. <c>GET /api/models/status</c> transitions directly from <c>running</c> →
+/// <c>ready</c>; a separate client-side verify step is not required and the state is
+/// unreachable in production. Users may still issue a manual re-verify from <c>Ready</c>.
+/// </remarks>
 public sealed class ModelRowViewModel
 {
     // ── Identity (immutable after construction) ──────────────────────────────────────────
@@ -91,18 +101,6 @@ public sealed class ModelRowViewModel
         RowState = ModelRowState.Running;
     }
 
-    /// <summary>
-    /// Download pull completed per SSE or status snapshot (status = "ready" not yet verified
-    /// but the pull itself finished). Transitions to DownloadedNeedsVerify so the user must
-    /// explicitly verify before the row reaches Ready.
-    /// </summary>
-    public void ApplyDownloadCompleted()
-    {
-        ProgressPercent = null;
-        ErrorMessage = null;
-        RowState = ModelRowState.DownloadedNeedsVerify;
-    }
-
     /// <summary>Download operation failed.</summary>
     public void ApplyDownloadFailed(string? errorMessage = null)
     {
@@ -116,7 +114,6 @@ public sealed class ModelRowViewModel
     {
         if (RowState is not (
             ModelRowState.Unknown or
-            ModelRowState.DownloadedNeedsVerify or
             ModelRowState.Ready or
             ModelRowState.VerifyFailed))
         {
@@ -174,9 +171,9 @@ public sealed class ModelRowViewModel
     {
         ModelRowState.Unknown => "Not checked",
         ModelRowState.Submitting => "Starting…",
-        ModelRowState.Queued => "Queued",
+        // "Queued for download" matches plan §7.3 honest-ack copy requirement.
+        ModelRowState.Queued => "Queued for download",
         ModelRowState.Running => ProgressPercent.HasValue ? $"Downloading {ProgressPercent}%" : "Downloading…",
-        ModelRowState.DownloadedNeedsVerify => "Downloaded",
         ModelRowState.Verifying => "Verifying",
         ModelRowState.Ready => "Ready",
         ModelRowState.DownloadFailed => "Download failed",
@@ -192,7 +189,7 @@ public sealed class ModelRowViewModel
     {
         ModelRowState.Ready => "status-success",
         ModelRowState.Running or ModelRowState.Queued or ModelRowState.Submitting => "status-info",
-        ModelRowState.DownloadedNeedsVerify or ModelRowState.Verifying => "status-warning",
+        ModelRowState.Verifying => "status-warning",
         ModelRowState.DownloadFailed or ModelRowState.VerifyFailed => "status-danger",
         ModelRowState.LiveUpdatesPaused => "status-neutral",
         _ => "status-neutral"
@@ -217,20 +214,20 @@ public sealed class ModelRowViewModel
     /// <summary>
     /// True when a Verify/Re-verify CTA should be shown. Always shown for external models
     /// that are not in a terminal downloading state.
+    /// Note: <see cref="ModelRowState.LiveUpdatesPaused"/> is intentionally excluded — §7.2
+    /// specifies Refresh as the only CTA in that state, and <see cref="TryBeginVerify"/>
+    /// rejects verify from paused (which would cause a silent no-op if the button were shown).
     /// </summary>
     public bool ShowVerifyCta =>
         RowState is ModelRowState.Unknown or
-                    ModelRowState.DownloadedNeedsVerify or
                     ModelRowState.Ready or
-                    ModelRowState.VerifyFailed or
-                    ModelRowState.LiveUpdatesPaused;
+                    ModelRowState.VerifyFailed;
 
     /// <summary>Verify CTA label.</summary>
     public string VerifyCtaLabel => RowState switch
     {
         ModelRowState.Ready => "Re-verify",
         ModelRowState.VerifyFailed => "Retry verify",
-        ModelRowState.LiveUpdatesPaused => "Verify",
         _ => "Verify now"
     };
 
@@ -238,7 +235,6 @@ public sealed class ModelRowViewModel
     public bool ShowRefreshCta =>
         RowState is ModelRowState.Queued or
                     ModelRowState.Running or
-                    ModelRowState.DownloadedNeedsVerify or
                     ModelRowState.Ready or
                     ModelRowState.DownloadFailed or
                     ModelRowState.VerifyFailed or
@@ -260,9 +256,8 @@ public sealed class ModelRowViewModel
     {
         ModelRowState.Unknown => "Not checked",
         ModelRowState.Submitting => "Starting…",
-        ModelRowState.Queued => "Queued",
+        ModelRowState.Queued => "Queued for download",
         ModelRowState.Running => "Downloading",
-        ModelRowState.DownloadedNeedsVerify => "Downloaded",
         ModelRowState.Verifying => "Verifying",
         ModelRowState.Ready => "Ready",
         ModelRowState.DownloadFailed => "Download failed",

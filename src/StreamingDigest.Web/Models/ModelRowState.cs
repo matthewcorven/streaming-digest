@@ -19,9 +19,6 @@ public enum ModelRowState
     /// <summary>Worker is actively pulling; progress% is populated.</summary>
     Running,
 
-    /// <summary>Pull completed; a Verify step is needed before the model is marked ready.</summary>
-    DownloadedNeedsVerify,
-
     /// <summary>Verify HTTP request is in-flight (POST /api/models/verify).</summary>
     Verifying,
 
