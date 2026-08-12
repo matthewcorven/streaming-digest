@@ -4,7 +4,7 @@ import { scrapeFirstPage, type ScrapeFirstPageRequest } from './scraper.js';
 export function createScraperServer() {
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     console.log(`[DEBUG] Received ${request.method} ${request.url}`);
-    if (request.method === 'GET' && request.url === '/health') {
+    if ((request.method === 'GET' || request.method === 'HEAD') && request.url === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ status: 'ok' }));
       return;
