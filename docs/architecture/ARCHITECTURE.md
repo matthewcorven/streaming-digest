@@ -341,6 +341,30 @@ Development reference:
 
 Compatibility: PWA fits naturally with the declared stack — Blazor WASM publishes `blazor.webassembly.js` plus `service-worker.js` and `manifest.json` as static assets from the WASM project, which the API already serves as static files under the no-SSR hosting model. HTTPS is satisfied by the Tailscale/reverse-proxy deployment path (and localhost during development).
 
+**Routing model:**
+
+The API uses a single-endpoint SPA hosting pattern with reserved path exceptions:
+
+- **Root path `/`**: Serves `index.html`, which bootstraps the Blazor WebAssembly app in the browser. This applies to all unmatched routes, enabling client-side SPA routing (navigation between pages without page reloads).
+- **API paths `/api/*`**: Reserved for REST API endpoints. These routes are explicitly mapped to handler functions and never fall through to the SPA fallback. All backend communication from the Blazor client goes through these endpoints.
+- **Admin paths `/admin/*`**: Reserved for operational endpoints. Includes the Hangfire job dashboard at `/admin/jobs` (authenticated, server-rendered) and other admin/observability endpoints.
+- **Internal paths `/internal/*`**: Reserved for internal-only endpoints consumed by the Blazor client (e.g., model lifecycle events, model-consuming operation state). Explicitly 404'd if not matched, never falling back to the SPA.
+
+Implementation detail: The API middleware chain applies `app.MapFallbackToFile("index.html")` after all reserved endpoints and static asset handlers, ensuring the SPA bootstrap only applies to unmatched routes. This pattern keeps the architecture simple — one host, one auth scheme, one TLS certificate — while allowing distinct concerns (API, admin, static assets) to coexist.
+
+**Access endpoints:**
+
+Users and developers access the application using these URLs:
+
+| Environment | Web App | Hangfire Dashboard | Aspire Dashboard |
+|---|---|---|---|
+| **Development (Aspire)** | `http://localhost:8080` | `http://localhost:8080/admin/jobs` | `http://localhost:18888` |
+| **Production (Docker Compose)** | `http://docker-host:port` (or Tailscale URL) | `http://docker-host:port/admin/jobs` | N/A (only in dev) |
+
+- **Web App**: The root URL `/` opens the search/dashboard UI. Users complete first-run setup (user account creation, model downloads) here.
+- **Hangfire Dashboard** (`/admin/jobs`): View job history, manually trigger ingestion runs, monitor background job status. Requires authentication.
+- **Aspire Dashboard** (dev only, port 18888): Monitor service health, view real-time logs and traces, restart services, check resource dependencies.
+
 ### 5.3 Hangfire
 
 Use Hangfire with PostgreSQL storage for:

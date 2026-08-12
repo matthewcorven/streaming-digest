@@ -265,7 +265,14 @@ docker compose logs streaming-digest-whisper
 
 ## First-run setup
 
-Open http://localhost:8080 in your browser.
+Once all services are healthy, open your browser and navigate to the Streaming Digest web app:
+
+| Access Point | URL | Purpose |
+|---|---|---|
+| **Web App** | `http://localhost:8080` | Main search and settings interface |
+| **Hangfire Dashboard** (optional) | `http://localhost:8080/admin/jobs` | Monitor background jobs and manually trigger ingestion |
+
+If deploying behind Tailscale or on a remote host, replace `localhost` with your hostname or Tailscale IP.
 
 ### 1. Create your user account
 
