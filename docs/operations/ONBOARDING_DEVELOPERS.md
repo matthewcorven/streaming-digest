@@ -43,6 +43,20 @@ Should be 10.0.0 or later.
 
 ### 3. Start the Aspire development stack
 
+Validate required AppHost parameter keys before startup:
+
+```bash
+./scripts/preflight_aspire_parameters.sh
+```
+
+If your shell environment cannot run the POSIX script, use the PowerShell 7 fallback:
+
+```bash
+pwsh ./scripts/preflight_aspire_parameters.ps1
+```
+
+Then start Aspire:
+
 ```bash
 dotnet run --project src/StreamingDigest.AppHost
 ```
@@ -123,7 +137,9 @@ streaming-digest/
 │   ├── StreamingDigest.*.Tests/          # Unit and integration tests
 │   └── Fixtures/                         # Test data
 ├── scripts/
-│   └── publish_compose.sh                # Regenerate compose.yaml from AppHost
+│   ├── publish_compose.sh                # Regenerate compose.yaml from AppHost
+│   ├── preflight_aspire_parameters.sh    # POSIX required-parameter check for AppHost
+│   └── preflight_aspire_parameters.ps1   # PowerShell 7 fallback required-parameter check
 ├── compose.yaml                          # Docker Compose (generated from AppHost)
 ├── Dockerfile.whisper                    # Whisper service image
 ├── CONTEXT.md                            # Project context and conventions

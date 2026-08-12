@@ -15,11 +15,6 @@ services:
         target: "/var/lib/postgresql"
         source: "streamingdigest-postgres18-data"
         read_only: false
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME} -d postgres"]
-      interval: "5s"
-      timeout: "5s"
-      retries: 5
     networks:
       - "aspire"
   ollama:
@@ -34,11 +29,6 @@ services:
         target: "/root/.ollama"
         source: "streamingdigest-ollama-data"
         read_only: false
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: "5s"
-      timeout: "5s"
-      retries: 5
     networks:
       - "aspire"
   ollama-bootstrap:
@@ -62,16 +52,10 @@ services:
   whisper:
     image: "streaming-digest-whisper:latest"
     container_name: "streaming-digest-whisper"
-    build:
-      context: "."
-      dockerfile: "Dockerfile.whisper"
+    ports:
+      - "127.0.0.1:8080:8080"
     expose:
       - "8080"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: "5s"
-      timeout: "5s"
-      retries: 5
     networks:
       - "aspire"
   otel-collector:
@@ -223,11 +207,6 @@ services:
         target: "/var/lib/streaming-digest/raw-html"
         source: "streaming-digest-debug-html"
         read_only: false
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
-      interval: "5s"
-      timeout: "5s"
-      retries: 5
     networks:
       - "aspire"
   api:
@@ -270,20 +249,13 @@ services:
       notifications__matrix__dashboardBaseUrl: "${NOTIFICATIONS_MATRIX_DASHBOARD_BASE_URL:-http://localhost:8080}"
     ports:
       - "8080:8080"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: "5s"
-      timeout: "5s"
-      retries: 5
     depends_on:
       postgres:
-        condition: "service_healthy"
+        condition: "service_started"
       scraper:
-        condition: "service_healthy"
-      whisper:
-        condition: "service_healthy"
+        condition: "service_started"
       ollama:
-        condition: "service_healthy"
+        condition: "service_started"
       ollama-bootstrap:
         condition: "service_completed_successfully"
       otel-collector:
@@ -335,24 +307,27 @@ services:
         target: "/var/lib/streaming-digest/matrix"
         source: "streaming-digest-matrix-state"
         read_only: false
-    healthcheck:
-      test: ["CMD", "dotnet", "--version"]
-      interval: "10s"
-      timeout: "5s"
-      retries: 3
     depends_on:
       postgres:
-        condition: "service_healthy"
+        condition: "service_started"
       scraper:
-        condition: "service_healthy"
-      whisper:
-        condition: "service_healthy"
+        condition: "service_started"
       ollama:
-        condition: "service_healthy"
+        condition: "service_started"
       ollama-bootstrap:
         condition: "service_completed_successfully"
       otel-collector:
         condition: "service_started"
+    networks:
+      - "aspire"
+  web:
+    image: "${WEB_IMAGE}"
+    environment:
+      OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY: "in_memory"
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      HTTP_PORTS: "${WEB_PORT}"
+    ports:
+      - "${WEB_PORT}"
     networks:
       - "aspire"
 networks:

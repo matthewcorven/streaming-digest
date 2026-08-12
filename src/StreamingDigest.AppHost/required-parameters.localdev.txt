@@ -1,0 +1,8 @@
+# Required AppHost local-development configuration keys.
+# One key per line. Comments and blank lines are ignored.
+Parameters:postgres-username
+Parameters:postgres-password
+Parameters:grafana-admin-user
+Parameters:grafana-admin-password
+Parameters:pgadmin-default-email
+Parameters:pgadmin-default-password
