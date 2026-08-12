@@ -322,13 +322,21 @@ A restored system should verify:
 
 ## Quick start
 
+Streaming Digest is designed for **zero-intervention onboarding** — fresh `docker compose up -d` starts all services cleanly without manual intervention.
+
+**Quick links by audience:**
+
+- **👤 End users deploying Streaming Digest?** → **[User Onboarding Guide](./docs/operations/ONBOARDING_USERS.md)** for deployment, first-run setup, and operations
+- **👨‍💻 Developers and OSS contributors?** → **[Developer Onboarding Guide](./docs/operations/ONBOARDING_DEVELOPERS.md)** for development setup, architecture, and contributing
+- **📖 Full feature overview?** → **[Onboarding Feature Doc](./ONBOARDING.md)** for technical details and how it works
+
+### Deploy in 3 commands
+
 Prerequisites:
 
 - Docker and Docker Compose
 - Tailscale or another private network access method
 - sufficient disk space for screenshots, transcripts, embeddings, and telemetry
-- local model files pulled into Ollama
-- Matrix bot account and room ID prepared; encrypted room readiness is MVP+
 
 Create a local environment file from the deployment template and then start the stack:
 
@@ -336,6 +344,8 @@ Create a local environment file from the deployment template and then start the 
 cp .env.example .env
 docker compose up -d
 ```
+
+All critical services reach healthy state within ~60 seconds. Then open http://localhost:8080 and create your user account.
 
 `compose.yaml` is a checked-in artifact generated from the Aspire AppHost rather than the source of truth.
 
@@ -411,22 +421,54 @@ On first startup:
 
 ## Documentation
 
-Detailed project documents are available in `docs/`:
+### Getting started
 
-- `docs/product/PRD.md`
-- `docs/architecture/ARCHITECTURE.md`
-- `docs/architecture/DATA_MODEL.md`
-- `docs/api/API_SPEC.md`
-- `docs/presentation/PRESENTATION.md`
+**New to Streaming Digest?** Start here:
+
+- **[ONBOARDING.md](./ONBOARDING.md)** — feature overview and architecture of zero-intervention onboarding
+- **[User Onboarding Guide](./docs/operations/ONBOARDING_USERS.md)** — deployment, first-run setup, operations, troubleshooting
+- **[Developer Onboarding Guide](./docs/operations/ONBOARDING_DEVELOPERS.md)** — development setup, contributing, project structure
+
+### Detailed project documents
+
+Available in `docs/`:
+
+- `docs/product/PRD.md` — product requirements and roadmap
+- `docs/architecture/ARCHITECTURE.md` — system design and component responsibilities
+- `docs/architecture/DATA_MODEL.md` — entity relationships and database schema
+- `docs/api/API_SPEC.md` — REST API endpoints and schemas
+- `docs/presentation/PRESENTATION.md` — UI/UX design and user workflows
 - `docs/adr/` — architectural decision records
 - Implementation work is tracked as GitHub issues (migrated from the retired implementation plan)
 - `docs/operations/UPGRADE_PATHS.md`
 
 ## Development
 
+**Getting started with development?** → **[Developer Onboarding Guide](./docs/operations/ONBOARDING_DEVELOPERS.md)** for setup, project structure, and workflow.
+
+### How the project is organized
+
 - **Issue-driven tracking** — implementation work lives in GitHub issues labeled `slice-*` (build order, prototypes first), `phase-*` (requirement grouping), and `squad:{member}` (owning agent).
-- **Squad** — this repo is developed by a Squad AI team (`.squad/`): roster and routing in `.squad/team.md` / `.squad/routing.md`, agent charters and histories in `.squad/agents/`, and team decisions indexed in `.squad/decisions.md`. Architectural decisions get full ADRs in `docs/adr/`; team/process/scope decisions live in the decisions index.
+- **Squad AI team** — this repo is developed by a Squad AI team (`.squad/`): roster and routing in `.squad/team.md` / `.squad/routing.md`, agent charters and histories in `.squad/agents/`, and team decisions indexed in `.squad/decisions.md`. Architectural decisions get full ADRs in `docs/adr/`; team/process/scope decisions live in the decisions index.
 - **Verification evidence** — durable verification results (benchmarks, recall reports, cross-platform checks, restore dry-runs, prototype comparisons) are committed append-only under `docs/verification/` as `{task-id}-{slug}.md`, with machine-readable JSON alongside for numeric results. Quality gates citing measured targets are not met until the evidence artifact is committed.
+
+### Local development
+
+Start the Aspire stack:
+
+```bash
+dotnet run --project src/StreamingDigest.AppHost
+```
+
+This starts all services and opens the Aspire dashboard at http://localhost:18888 automatically.
+
+Run tests:
+
+```bash
+dotnet test
+```
+
+See [Developer Onboarding Guide](./docs/operations/ONBOARDING_DEVELOPERS.md) for debugging, database migrations, and updating the Docker Compose setup.
 
 ### .NET User Secrets
 
