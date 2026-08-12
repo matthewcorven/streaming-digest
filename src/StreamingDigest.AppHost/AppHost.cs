@@ -286,6 +286,10 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WithEnvironment("llm__baseUrl", "http://ollama:11434")
     .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", "http://whisper:" + whisperPort.ToString(CultureInfo.InvariantCulture));
 
+// Blazor WebAssembly dev server (runs Vite on port 5173)
+builder.AddNpmApp("web", workingDirectory: "../StreamingDigest.Web")
+    .WithExternalHttpEndpoints();
+
 builder.Build().Run();
 
 static void SetEnvDefault(IDictionary<string, CapturedEnvironmentVariable> env, string key, string defaultValue)
