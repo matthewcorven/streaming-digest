@@ -4,12 +4,173 @@ This guide is for users deploying Streaming Digest on their own infrastructure.
 
 ## System requirements
 
-- **Docker** and **Docker Compose** (v2.20+)
-- **Linux** host (or Docker Desktop on Mac/Windows for testing; production use Linux)
-- **CPU**: 2+ cores (more cores = faster Ollama inference)
-- **RAM**: 4 GB minimum for API + PostgreSQL; 8+ GB if running Ollama locally
-- **Disk**: 50+ GB recommended (PostgreSQL + screenshots + models + telemetry)
+- **Docker Desktop** for Mac (v4.20+) with sufficient resource allocation
+- **Mac hardware**: Apple Silicon (M1 Pro or higher recommended)
+  - Minimum: M1 with 8 GB unified memory
+  - Recommended: M3+ with 16+ GB unified memory for local LLM inference
+  - For external inference: M1 with 8 GB minimum is sufficient
+- **CPU**: 4+ cores allocated to Docker (default: host core count)
+- **RAM**: 8 GB unified memory minimum; 16+ GB if running local LLM inference
+- **Disk**: 50+ GB available (PostgreSQL + screenshots + models + telemetry)
 - **Network**: Private (Tailscale, VPN, or internal network only)
+
+## LLM/SLM hosting and runtime requirements
+
+Streaming Digest uses LLMs/SLMs for text summarization during feed processing. Your choice of hosting strategy determines infrastructure requirements and performance.
+
+### Hosting options (Mac-focused)
+
+| Strategy | Setup | Resource cost | Performance | Use case |
+|----------|-------|------|-------------|----------|
+| **Local Ollama (Docker)** | Runs in Docker on Mac via Ollama container | 6–12 GB unified memory | Moderate (~30–120s per feed) on M-series GPU | Private, no external APIs, full control |
+| **External Ollama** | Run Ollama on separate Mac/Linux with GPU, Streaming Digest connects via network | Minimal on Streaming Digest Mac; significant on inference Mac | Fast (depends on remote GPU) | Dedicated inference server, scales easily |
+| **Cloud LLM API** | OpenAI, Anthropic, Groq, or compatible API | Pay-per-use ($0.01–$0.50 per 1K tokens) | Very fast (sub-second) | Simplest setup, outsourced inference |
+| **Mixed** | Local SLM for speed + cloud LLM for quality | Moderate unified memory + API costs | Best of both: filter with local, enhance with cloud | Balance cost and quality |
+
+### Local Ollama on Mac (recommended for privacy)
+
+**Hardware requirements by Mac model:**
+
+| Mac Model | Unified Memory | Ollama Performance | Recommended models |
+|-----------|---|---|---|
+| M1/M1 Pro | 8 GB | Slow (~120s per feed) | Phi-3 (3B), Llama 2 7B |
+| M1 Max | 16 GB | Moderate (~60s per feed) | Llama 2 7B–13B, Mistral 7B |
+| M2/M2 Pro | 8–16 GB | Moderate (~60–120s per feed) | Phi-3, Llama 2 7B–13B |
+| M2 Max | 16–32 GB | Good (~30–60s per feed) | Llama 3.1 8B, Neural Chat 13B |
+| M3/M3 Pro | 8–18 GB | Good (~30–60s per feed) | Llama 3.1 8B–13B |
+| M3 Max | 24–36 GB | Excellent (~10–30s per feed) | Llama 3.1 70B (with quantization) |
+| M4/M4 Pro | 12–20 GB | Excellent (~20–45s per feed) | Llama 3.1 8B–13B, best-in-class quality |
+| M4 Max | 32–48 GB | Outstanding (~10–20s per feed) | Full model range |
+
+**Apple Silicon performance baseline:**
+- Phi-3 (3B model): ~10–15 seconds per feed (M1 Pro+)
+- Llama 3.1 8B: ~30–90 seconds per feed (M2 Max+)
+- Neural Chat 13B: ~60–180 seconds per feed (M3 Max+)
+- Test feed summarization: `docker compose logs streaming-digest-api | grep "summarize"`
+
+**Storage per model:**
+- Phi-3 Mini (3B): 2 GB
+- Llama 2 7B: 4 GB
+- Llama 3.1 8B: 5 GB
+- Neural Chat 13B: 8 GB
+- Llama 3.1 70B (quantized): 40 GB
+
+**Configuration in `.env`:**
+```bash
+# Use built-in Ollama container
+STREAMINGDIGEST_LLM_PROVIDER=ollama
+STREAMINGDIGEST_LLM_ENDPOINT=http://streaming-digest-ollama:11434
+
+# Model selection (see table above for your Mac)
+# M1/M1 Pro: use Phi-3 or smaller
+# M2–M3 Pro: use Llama 3.1 8B
+# M3 Max+: use Llama 3.1 13B or larger
+STREAMINGDIGEST_LLM_MODEL=llama3.1:8b-instruct-q4_0
+```
+
+**Docker Desktop memory allocation:**
+Ollama inference can consume significant unified memory. In Docker Desktop > Settings > Resources:
+- Base memory: Set to 75% of your Mac's total (e.g., 12 GB on 16 GB Mac, 24 GB on 32 GB Mac)
+- CPUs: Leave at default (uses all available)
+- Swap: Increase if you see slowdowns with large models
+
+**First-run model download:**
+When Streaming Digest starts with a new `LLM_MODEL`, Ollama automatically pulls the model (~10–30 minutes first time, depending on size and network). Monitor progress:
+```bash
+docker compose logs streaming-digest-ollama
+```
+
+### External Ollama (on separate Mac or Linux machine)
+
+Share a single Ollama server across multiple Streaming Digest instances:
+
+**On the Ollama host Mac/Linux:**
+```bash
+# Install Ollama: ollama.ai (Mac) or https://github.com/ollama/ollama (Linux)
+# Pull models
+ollama pull llama3.1:8b-instruct-q4_0
+
+# Start server accessible over network
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+```
+
+**In Streaming Digest `.env`:**
+```bash
+STREAMINGDIGEST_LLM_PROVIDER=ollama
+STREAMINGDIGEST_LLM_ENDPOINT=http://<ollama-host-ip>:11434
+STREAMINGDIGEST_LLM_MODEL=llama3.1:8b-instruct-q4_0
+```
+
+**Benefits:**
+- Streaming Digest host can run on smaller Mac (M1 8GB)
+- Inference server can be on more powerful Mac (M3 Max) or dedicated Linux GPU machine
+- Multiple Streaming Digest instances share one Ollama server
+- Easier to upgrade inference hardware without touching Streaming Digest
+
+**Network setup:**
+- Ensure Ollama host and Streaming Digest host are on same private network (Tailscale, VPN, or LAN)
+- Verify connectivity: `curl http://<ollama-host-ip>:11434/api/tags`
+
+### Cloud LLM API (simplest setup)
+
+Use OpenAI, Anthropic, Groq, or compatible APIs instead of local inference:
+
+**Configuration in `.env`:**
+```bash
+# OpenAI
+STREAMINGDIGEST_LLM_PROVIDER=openai
+STREAMINGDIGEST_LLM_ENDPOINT=https://api.openai.com/v1
+STREAMINGDIGEST_LLM_MODEL=gpt-4-mini
+STREAMINGDIGEST_LLM_API_KEY=sk-...
+
+# Or Groq (faster + cheaper):
+STREAMINGDIGEST_LLM_PROVIDER=openai
+STREAMINGDIGEST_LLM_ENDPOINT=https://api.groq.com/openai/v1
+STREAMINGDIGEST_LLM_MODEL=mixtral-8x7b-32768
+STREAMINGDIGEST_LLM_API_KEY=gsk-...
+```
+
+**Cost estimates** (2026 pricing):
+- GPT-4 Mini: ~$0.05/1M input tokens, $0.15/1M output tokens
+- Groq Mixtral: ~$0.24/1M tokens (input + output)
+- Claude 3.5 Haiku: ~$0.80/$4.00 per 1M input/output tokens
+
+**Typical costs for 20 feeds/day:**
+- ~1.2M tokens/month → ~$0.50–$5.00/month depending on provider
+
+**Benefits:**
+- No local inference overhead; M1 Mac with 8 GB unified memory is sufficient
+- Access to latest models and highest quality
+- Highly available; no local tuning needed
+- Predictable per-token costs
+
+### Model selection guide
+
+| Goal | Recommended | Mac requirements | Cost |
+|------|-------------|------------------|------|
+| **Lowest cost** | Phi-3 (local) | M1+ with 8 GB | Free (local) |
+| **Best quality** | GPT-4 or Claude 3.5 | M1+ with 8 GB | $1–5/month |
+| **Balanced** | Llama 3.1 8B (local) | M2+ with 16 GB | Free (local) |
+| **Maximum privacy** | Llama 3.1 (local) | M2 Max+ | Free (local) |
+| **Fastest inference** | Groq API | M1+ with 8 GB | ~$2–5/month |
+
+### Troubleshooting Ollama performance on Mac
+
+**Slowdowns or OOM errors:**
+1. Check Docker Desktop memory allocation: Settings > Resources > Base Memory
+2. Monitor memory during summarization: `top -l1 | head -20`
+3. Reduce model size (switch to Phi-3 or smaller 7B model)
+4. Reduce Docker CPU allocation if thermal throttling occurs
+
+**Model won't download:**
+- Check network: `ping ollama.ai`
+- Check disk space: `df -h` (need at least model size + 2 GB free)
+- Check Docker memory: increase in Docker Desktop settings
+
+**Connection refused errors:**
+- Verify Ollama service is running: `docker compose ps | grep ollama`
+- Check logs: `docker compose logs streaming-digest-ollama`
+- Restart: `docker compose restart streaming-digest-ollama`
 
 ## Pre-deployment setup
 
