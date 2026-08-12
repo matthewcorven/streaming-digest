@@ -45,6 +45,14 @@ public sealed class AuthenticationService
         {
             ResetAuthenticationState();
         }
+        catch (HttpRequestException)
+        {
+            ResetAuthenticationState();
+        }
+        catch (InvalidOperationException)
+        {
+            ResetAuthenticationState();
+        }
     }
 
     public async Task<LoginResult> LoginAsync(string username, string password)
@@ -62,11 +70,17 @@ public sealed class AuthenticationService
             return LoginResult.Failed;
         }
 
-        var loginResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
-    _isSetupRequired = false;
+        var loginResponse = await TryReadJsonAsync<AuthResponse>(response, CancellationToken.None);
+        if (loginResponse is null)
+        {
+            ResetAuthenticationState();
+            return LoginResult.Failed;
+        }
+
+        _isSetupRequired = false;
         _isAuthenticated = true;
-        _requiresPasswordChange = loginResponse?.MustChangePassword ?? false;
-        _currentUser = loginResponse?.Username ?? username;
+        _requiresPasswordChange = loginResponse.MustChangePassword;
+        _currentUser = loginResponse.Username ?? username;
         _csrfToken = null;
         Changed?.Invoke();
 
@@ -130,14 +144,14 @@ public sealed class AuthenticationService
         using var csrfResponse = await _httpClient.GetAsync("/api/auth/csrf", cancellationToken);
         if (!csrfResponse.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException("The API could not obtain a CSRF token.");
+            throw new UnauthorizedAccessException("The API could not obtain a CSRF token.");
         }
 
-        var csrf = await csrfResponse.Content.ReadFromJsonAsync<CsrfResponse>(cancellationToken: cancellationToken);
+        var csrf = await TryReadJsonAsync<CsrfResponse>(csrfResponse, cancellationToken);
         _csrfToken = csrf?.Token;
         if (string.IsNullOrWhiteSpace(_csrfToken))
         {
-            throw new InvalidOperationException("The API could not obtain a CSRF token.");
+            throw new UnauthorizedAccessException("The API could not obtain a CSRF token.");
         }
 
         return _csrfToken;
