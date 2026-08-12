@@ -1,0 +1,63 @@
+# Whisper audio-to-text runtime for streaming-digest.
+# Builds a Linux-compatible OpenAI Whisper server that exposes the contract
+# expected by LocalWhisperAudioToTextProvider:
+#   GET  /health
+#   POST /internal/audio-to-text/transcribe  { filePath, language }
+#
+# Note: the previous MLX-based image only works on Apple Silicon. This image
+# uses openai-whisper (PyTorch CPU) so it runs on Linux/x86_64 and arm64.
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install torch CPU wheel first (avoids the large CUDA bundle), then the rest from PyPI.
+RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir \
+    faster-whisper==1.1.1 \
+    requests==2.32.3 \
+    fastapi==0.115.6 \
+    "uvicorn[standard]==0.32.1" \
+    python-multipart==0.0.19 \
+    pydantic==2.10.4
+
+# Pre-download the default model so the container starts without a runtime
+# HuggingFace dependency. This is required for zero-intervention onboarding.
+# The download is retried because the HuggingFace CDN can be transiently flaky.
+ENV WHISPER_MODEL=base
+ENV WHISPER_DEVICE=cpu
+ENV WHISPER_COMPUTE_TYPE=int8
+RUN python - <<'PY'
+from faster_whisper import WhisperModel
+import os
+import time
+
+model = os.getenv("WHISPER_MODEL")
+device = os.getenv("WHISPER_DEVICE")
+compute = os.getenv("WHISPER_COMPUTE_TYPE")
+last_error = None
+for attempt in range(1, 6):
+    print(f"Pre-downloading whisper model: {model} (attempt {attempt}/5)")
+    try:
+        WhisperModel(model, device=device, compute_type=compute)
+        print("Model pre-download complete.")
+        break
+    except Exception as exc:
+        last_error = exc
+        print(f"Download attempt {attempt} failed: {exc}")
+        if attempt < 5:
+            time.sleep(10)
+else:
+    raise RuntimeError(f"Failed to pre-download whisper model after 5 attempts: {last_error}")
+PY
+
+COPY whisper_server.py .
+
+EXPOSE 8080
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["uvicorn", "whisper_server:app", "--host", "0.0.0.0", "--port", "8080"]
