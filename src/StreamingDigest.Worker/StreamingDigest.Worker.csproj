@@ -29,10 +29,18 @@
   <ProjectReference Include="..\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
 </ItemGroup>
 
+<!-- Pre-publish target: mark all appsettings files as non-publishable BEFORE Publish runs -->
+<Target Name="ExcludeAppSettingsFromPublish" BeforeTargets="PrepareForPublish">
   <ItemGroup>
-    <None Update="appsettings.schema.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <Content Remove="appsettings.json" />
+    <Content Remove="appsettings.Development.json" />
+    <Content Remove="appsettings.schema.json" />
   </ItemGroup>
+  <ItemGroup>
+    <None Remove="appsettings.json" />
+    <None Remove="appsettings.Development.json" />
+    <None Remove="appsettings.schema.json" />
+  </ItemGroup>
+</Target>
 
 </Project>

@@ -34,10 +34,35 @@
   <ProjectReference Include="..\StreamingDigest.Worker\StreamingDigest.Worker.csproj" Aliases="StreamingDigestWorker" />
 </ItemGroup>
 
+<ItemGroup>
+  <None Update="appsettings.schema.json">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+  </None>
+  <None Update="appsettings.json">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+  </None>
+  <None Update="appsettings.Development.json">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+  </None>
+</ItemGroup>
+
+<!-- Pre-publish target: remove Worker's appsettings from publish to avoid NETSDK1152 conflict -->
+<Target Name="RemoveWorkerAppSettingsFromPublish" BeforeTargets="PrepareForPublish">
   <ItemGroup>
-    <None Update="appsettings.schema.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <PublishContent Include="@(ContentWithTargetPath)" Condition="'%(ContentWithTargetPath.TargetPath)' == 'appsettings.json' or '%(ContentWithTargetPath.TargetPath)' == 'appsettings.Development.json' or '%(ContentWithTargetPath.TargetPath)' == 'appsettings.schema.json'" />
   </ItemGroup>
+  <ItemGroup>
+    <ContentWithTargetPath Remove="@(PublishContent)" />
+  </ItemGroup>
+  <!-- Keep only Api's own appsettings, remove Worker's -->
+  <ItemGroup>
+    <None Include="appsettings.json" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="appsettings.Development.json" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="appsettings.schema.json" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Target>
 
 </Project>
