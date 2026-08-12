@@ -15,6 +15,11 @@ services:
         target: "/var/lib/postgresql"
         source: "streamingdigest-postgres18-data"
         read_only: false
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME} -d postgres"]
+      interval: "5s"
+      timeout: "5s"
+      retries: 5
     networks:
       - "aspire"
   ollama:
@@ -29,6 +34,11 @@ services:
         target: "/root/.ollama"
         source: "streamingdigest-ollama-data"
         read_only: false
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: "5s"
+      timeout: "5s"
+      retries: 5
     networks:
       - "aspire"
   ollama-bootstrap:
@@ -47,6 +57,23 @@ services:
     depends_on:
       ollama:
         condition: "service_started"
+    networks:
+      - "aspire"
+  whisper:
+    image: "streaming-digest-whisper:latest"
+    container_name: "streaming-digest-whisper"
+    build:
+      context: "."
+      dockerfile: "Dockerfile.whisper"
+    ports:
+      - "127.0.0.1:8080:8080"
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: "5s"
+      timeout: "5s"
+      retries: 5
     networks:
       - "aspire"
   otel-collector:
@@ -94,6 +121,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
     ports:
       - "127.0.0.1:3000:3000"
     expose:
@@ -196,6 +225,11 @@ services:
         target: "/var/lib/streaming-digest/raw-html"
         source: "streaming-digest-debug-html"
         read_only: false
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: "5s"
+      timeout: "5s"
+      retries: 5
     networks:
       - "aspire"
   api:
@@ -222,6 +256,7 @@ services:
       STREAMINGDIGEST_LLM_MODEL: "llama3.1:8b"
       Scraper__BaseUrl: "http://scraper:3000"
       llm__baseUrl: "http://ollama:11434"
+      STREAMINGDIGEST_WHISPER_BASE_URL: "http://whisper:8080"
       observability:services:grafana:url: "http://grafana:3000"
       observability:services:pgadmin:url: "http://pgadmin:5050"
       observability:services:prometheus:url: "http://prometheus:9090"
@@ -237,13 +272,18 @@ services:
       notifications__matrix__dashboardBaseUrl: "${NOTIFICATIONS_MATRIX_DASHBOARD_BASE_URL:-http://localhost:8080}"
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: "5s"
+      timeout: "5s"
+      retries: 5
     depends_on:
       postgres:
-        condition: "service_started"
+        condition: "service_healthy"
       scraper:
-        condition: "service_started"
+        condition: "service_healthy"
       ollama:
-        condition: "service_started"
+        condition: "service_healthy"
       ollama-bootstrap:
         condition: "service_completed_successfully"
       otel-collector:
@@ -274,6 +314,7 @@ services:
       STREAMINGDIGEST_LLM_MODEL: "llama3.1:8b"
       Scraper__BaseUrl: "http://scraper:3000"
       llm__baseUrl: "http://ollama:11434"
+      STREAMINGDIGEST_WHISPER_BASE_URL: "http://whisper:8080"
       ASPNETCORE_ENVIRONMENT: "Production"
       notifications__matrix__enabled: "${NOTIFICATIONS_MATRIX_ENABLED:-false}"
       notifications__matrix__homeserverUrl: "${NOTIFICATIONS_MATRIX_HOMESERVER_URL:-https://matrix-client.matrix.org}"
@@ -294,13 +335,18 @@ services:
         target: "/var/lib/streaming-digest/matrix"
         source: "streaming-digest-matrix-state"
         read_only: false
+    healthcheck:
+      test: ["CMD", "dotnet", "--version"]
+      interval: "10s"
+      timeout: "5s"
+      retries: 3
     depends_on:
       postgres:
-        condition: "service_started"
+        condition: "service_healthy"
       scraper:
-        condition: "service_started"
+        condition: "service_healthy"
       ollama:
-        condition: "service_started"
+        condition: "service_healthy"
       ollama-bootstrap:
         condition: "service_completed_successfully"
       otel-collector:
