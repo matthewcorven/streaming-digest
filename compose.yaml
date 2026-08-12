@@ -65,8 +65,6 @@ services:
     build:
       context: "."
       dockerfile: "Dockerfile.whisper"
-    ports:
-      - "127.0.0.1:8080:8080"
     expose:
       - "8080"
     healthcheck:
@@ -282,6 +280,8 @@ services:
         condition: "service_healthy"
       scraper:
         condition: "service_healthy"
+      whisper:
+        condition: "service_healthy"
       ollama:
         condition: "service_healthy"
       ollama-bootstrap:
@@ -344,6 +344,8 @@ services:
       postgres:
         condition: "service_healthy"
       scraper:
+        condition: "service_healthy"
+      whisper:
         condition: "service_healthy"
       ollama:
         condition: "service_healthy"
