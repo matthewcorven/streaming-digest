@@ -76,12 +76,28 @@ All should show "✓ Running" or "✓ Healthy".
 
 ### 5. Open the web app
 
-Navigate to http://localhost:8080
+In the Aspire dashboard, click the `streaming-digest-api` service URL (e.g., `http://localhost:8080`) to open the Blazor WebAssembly application in your browser.
 
-Complete first-run setup:
-1. Create your user account
-2. Download embedding model (`bge-m3`)
-3. Verify Whisper is running
+**URLs to know:**
+
+| URL | Purpose |
+|-----|---------|
+| `http://localhost:8080` | **Web app root** — Search, channels, ingestion, settings pages |
+| `http://localhost:8080/admin/jobs` | **Hangfire job dashboard** — Monitor ingestion jobs, manual triggers |
+| `http://localhost:18888` | **Aspire dashboard** — Service health, logs, traces, resource management |
+
+The web app is hosted from the `streaming-digest-api` service:
+
+- **Root path `/`** serves the SPA (`index.html`), bootstrapping the Blazor WASM app in the browser.
+- **API routes `/api/*`** are backend REST endpoints consumed by the WASM client.
+- **Admin routes `/admin/*`** include the Hangfire job dashboard (`/admin/jobs`) and observability endpoints.
+
+For architectural details on routing and SPA hosting, see [ARCHITECTURE.md § 5.2 - Routing model](../architecture/ARCHITECTURE.md#52-blazor-wasm).
+
+**Complete first-run setup:**
+1. Create your user account (login page appears automatically)
+2. Download embedding model (`bge-m3`) from Settings → Models
+3. Verify Whisper service is running in Aspire dashboard
 
 ## Project structure
 
