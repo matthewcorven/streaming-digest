@@ -28,15 +28,15 @@ COPY src/StreamingDigest.Worker/ src/StreamingDigest.Worker/
 # Build API (which compiles dependencies including Worker)
 RUN cd /src && dotnet build "src/StreamingDigest.Api/StreamingDigest.Api.csproj" -c Release --no-restore 2>&1 | tee build.log || true
 
-# Publish only the API service
+# Publish only the API service (rebuild from the build output to ensure clean state)
 WORKDIR /src/src/StreamingDigest.Api
-RUN dotnet publish "StreamingDigest.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false --no-build 2>&1 | tail -20
+RUN dotnet publish "StreamingDigest.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false 2>&1 | tail -30
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && apt-get install -y --no-install-recommends libgssapi-krb5-2 curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/publish .
