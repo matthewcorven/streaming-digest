@@ -9,6 +9,12 @@
 
 - When asking questions of the human operator, use the ask_questions/askQuestions tool.
 
+## Application Code/Script Development: Debug Logging Rule
+
+- applies to all application code and scripts in this repository, agnostic to language, framework, or runtime
+- Every conditional path logs at `Debug`: each `if` body, each `else` body, and every `try`/`catch`/`finally` path. Keep logs short, structured, and searchable so Aspire logs and file-based searches can trace branch execution.
+- All test coverage must include log verification for each conditional path.
+
 ## Issue-driven work queue
 
 - GitHub issues are the authoritative execution queue for implementation work in this repository.
