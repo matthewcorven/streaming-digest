@@ -3,6 +3,7 @@ using Aspire.Hosting.Docker;
 using Aspire.Hosting.Docker.Resources;
 using Aspire.Hosting.Docker.Resources.ComposeNodes;
 using Aspire.Hosting.Docker.Resources.ServiceNodes;
+using Microsoft.Extensions.Configuration;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -21,6 +22,12 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) =>
 };
 
 var builder = DistributedApplication.CreateBuilder(args);
+
+// `dotnet run --no-launch-profile` does not reliably flow a Development environment for the
+// AppHost process, so Aspire parameter resources backed by user-secrets can appear missing even
+// when the secrets exist. Load the AppHost user-secrets explicitly so local orchestration gets
+// stable parameter resolution in both CLI and VS Code flows.
+builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
 
 const string composeProjectName = "streaming-digest";
 const string defaultEmbeddingModel = "bge-m3";
@@ -172,14 +179,15 @@ builder.AddDockerComposeEnvironment("docker-compose")
         SetPublishedPorts(composeFile, "whisper", [$"127.0.0.1:{whisperPort}:{whisperPort}"]);
     });
 
-var postgres = builder.AddPostgres("postgres", postgresUsername, postgresPassword)
+var postgresServer = builder.AddPostgres("postgres", postgresUsername, postgresPassword)
     // pgvector is required (ARCHITECTURE.md target runtime: "PostgreSQL + pgvector").
     // The pgvector image bundles the `vector` extension on top of stock postgres.
     .WithImage("pgvector/pgvector")
     .WithImageTag("0.8.5-pg18-trixie")
     .WithImageRegistry("docker.io")
-    .WithVolume("streamingdigest-postgres18-data", "/var/lib/postgresql")
-    .AddDatabase("streamingdigest");
+    .WithVolume("streamingdigest-postgres18-data", "/var/lib/postgresql");
+
+var streamingDigestDatabase = postgresServer.AddDatabase("streamingdigest");
 
 var ollama = builder.AddContainer("ollama", "ollama/ollama")
     .WithImageTag("latest")
@@ -241,7 +249,7 @@ var pgadmin = builder.AddContainer("pgadmin", "dpage/pgadmin4")
     .WithEnvironment("PGADMIN_LISTEN_PORT", "5050")
     .WithVolume("streamingdigest-pgadmin-data", "/var/lib/pgadmin")
     .WithHttpEndpoint(targetPort: 5050, port: 5050)
-    .WaitFor(postgres);
+    .WaitFor(postgresServer);
 
 var loki = builder.AddContainer("loki", "grafana/loki")
     .WithImageTag("3.2.0")
@@ -265,13 +273,12 @@ var scraper = builder.AddDockerfile("scraper", "../StreamingDigest.Scraper")
 
 var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithExternalHttpEndpoints()
-    .WithReference(postgres)
-    .WaitFor(postgres)
+    .WithReference(streamingDigestDatabase)
+    .WaitFor(postgresServer)
     .WaitFor(scraper)
     .WaitFor(ollama)
     .WaitForCompletion(ollamaBootstrap)
     .WaitFor(otelCollector)
-    .WaitFor(pgadmin)
     .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
     .WithEnvironment("STREAMINGDIGEST_OBSERVABILITY_ENABLED", "true")
     .WithEnvironment("STREAMINGDIGEST_EMBEDDING_MODEL", defaultEmbeddingModel)
@@ -287,8 +294,8 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("observability:services:otelCollector:url", "http://otel-collector:4317");
 
 builder.AddProject<Projects.StreamingDigest_Worker>("worker")
-    .WithReference(postgres)
-    .WaitFor(postgres)
+    .WithReference(streamingDigestDatabase)
+    .WaitFor(postgresServer)
     .WaitFor(scraper)
     .WaitFor(ollama)
     .WaitForCompletion(ollamaBootstrap)
@@ -305,6 +312,7 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
 builder.AddProject<Projects.StreamingDigest_Web>("web")
     .WithReference(api)
     .WaitFor(api)
+    .WithEnvironment("ApiBaseUrl", "http://localhost:5149")
     .WithExternalHttpEndpoints();
 
 builder.Build().Run();

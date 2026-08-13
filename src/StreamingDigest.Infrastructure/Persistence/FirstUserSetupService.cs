@@ -17,9 +17,54 @@ public sealed class FirstUserSetupService
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = new NpgsqlCommand("SELECT COUNT(*) FROM public.app_users", connection);
-        var userCount = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
-        return new FirstUserSetupStatus(userCount == 0, userCount);
+        long userCount;
+        long usersRequiringPasswordChange;
+        await using (var userStateCommand = new NpgsqlCommand(
+                         """
+                         SELECT
+                             COUNT(*) AS total_users,
+                             COUNT(*) FILTER (WHERE must_change_password) AS users_requiring_password_change
+                         FROM public.app_users
+                         """,
+                         connection))
+        {
+            await using var reader = await userStateCommand.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            userCount = reader.GetInt64(0);
+            usersRequiringPasswordChange = reader.GetInt64(1);
+            await reader.CloseAsync();
+        }
+
+        long channelCount;
+        await using (var channelCountCommand = new NpgsqlCommand("SELECT COUNT(*) FROM public.channels", connection))
+        {
+            channelCount = Convert.ToInt64(await channelCountCommand.ExecuteScalarAsync(cancellationToken));
+        }
+
+        var setupRequired = EvaluateSetupRequired(userCount, usersRequiringPasswordChange, channelCount);
+        _logger.LogDebug(
+            "Computed first-user setup status. SetupRequired={SetupRequired}, UserCount={UserCount}, UsersRequiringPasswordChange={UsersRequiringPasswordChange}, ChannelCount={ChannelCount}.",
+            setupRequired,
+            userCount,
+            usersRequiringPasswordChange,
+            channelCount);
+
+        return new FirstUserSetupStatus(setupRequired, userCount);
+    }
+
+    public static bool EvaluateSetupRequired(long userCount, long usersRequiringPasswordChange, long channelCount)
+    {
+        if (userCount == 0)
+        {
+            return true;
+        }
+
+        if (usersRequiringPasswordChange == userCount && channelCount == 0)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public async Task<FirstUserInitializationResult> InitializeAsync(string connectionString, string username, string password, CancellationToken cancellationToken = default)

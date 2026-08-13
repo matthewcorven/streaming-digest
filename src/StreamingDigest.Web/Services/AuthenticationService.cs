@@ -8,7 +8,7 @@ public sealed class AuthenticationService
 {
     private readonly HttpClient _httpClient;
     private bool _isAuthenticated;
-    private bool _isSetupRequired;
+    private bool _isSetupRequired = true;
     private bool _requiresPasswordChange;
     private string _currentUser = "guest";
     private string? _csrfToken;

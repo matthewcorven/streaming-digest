@@ -15,11 +15,30 @@ using StreamingDigest.Application.Observability;
 using StreamingDigest.Infrastructure.Persistence;
 
 var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+const string webClientCorsPolicy = "web-client";
 
 var builder = WebApplication.CreateBuilder(args);
 
 var applicationConfiguration = ApplicationConfigurationLoader.LoadFromDirectory(builder.Environment.ContentRootPath);
 builder.Services.AddSingleton(applicationConfiguration);
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(webClientCorsPolicy, policy =>
+    {
+        policy.WithOrigins(
+                "http://localhost:5001",
+                "http://127.0.0.1:5001",
+                "http://localhost:5002",
+                "http://127.0.0.1:5002",
+                "http://localhost:5003",
+                "http://127.0.0.1:5003",
+                "http://localhost:50663",
+                "http://127.0.0.1:50663")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 
 builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(options =>
@@ -134,6 +153,7 @@ if (app.Environment.IsDevelopment())
 }
 
 ApiRequestPipeline.Configure(app, authService, connectionString);
+app.UseCors(webClientCorsPolicy);
 
 app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
 {
