@@ -98,7 +98,9 @@ public sealed class AuthenticationService
         }
         catch
         {
-            _isSetupRequired = false;
+            // Fail-closed: if we cannot reach the API, preserve the prior belief that setup may be required.
+            // This prevents the app from silently routing first-run users to /login while the backend is still starting.
+            _isSetupRequired = previousValue;
         }
 
         if (previousValue != _isSetupRequired)

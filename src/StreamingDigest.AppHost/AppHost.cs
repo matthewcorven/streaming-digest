@@ -3,7 +3,22 @@ using Aspire.Hosting.Docker;
 using Aspire.Hosting.Docker.Resources;
 using Aspire.Hosting.Docker.Resources.ComposeNodes;
 using Aspire.Hosting.Docker.Resources.ServiceNodes;
+using System.Diagnostics;
 using System.Globalization;
+
+await RunDockerScraperPruneAsync("startup");
+
+AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+{
+    try
+    {
+        RunDockerScraperPruneAsync("shutdown").GetAwaiter().GetResult();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[scraper-prune] shutdown cleanup failed: {ex.Message}");
+    }
+};
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -248,7 +263,7 @@ var scraper = builder.AddDockerfile("scraper", "../StreamingDigest.Scraper")
     .WithHttpEndpoint(env: "PORT", targetPort: 3000)
     .WithHttpHealthCheck("/health");
 
-builder.AddProject<Projects.StreamingDigest_Api>("api")
+var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithExternalHttpEndpoints()
     .WithReference(postgres)
     .WaitFor(postgres)
@@ -288,6 +303,8 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
 
 // Blazor WebAssembly frontend
 builder.AddProject<Projects.StreamingDigest_Web>("web")
+    .WithReference(api)
+    .WaitFor(api)
     .WithExternalHttpEndpoints();
 
 builder.Build().Run();
@@ -314,4 +331,85 @@ static void SetPublishedPorts(ComposeFile composeFile, string serviceName, List<
     {
         service.Ports = ports;
     }
+}
+
+static async Task RunDockerScraperPruneAsync(string phase)
+{
+    try
+    {
+        var repoRoot = FindRepositoryRoot();
+        var scriptPath = OperatingSystem.IsWindows()
+            ? Path.Combine(repoRoot, "scripts", "prune_orphaned_scrapers.ps1")
+            : Path.Combine(repoRoot, "scripts", "prune_orphaned_scrapers.sh");
+
+        if (!File.Exists(scriptPath))
+        {
+            Console.WriteLine($"[scraper-prune] cleanup script not found for {phase}: {scriptPath}");
+            return;
+        }
+
+        var processStartInfo = new ProcessStartInfo
+        {
+            WorkingDirectory = repoRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        if (OperatingSystem.IsWindows())
+        {
+            processStartInfo.FileName = "pwsh";
+            processStartInfo.Arguments = $"-NoLogo -NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" -Phase {phase}";
+        }
+        else
+        {
+            processStartInfo.FileName = "/bin/sh";
+            processStartInfo.Arguments = $"\"{scriptPath}\" \"{phase}\"";
+        }
+
+        using var process = Process.Start(processStartInfo)
+            ?? throw new InvalidOperationException($"Unable to start Docker cleanup script: {scriptPath}");
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+
+        if (!string.IsNullOrWhiteSpace(stdout))
+        {
+            Console.WriteLine(stdout.TrimEnd());
+        }
+
+        if (!string.IsNullOrWhiteSpace(stderr))
+        {
+            Console.Error.WriteLine(stderr.TrimEnd());
+        }
+
+        if (process.ExitCode != 0)
+        {
+            Console.Error.WriteLine($"[scraper-prune] cleanup failed during {phase} with exit code {process.ExitCode}.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[scraper-prune] cleanup invocation for {phase} failed: {ex.Message}");
+    }
+}
+
+static string FindRepositoryRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "StreamingDigest.slnx")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    throw new InvalidOperationException("Unable to find the repository root while resolving the scraper prune script.");
 }
