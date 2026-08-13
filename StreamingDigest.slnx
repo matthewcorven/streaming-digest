@@ -18,5 +18,6 @@
     <Project Path="tests/StreamingDigest.E2E/StreamingDigest.E2E.csproj" />
     <Project Path="tests/StreamingDigest.IntegrationTests/StreamingDigest.IntegrationTests.csproj" />
     <Project Path="tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj" />
+    <Project Path="tests/StreamingDigest.Web.UnitTests/StreamingDigest.Web.UnitTests.csproj" />
   </Folder>
 </Solution>

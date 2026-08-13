@@ -58,7 +58,33 @@ public class PwaAssetTests
         Assert.Contains("<meta name=\"viewport\"", content);
         Assert.Contains("width=device-width", content);
         Assert.Contains("<link rel=\"manifest\"", content);
+        Assert.Contains("_framework/blazor.webassembly.js", content);
         Assert.Contains("navigator.serviceWorker.register", content);
+    }
+
+    [Fact]
+    public void AppSettings_ExposesDefaultApiBaseUrlForClientBootstrap()
+    {
+        var webRoot = GetWebRootDirectory();
+        var appSettingsPath = Path.Combine(webRoot, "appsettings.json");
+
+        Assert.True(File.Exists(appSettingsPath));
+
+        using var document = JsonDocument.Parse(File.ReadAllText(appSettingsPath));
+        var root = document.RootElement;
+
+        Assert.Equal("http://localhost:5149", root.GetProperty("ApiBaseUrl").GetString());
+    }
+
+    [Fact]
+    public void BuildOutput_ContainsBlazorBootAssets()
+    {
+        var frameworkRoot = GetBlazorFrameworkOutputDirectory();
+        var frameworkFiles = Directory.GetFiles(frameworkRoot);
+
+        Assert.Contains(frameworkFiles, path => Path.GetFileName(path).StartsWith("dotnet.native.", StringComparison.OrdinalIgnoreCase) && path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(frameworkFiles, path => Path.GetFileName(path).StartsWith("dotnet.runtime.", StringComparison.OrdinalIgnoreCase) && path.EndsWith(".js", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(frameworkFiles, path => Path.GetFileName(path).StartsWith("StreamingDigest.Web.", StringComparison.OrdinalIgnoreCase) && path.EndsWith(".wasm", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string GetWebRootDirectory()
@@ -77,5 +103,23 @@ public class PwaAssetTests
         }
 
         throw new DirectoryNotFoundException("Could not locate the StreamingDigest.Web wwwroot directory.");
+    }
+
+    private static string GetBlazorFrameworkOutputDirectory()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "src", "StreamingDigest.Web", "bin", "Debug", "net10.0", "wwwroot", "_framework");
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the StreamingDigest.Web build output framework directory.");
     }
 }

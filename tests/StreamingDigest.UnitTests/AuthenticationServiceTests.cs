@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using StreamingDigest.Application;
+using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Web.Services;
 
 namespace StreamingDigest.UnitTests;
@@ -91,9 +92,50 @@ public sealed class AuthenticationServiceTests
         Assert.False(service.IsAuthenticated);
     }
 
+    [Fact]
+    public async Task InitializeAsync_preserves_setup_required_when_setup_status_cannot_be_reached()
+    {
+        var handler = new StubHandler(_ => throw new HttpRequestException("backend unavailable"));
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://example.test") };
+        var service = new AuthenticationService(httpClient);
+
+        await service.InitializeAsync();
+
+        Assert.True(service.IsSetupRequired);
+        Assert.False(service.IsAuthenticated);
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(handler(request));
+    }
+}
+
+public sealed class FirstUserSetupServicePolicyTests
+{
+    [Fact]
+    public void EvaluateSetupRequired_returns_true_when_no_users_exist()
+    {
+        Assert.True(FirstUserSetupService.EvaluateSetupRequired(userCount: 0, usersRequiringPasswordChange: 0, channelCount: 0));
+    }
+
+    [Fact]
+    public void EvaluateSetupRequired_returns_true_when_only_bootstrap_users_exist_and_no_channels_exist()
+    {
+        Assert.True(FirstUserSetupService.EvaluateSetupRequired(userCount: 1, usersRequiringPasswordChange: 1, channelCount: 0));
+    }
+
+    [Fact]
+    public void EvaluateSetupRequired_returns_false_when_channels_exist()
+    {
+        Assert.False(FirstUserSetupService.EvaluateSetupRequired(userCount: 1, usersRequiringPasswordChange: 1, channelCount: 1));
+    }
+
+    [Fact]
+    public void EvaluateSetupRequired_returns_false_when_password_has_been_set()
+    {
+        Assert.False(FirstUserSetupService.EvaluateSetupRequired(userCount: 1, usersRequiringPasswordChange: 0, channelCount: 0));
     }
 }

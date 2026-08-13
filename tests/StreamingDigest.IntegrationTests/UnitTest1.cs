@@ -21,4 +21,17 @@ public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    [Fact]
+    public async Task RootPage_LoadsSuccessfully()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/");
+
+        response.EnsureSuccessStatusCode();
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("<div id=\"app\">", html, StringComparison.OrdinalIgnoreCase);
+    }
 }
