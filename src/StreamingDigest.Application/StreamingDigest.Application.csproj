@@ -11,7 +11,6 @@
 </ItemGroup>
 
 <ItemGroup>
-  <PackageReference Include="JsonSchema.Net" />
   <PackageReference Include="Microsoft.Extensions.AI" />
   <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
   <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />

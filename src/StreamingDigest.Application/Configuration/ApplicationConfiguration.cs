@@ -1,7 +1,6 @@
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Nodes;
-using Json.Schema;
 
 namespace StreamingDigest.Application.Configuration;
 
@@ -207,27 +206,9 @@ public static class ApplicationConfigurationLoader
         }
 
         var configText = File.ReadAllText(configFilePath);
-        var schemaText = File.ReadAllText(schemaFilePath);
-        var configNode = JsonNode.Parse(configText);
+        using var configDocument = JsonDocument.Parse(configText);
 
-        if (configNode is null)
-        {
-            throw new InvalidOperationException($"Application configuration file '{configFilePath}' is empty or not valid JSON.");
-        }
-
-        var schema = JsonSchema.FromText(schemaText);
-        var evaluationResult = schema.Evaluate(configNode, new EvaluationOptions());
-
-        if (!evaluationResult.IsValid)
-        {
-            var messages = (evaluationResult.Errors ?? Enumerable.Empty<KeyValuePair<string, string>>())
-                .Select(error => $"{error.Key}: {error.Value}")
-                .Distinct(StringComparer.Ordinal)
-                .Take(10);
-
-            throw new InvalidOperationException(
-                $"Application configuration validation failed for '{configFilePath}'.{Environment.NewLine}{string.Join(Environment.NewLine, messages)}");
-        }
+        ValidateConfigurationDocument(configDocument.RootElement, configFilePath);
 
         var configuration = JsonSerializer.Deserialize<ApplicationConfiguration>(configText, new JsonSerializerOptions
         {
@@ -235,6 +216,130 @@ public static class ApplicationConfigurationLoader
         });
 
         return configuration ?? throw new InvalidOperationException($"Application configuration file '{configFilePath}' could not be deserialized.");
+    }
+
+    private static void ValidateConfigurationDocument(JsonElement root, string configFilePath)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw CreateValidationException(configFilePath, "Root JSON value must be an object.");
+        }
+
+        var errors = new List<string>();
+
+        ValidateRequiredString(root, "appVersion", errors, v => IsVersion(v, configFilePath));
+        ValidateRequiredString(root, "configSchemaVersion", errors, v => IsVersion(v, configFilePath));
+        ValidateRequiredString(root, "deploymentSchemaVersion", errors, v => IsVersion(v, configFilePath));
+
+        if (TryGetObject(root, "app", out var appElement))
+        {
+            ValidateRequiredString(appElement, "name", errors, v => !string.IsNullOrWhiteSpace(v));
+            ValidateRequiredString(appElement, "environment", errors, v => IsAllowed(v, ["Development", "Staging", "Production"]));
+            ValidateRequiredString(appElement, "mutableSettingsStore", errors, v => IsAllowed(v, ["file", "database"]));
+        }
+        else
+        {
+            errors.Add("app: required object is missing.");
+        }
+
+        if (TryGetObject(root, "runtime", out var runtimeElement))
+        {
+            ValidateBoolean(runtimeElement, "enableHttpRedirect", errors);
+            ValidateRequiredString(runtimeElement, "defaultTheme", errors, v => IsAllowed(v, ["light", "dark", "system"]));
+            ValidateInteger(runtimeElement, "paginationPageSize", errors, min: 10, max: 200);
+        }
+        else
+        {
+            errors.Add("runtime: required object is missing.");
+        }
+
+        if (TryGetObject(root, "connectionStrings", out var connectionStringsElement))
+        {
+            ValidateRequiredString(connectionStringsElement, "streamingdigest", errors, v => !string.IsNullOrWhiteSpace(v));
+        }
+        else
+        {
+            errors.Add("connectionStrings: required object is missing.");
+        }
+
+        if (TryGetObject(root, "logging", out var loggingElement))
+        {
+            ValidateRequiredString(loggingElement, "level", errors, v => IsAllowed(v, ["Trace", "Debug", "Information", "Warning", "Error", "Critical"]));
+        }
+        else
+        {
+            errors.Add("logging: required object is missing.");
+        }
+
+        if (errors.Count > 0)
+        {
+            throw CreateValidationException(configFilePath, string.Join(Environment.NewLine, errors.Take(10).Distinct(StringComparer.Ordinal)));
+        }
+    }
+
+    private static bool TryGetObject(JsonElement root, string propertyName, out JsonElement value)
+    {
+        if (root.TryGetProperty(propertyName, out value) && value.ValueKind == JsonValueKind.Object)
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static void ValidateRequiredString(JsonElement parent, string propertyName, List<string> errors, Func<string, bool> predicate)
+    {
+        if (!parent.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+        {
+            errors.Add($"{propertyName}: expected string value.");
+            return;
+        }
+
+        var value = property.GetString();
+        if (!string.IsNullOrWhiteSpace(value) && predicate(value))
+        {
+            return;
+        }
+
+        errors.Add($"{propertyName}: invalid value '{value}'.");
+    }
+
+    private static void ValidateBoolean(JsonElement parent, string propertyName, List<string> errors)
+    {
+        if (!parent.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.True && property.ValueKind != JsonValueKind.False)
+        {
+            errors.Add($"{propertyName}: expected boolean value.");
+        }
+    }
+
+    private static void ValidateInteger(JsonElement parent, string propertyName, List<string> errors, int min, int max)
+    {
+        if (!parent.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Number || !property.TryGetInt32(out var value))
+        {
+            errors.Add($"{propertyName}: expected integer value.");
+            return;
+        }
+
+        if (value < min || value > max)
+        {
+            errors.Add($"{propertyName}: value {value} is outside the allowed range [{min}, {max}].");
+        }
+    }
+
+    private static bool IsVersion(string value, string configFilePath)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(value, "^\\d+\\.\\d+\\.\\d+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    private static bool IsAllowed(string value, string[] allowedValues)
+    {
+        return allowedValues.Contains(value, StringComparer.Ordinal);
+    }
+
+    private static InvalidOperationException CreateValidationException(string configFilePath, string message)
+    {
+        return new InvalidOperationException($"Application configuration validation failed for '{configFilePath}'.{Environment.NewLine}{message}");
     }
 
     public static ApplicationConfiguration LoadFromDirectory(string? directoryPath)
