@@ -26,15 +26,8 @@
   <ProjectReference Include="..\..\src\StreamingDigest.Api\StreamingDigest.Api.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.AppHost\StreamingDigest.AppHost.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Application\StreamingDigest.Application.csproj" />
-  <ProjectReference Include="..\..\src\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
-  <ProjectReference Include="..\..\src\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" />
-  <ProjectReference Include="..\..\src\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
+  <ProjectReference Include="..\..\src\StreamingDigest.Contracts\StreamingDigest.Contracts.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Web\StreamingDigest.Web.csproj" />
-  <ProjectReference Include="..\..\src\StreamingDigest.Worker\StreamingDigest.Worker.csproj" />
-</ItemGroup>
-
-<ItemGroup>
-  <Compile Remove="UpgradeMaintenanceUiMapperTests.cs" />
 </ItemGroup>
 
 <ItemGroup>

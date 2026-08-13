@@ -27,10 +27,9 @@
 
 <ItemGroup>
   <ProjectReference Include="..\StreamingDigest.Application\StreamingDigest.Application.csproj" />
+  <ProjectReference Include="..\StreamingDigest.Contracts\StreamingDigest.Contracts.csproj" />
   <ProjectReference Include="..\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" />
   <ProjectReference Include="..\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
-  <ProjectReference Include="..\StreamingDigest.Web\StreamingDigest.Web.csproj" />
-  <!-- Referenced so POST /api/models/download can enqueue the strongly-typed ModelDownloadJob. -->
   <ProjectReference Include="..\StreamingDigest.Worker\StreamingDigest.Worker.csproj" Aliases="StreamingDigestWorker" />
 </ItemGroup>
 

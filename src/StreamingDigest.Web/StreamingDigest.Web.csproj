@@ -13,6 +13,10 @@
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\StreamingDigest.Contracts\StreamingDigest.Contracts.csproj" />
+  </ItemGroup>
+
   <!-- Flattened ASP.NET Core hosted shape: the WASM client bootstrap is excluded from
        server compilation (only one top-level-statements file is allowed) and shipped as
        a content file so the WebAssembly.Sdk tooling can locate the client entry point. -->
