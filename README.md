@@ -460,6 +460,12 @@ Start the Aspire stack:
 dotnet run --project src/StreamingDigest.AppHost
 ```
 
+Reset local containers, volumes, and repo-local processes to a clean first-run state:
+
+```bash
+./scripts/reset_local_state.sh
+```
+
 This starts all services and opens the Aspire dashboard at http://localhost:18888 automatically.
 
 Run tests:
