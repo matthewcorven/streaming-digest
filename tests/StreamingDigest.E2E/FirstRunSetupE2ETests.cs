@@ -20,6 +20,10 @@ public sealed class FirstRunSetupE2ETests : IAsyncLifetime
     private static readonly SemaphoreSlim BrowserInstallLock = new(1, 1);
     private static bool s_browserInstalled;
 
+    private static bool IsEnabled =>
+        string.Equals(Environment.GetEnvironmentVariable("STREAMINGDIGEST_E2E_SMOKE"), "1", StringComparison.Ordinal)
+        || string.Equals(Environment.GetEnvironmentVariable("STREAMINGDIGEST_E2E_SMOKE"), "true", StringComparison.OrdinalIgnoreCase);
+
     private readonly string _containerName = $"streaming-digest-first-run-e2e-{Guid.NewGuid():N}";
     private readonly int _postgresPort = GetAvailablePort();
     private readonly int _appPort = GetAvailablePort();
@@ -32,9 +36,14 @@ public sealed class FirstRunSetupE2ETests : IAsyncLifetime
     private string ApiBaseUrl => $"http://127.0.0.1:{_appPort}";
     private string WebBaseUrl => $"http://127.0.0.1:{_webPort}";
 
-    [Fact(Skip = "E2E test requires Docker and full infrastructure setup; runs locally only")]
+    [Fact]
     public async Task Zero_user_start_requires_setup_then_blocks_setup_after_first_sign_in()
     {
+        if (!IsEnabled)
+        {
+            return;
+        }
+
         await AssertSetupRequiredAsync();
         await EnsurePlaywrightBrowsersInstalledAsync();
 

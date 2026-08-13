@@ -90,6 +90,123 @@ public sealed class FirstUserSetupServiceTests : IAsyncLifetime
         Assert.Equal(0, userCount);
     }
 
+    [Fact]
+    public async Task GetStatusAsync_returns_setup_required_when_no_users_exist()
+    {
+        var service = new FirstUserSetupService(NullLogger<FirstUserSetupService>.Instance);
+
+        var status = await service.GetStatusAsync(_connectionString!);
+
+        Assert.True(status.SetupRequired);
+        Assert.Equal(0, status.UserCount);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_returns_setup_required_when_only_bootstrap_style_user_exists_and_no_channels_exist()
+    {
+        await SeedUserAsync("bootstrap", mustChangePassword: true);
+        var service = new FirstUserSetupService(NullLogger<FirstUserSetupService>.Instance);
+
+        var status = await service.GetStatusAsync(_connectionString!);
+
+        Assert.True(status.SetupRequired);
+        Assert.Equal(1, status.UserCount);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_returns_not_required_when_password_is_set_even_without_channels()
+    {
+        await SeedUserAsync("founder", mustChangePassword: false);
+        var service = new FirstUserSetupService(NullLogger<FirstUserSetupService>.Instance);
+
+        var status = await service.GetStatusAsync(_connectionString!);
+
+        Assert.False(status.SetupRequired);
+        Assert.Equal(1, status.UserCount);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_returns_not_required_when_a_channel_exists()
+    {
+        await SeedUserAsync("bootstrap", mustChangePassword: true);
+        await SeedChannelAsync();
+        var service = new FirstUserSetupService(NullLogger<FirstUserSetupService>.Instance);
+
+        var status = await service.GetStatusAsync(_connectionString!);
+
+        Assert.False(status.SetupRequired);
+        Assert.Equal(1, status.UserCount);
+    }
+
+    private async Task SeedUserAsync(string username, bool mustChangePassword)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO public.app_users (
+                id,
+                username,
+                password_hash,
+                password_hash_algorithm,
+                must_change_password,
+                created_at,
+                updated_at)
+            VALUES (
+                @id,
+                @username,
+                @password_hash,
+                'argon2id',
+                @must_change_password,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP)
+            """,
+            connection);
+
+        command.Parameters.AddWithValue("id", Guid.NewGuid());
+        command.Parameters.AddWithValue("username", username);
+        command.Parameters.AddWithValue("password_hash", AppAuthService.HashPassword("setup-passw0rd!"));
+        command.Parameters.AddWithValue("must_change_password", mustChangePassword);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task SeedChannelAsync()
+    {
+        await using var connection = new NpgsqlConnection(_connectionString!);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO public.channels (
+                id,
+                youtube_channel_id,
+                name_original,
+                profile_url,
+                source_url,
+                created_at,
+                updated_at)
+            VALUES (
+                @id,
+                @youtube_channel_id,
+                @name_original,
+                @profile_url,
+                @source_url,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP)
+            """,
+            connection);
+
+        command.Parameters.AddWithValue("id", Guid.NewGuid());
+        command.Parameters.AddWithValue("youtube_channel_id", "UC-test-channel");
+        command.Parameters.AddWithValue("name_original", "Test Channel");
+        command.Parameters.AddWithValue("profile_url", "https://www.youtube.com/@testchannel");
+        command.Parameters.AddWithValue("source_url", "https://www.youtube.com/@testchannel");
+
+        await command.ExecuteNonQueryAsync();
+    }
+
     private async Task StartPostgresContainerAsync()
     {
         var dockerArgs = new[]

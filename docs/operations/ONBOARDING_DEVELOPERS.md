@@ -61,6 +61,12 @@ Then start Aspire:
 dotnet run --project src/StreamingDigest.AppHost
 ```
 
+To return to a clean first-run state locally, use:
+
+```bash
+./scripts/reset_local_state.sh
+```
+
 This starts:
 - **Aspire Dashboard** at http://localhost:18888 (automatically opens in browser)
 - **All services** (API, Worker, PostgreSQL, Ollama, Whisper, etc.)
@@ -109,9 +115,15 @@ The web app is hosted from the `streaming-digest-api` service:
 For architectural details on routing and SPA hosting, see [ARCHITECTURE.md § 5.2 - Routing model](../architecture/ARCHITECTURE.md#52-blazor-wasm).
 
 **Complete first-run setup:**
-1. Create your user account (login page appears automatically)
+1. Create your user account (the app redirects to `/setup` automatically when no admin password has been set and no bounded-context data exists)
 2. Download embedding model (`bge-m3`) from Settings → Models
 3. Verify Whisper service is running in Aspire dashboard
+
+For the first-run browser smoke test in CI or local verification, set `STREAMINGDIGEST_E2E_SMOKE=1` before running:
+
+```bash
+dotnet test tests/StreamingDigest.E2E/StreamingDigest.E2E.csproj --filter "FullyQualifiedName~Zero_user_start_requires_setup_then_blocks_setup_after_first_sign_in"
+```
 
 ## Project structure
 
@@ -140,6 +152,7 @@ streaming-digest/
 │   ├── publish_compose.sh                # Regenerate compose.yaml from AppHost
 │   ├── preflight_aspire_parameters.sh    # POSIX required-parameter check for AppHost
 │   └── preflight_aspire_parameters.ps1   # PowerShell 7 fallback required-parameter check
+│   └── reset_local_state.sh              # Remove local containers/volumes and return to first-run state
 ├── compose.yaml                          # Docker Compose (generated from AppHost)
 ├── Dockerfile.whisper                    # Whisper service image
 ├── CONTEXT.md                            # Project context and conventions

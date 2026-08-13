@@ -26,5 +26,8 @@ public class AppHostDockerCleanupTests
 
         var powershellScriptPath = Path.Combine(repoRoot, "scripts", "prune_orphaned_scrapers.ps1");
         Assert.True(File.Exists(powershellScriptPath), $"Expected cleanup script at {powershellScriptPath}.");
+
+        var resetScriptPath = Path.Combine(repoRoot, "scripts", "reset_local_state.sh");
+        Assert.True(File.Exists(resetScriptPath), $"Expected cleanup script at {resetScriptPath}.");
     }
 }
