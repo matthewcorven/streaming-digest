@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Components.WebAssembly.Http;
 
 namespace StreamingDigest.Web.Services;
 
@@ -63,7 +64,8 @@ public sealed class AuthenticationService
             return LoginResult.Failed;
         }
 
-        using var response = await _httpClient.PostAsJsonAsync("/api/auth/login", new { username, password });
+        using var request = CreateRequest(HttpMethod.Post, "/api/auth/login", JsonContent.Create(new { username, password }));
+        using var response = await _httpClient.SendAsync(request);
         if (!response.IsSuccessStatusCode)
         {
             ResetAuthenticationState();
@@ -93,7 +95,10 @@ public sealed class AuthenticationService
 
         try
         {
-            var response = await _httpClient.GetFromJsonAsync<SetupStatusResponse>("/api/setup/status", cancellationToken);
+            using var request = CreateRequest(HttpMethod.Get, "/api/setup/status");
+            using var responseMessage = await _httpClient.SendAsync(request, cancellationToken);
+            responseMessage.EnsureSuccessStatusCode();
+            var response = await TryReadJsonAsync<SetupStatusResponse>(responseMessage, cancellationToken);
             _isSetupRequired = response?.SetupRequired ?? false;
         }
         catch
@@ -111,7 +116,8 @@ public sealed class AuthenticationService
 
     public async Task<FirstUserSetupResult> InitializeFirstUserAsync(string username, string password, CancellationToken cancellationToken = default)
     {
-        using var response = await _httpClient.PostAsJsonAsync("/api/setup/initialize", new { username, password }, cancellationToken);
+        using var request = CreateRequest(HttpMethod.Post, "/api/setup/initialize", JsonContent.Create(new { username, password }));
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (response.IsSuccessStatusCode)
         {
             _isSetupRequired = false;
@@ -131,7 +137,8 @@ public sealed class AuthenticationService
 
     public async Task<string> EnsureApiSessionAsync(CancellationToken cancellationToken = default)
     {
-        using var meResponse = await _httpClient.GetAsync("/api/auth/me", cancellationToken);
+        using var meRequest = CreateRequest(HttpMethod.Get, "/api/auth/me");
+        using var meResponse = await _httpClient.SendAsync(meRequest, cancellationToken);
         if (!meResponse.IsSuccessStatusCode)
         {
             ResetAuthenticationState();
@@ -143,7 +150,8 @@ public sealed class AuthenticationService
         _requiresPasswordChange = authResponse?.MustChangePassword ?? false;
         _currentUser = authResponse?.Username ?? _currentUser;
 
-        using var csrfResponse = await _httpClient.GetAsync("/api/auth/csrf", cancellationToken);
+        using var csrfRequest = CreateRequest(HttpMethod.Get, "/api/auth/csrf");
+        using var csrfResponse = await _httpClient.SendAsync(csrfRequest, cancellationToken);
         if (!csrfResponse.IsSuccessStatusCode)
         {
             throw new UnauthorizedAccessException("The API could not obtain a CSRF token.");
@@ -161,6 +169,8 @@ public sealed class AuthenticationService
 
     public async Task<HttpResponseMessage> SendAuthenticatedRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
     {
+        PrepareBrowserRequest(request);
+
         if (!request.Headers.TryGetValues("X-CSRF-Token", out var existingValues) || string.IsNullOrWhiteSpace(existingValues.FirstOrDefault()))
         {
             var csrfToken = await EnsureApiSessionAsync(cancellationToken);
@@ -212,7 +222,8 @@ public sealed class AuthenticationService
     {
         try
         {
-            await _httpClient.PostAsync("/api/auth/logout", null);
+            using var request = CreateRequest(HttpMethod.Post, "/api/auth/logout");
+            await _httpClient.SendAsync(request);
         }
         catch
         {
@@ -253,6 +264,22 @@ public sealed class AuthenticationService
         {
             return default;
         }
+    }
+
+    private static HttpRequestMessage CreateRequest(HttpMethod method, string requestUri, HttpContent? content = null)
+    {
+        var request = new HttpRequestMessage(method, requestUri)
+        {
+            Content = content
+        };
+
+        PrepareBrowserRequest(request);
+        return request;
+    }
+
+    private static void PrepareBrowserRequest(HttpRequestMessage request)
+    {
+        request.SetBrowserRequestCredentials(BrowserRequestCredentials.Include);
     }
 
     private sealed class CsrfResponse
