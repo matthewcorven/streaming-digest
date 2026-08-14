@@ -18,6 +18,14 @@ var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 const string webClientCorsPolicy = "web-client";
 
 var builder = WebApplication.CreateBuilder(args);
+var allowedCorsOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()?
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Select(origin => origin.Trim())
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+    ?? [];
 
 var applicationConfiguration = ApplicationConfigurationLoader.LoadFromDirectory(builder.Environment.ContentRootPath);
 builder.Services.AddSingleton(applicationConfiguration);
@@ -25,15 +33,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy(webClientCorsPolicy, policy =>
     {
-        policy.WithOrigins(
-                "http://localhost:5001",
-                "http://127.0.0.1:5001",
-                "http://localhost:5002",
-                "http://127.0.0.1:5002",
-                "http://localhost:5003",
-                "http://127.0.0.1:5003",
-                "http://localhost:50663",
-                "http://127.0.0.1:50663")
+        policy.SetIsOriginAllowed(origin => allowedCorsOrigins.Contains(origin))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -152,8 +152,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-ApiRequestPipeline.Configure(app, authService, connectionString);
 app.UseCors(webClientCorsPolicy);
+ApiRequestPipeline.Configure(app, authService, connectionString);
 
 app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
 {

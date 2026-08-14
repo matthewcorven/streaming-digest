@@ -63,7 +63,7 @@ public class PwaAssetTests
     }
 
     [Fact]
-    public void AppSettings_ExposesDefaultApiBaseUrlForClientBootstrap()
+    public void AppSettings_DefaultsClientBootstrapToSameOrigin()
     {
         var webRoot = GetWebRootDirectory();
         var appSettingsPath = Path.Combine(webRoot, "appsettings.json");
@@ -73,7 +73,21 @@ public class PwaAssetTests
         using var document = JsonDocument.Parse(File.ReadAllText(appSettingsPath));
         var root = document.RootElement;
 
-        Assert.Equal("http://localhost:5149", root.GetProperty("ApiBaseUrl").GetString());
+        Assert.Equal("/", root.GetProperty("Api").GetProperty("BaseUrl").GetString());
+    }
+
+    [Fact]
+    public void DevelopmentAppSettings_ExposeStandaloneApiBaseUrlOverride()
+    {
+        var webRoot = GetWebRootDirectory();
+        var appSettingsPath = Path.Combine(webRoot, "appsettings.Development.json");
+
+        Assert.True(File.Exists(appSettingsPath));
+
+        using var document = JsonDocument.Parse(File.ReadAllText(appSettingsPath));
+        var root = document.RootElement;
+
+        Assert.Equal("http://localhost:5149", root.GetProperty("Api").GetProperty("BaseUrl").GetString());
     }
 
     [Fact]

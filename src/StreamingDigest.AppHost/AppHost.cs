@@ -312,7 +312,6 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
 builder.AddProject<Projects.StreamingDigest_Web>("web")
     .WithReference(api)
     .WaitFor(api)
-    .WithEnvironment("ApiBaseUrl", "http://localhost:5149")
     .WithExternalHttpEndpoints();
 
 builder.Build().Run();

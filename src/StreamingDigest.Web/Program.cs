@@ -10,12 +10,17 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 
 var apiBaseAddress = builder.Configuration["services:api:http:0"]
     ?? builder.Configuration["services__api__http__0"]
+    ?? builder.Configuration["Api:BaseUrl"]
     ?? builder.Configuration["ApiBaseUrl"]
-    ?? "http://localhost:5149";
+    ?? builder.HostEnvironment.BaseAddress;
+
+var resolvedApiBaseAddress = Uri.TryCreate(apiBaseAddress, UriKind.Absolute, out var absoluteApiBaseAddress)
+    ? absoluteApiBaseAddress
+    : new Uri(new Uri(builder.HostEnvironment.BaseAddress, UriKind.Absolute), apiBaseAddress);
 
 builder.Services.AddScoped(_ => new HttpClient
 {
-    BaseAddress = new Uri(apiBaseAddress, UriKind.Absolute)
+    BaseAddress = resolvedApiBaseAddress
 });
 
 builder.Services.AddScoped<UpgradeMaintenanceSnapshotService>();
