@@ -763,7 +763,7 @@ Runs an embedding-service health/probe operation against the configured embeddin
 
 ### POST `/api/admin/operations/audio-to-text/test`
 
-Runs an audio-to-text (whisper) health/probe operation against the configured service endpoint (`STREAMINGDIGEST_WHISPER_BASE_URL` / `whisper:baseUrl`) and reports the truthful outcome in the standard operation envelope. Mirrors the behavior documented for `POST /api/admin/test-audio-to-text` in §17; when whisper is unconfigured the operation completes with `healthStatus: "warning"` (degrade), not a fault.
+Runs an audio-to-text (whisper) health/probe operation against the configured service endpoint (`STREAMINGDIGEST_WHISPER_BASE_URL` / `whisper:baseUrl`) and reports the truthful outcome in the standard operation envelope. When whisper is unconfigured the operation completes with `healthStatus: "warning"` (degrade), not a fault.
 
 ### POST `/api/admin/operations/notifications/matrix/test`
 
@@ -1338,40 +1338,34 @@ Re-runs resource processing (scrape/classify/repository association) for a succe
 
 ## 17. Admin health/test endpoints
 
-### GET `/api/admin/health`
+> ⚠️ **Status: These endpoints are not implemented in shipped code.**
+> Test functionality has been consolidated under `/api/admin/operations/` (§7).
+> This section documents legacy routes from pre-MVP planning; see issue #251.
 
-Returns dependency health summary:
+### ~~GET `/api/admin/health`~~ (NOT IMPLEMENTED)
 
-- PostgreSQL.
-- pgvector.
-- Ollama embeddings.
-- Ollama LLM.
-- audio-to-text service.
-- scraper service.
-- Matrix notifier.
-- Hangfire.
+Documented in §17 as returning dependency health summary, but not shipped.
+See `GET /api/health`, `/api/db-health`, `/api/overview` (basic health) or
+`POST /api/admin/operations/notifications/matrix/test`, etc. (operation-based testing).
 
-### POST `/api/admin/test-matrix`
+### ~~POST `/api/admin/test-matrix`~~ (NOT IMPLEMENTED)
 
-Sends Matrix test notification. MVP sends do not require E2EE. Encrypted/E2EE sends are MVP+.
+Use `POST /api/admin/operations/notifications/matrix/test` instead (§7).
 
-### POST `/api/admin/test-embedding`
+### ~~POST `/api/admin/test-embedding`~~ (NOT IMPLEMENTED)
 
-Request:
+Use `POST /api/admin/operations/embeddings/test` instead (§7).
 
-```json
-{
-  "text": "test embedding"
-}
-```
+### ~~POST `/api/admin/test-audio-to-text`~~ (NOT IMPLEMENTED)
 
-Returns model/dimensions and latency.
+Use `POST /api/admin/operations/audio-to-text/test` instead (§7).
+Performs a real `GET /health` probe against the configured whisper service
+(`STREAMINGDIGEST_WHISPER_BASE_URL`) via `IAudioToTextProvider.CheckHealthAsync`
+and reports the truthful status. The previous behavior (a fake `completed`/`healthy`
+without probing) has been removed (issue #210).
 
-### POST `/api/admin/test-audio-to-text`
-
-Performs a real `GET /health` probe against the configured whisper service (`STREAMINGDIGEST_WHISPER_BASE_URL`) via `IAudioToTextProvider.CheckHealthAsync` and reports the truthful status. The previous behavior (a fake `completed`/`healthy` without probing) has been removed (issue #210).
-
-Response shape is the standard admin-action-result envelope. The `status`, `healthStatus`, and `message` fields reflect the probe outcome:
+Response shape is the standard admin-action-result envelope. The `status`,
+`healthStatus`, and `message` fields reflect the probe outcome:
 
 | Probe outcome | `status` | `healthStatus` | `message` |
 | --- | --- | --- | --- |
@@ -1379,118 +1373,82 @@ Response shape is the standard admin-action-result envelope. The `status`, `heal
 | Whisper unavailable (no runtime, no provider registered, 5xx, connection refused, stub) | `completed` | `warning` | Engine + endpoint + "unavailable" + degrade note |
 | Probe threw (genuine fault) | `failed` | `error` | Failure detail |
 
-When whisper is unavailable, caption-less videos degrade to `unavailable_captions` with a `transcript_ingest_failed` domain event (notify); captioned ingestion proceeds with a warning (PRD §2.4). An unconfigured whisper runtime (no `IAudioToTextProvider` registered) is treated as the expected degrade state, not a fault, so it returns `completed`/`warning` (HTTP 200); HTTP 500 is reserved for genuine probe exceptions only.
+When whisper is unavailable, caption-less videos degrade to `unavailable_captions`
+with a `transcript_ingest_failed` domain event (notify); captioned ingestion proceeds
+with a warning (PRD §2.4). An unconfigured whisper runtime (no `IAudioToTextProvider`
+registered) is treated as the expected degrade state, not a fault, so it returns
+`completed`/`warning` (HTTP 200); HTTP 500 is reserved for genuine probe exceptions only.
 
-### POST `/api/admin/test-scraper`
+### ~~POST `/api/admin/test-scraper`~~ (NOT IMPLEMENTED)
 
-Runs scraper health test against a controlled URL or fixture.
+Documented as running scraper health test against a controlled URL or fixture.
+Not shipped; no equivalent endpoint exists.
 
-### POST `/api/admin/test-repository-provider`
+### ~~POST `/api/admin/test-repository-provider`~~ (NOT IMPLEMENTED)
 
-Runs repository-provider health test, GitHub for MVP.
+Documented as running repository-provider health test, GitHub for MVP.
+Not shipped; no equivalent endpoint exists.
 
-### POST `/api/admin/test-youtube-ingestion`
+### ~~POST `/api/admin/test-youtube-ingestion`~~ (NOT IMPLEMENTED)
 
-Runs lightweight YouTube adapter verification without ingesting a full video when possible.
+Documented as running lightweight YouTube adapter verification without ingesting a full video.
+Not shipped; no equivalent endpoint exists.
 
-### GET `/api/admin/observability-links`
+### ~~GET `/api/admin/observability-links`~~ (NOT IMPLEMENTED)
 
-Response:
-
-```json
-{
-  "grafanaUrl": "http://host:3000",
-  "prometheusUrl": "http://host:9090",
-  "hangfireUrl": "/admin/jobs",
-  "lokiUrl": "http://host:3100",
-  "tempoUrl": "http://host:3200"
-}
-```
+Documented as returning Grafana, Prometheus, Hangfire, Loki, and Tempo URLs.
+Not shipped; observability URLs are available via environment configuration instead.
 
 ## 18. Backup and upgrade/maintenance endpoints
 
-MVP maturity rule:
+> ⚠️ **Status: Most of these endpoints are not implemented in shipped code.**
+> Only backup/restore operations are available under `/api/admin/operations/`.
+> This section documents planned maintenance/upgrade workflows (MVP+ scope).
+> See issue #251.
 
-- Status, versions, backup creation/list/detail, upgrade preview, and derived-data regeneration endpoints are real MVP contracts.
-- `apply-migrations` is an MVP contract for app/config/DB migrations that are safe to run in-app after compatibility checks pass.
+MVP maturity rule (design intent, not yet shipped):
+
+- Status, versions, backup creation/list/detail, upgrade preview, and derived-data regeneration endpoints are planned MVP contracts.
+- `apply-migrations` is a planned MVP contract for app/config/DB migrations that are safe to run in-app after compatibility checks pass.
 - High-risk infrastructure migrations, such as PostgreSQL major upgrades, pgvector extension upgrades, large volume moves, or Matrix crypto-store migrations after E2EE is enabled, must return a manual/guided runbook requirement instead of attempting unsafe fully automated mutation.
 
-### GET `/api/admin/maintenance/status`
+### ~~GET `/api/admin/maintenance/status`~~ (NOT IMPLEMENTED)
 
-Returns versions, compatibility, backup status, migration status, derived-data status, and post-upgrade checklist state.
+Planned to return versions, compatibility, backup status, migration status, derived-data status, and post-upgrade checklist state. Not shipped.
 
-```json
-{
-  "versions": {
-    "appVersion": "0.1.0",
-    "dbSchemaVersion": "202607170001",
-    "configSchemaVersion": "1",
-    "deploymentSchemaVersion": "1"
-  },
-  "riskLevel": "medium",
-  "backup": {
-    "lastBackupAt": "2026-07-17T10:00:00Z",
-    "backupRecommended": true,
-    "backupRequired": false
-  },
-  "compatibility": {
-    "api": "healthy",
-    "worker": "paused_until_migration_complete",
-    "postgres": "healthy",
-    "ollama": "healthy",
-    "whisper": "warning",
-    "matrix": "not_configured"
-  },
-  "derivedData": {
-    "staleSearchDocuments": 123,
-    "staleEmbeddings": 456,
-    "pendingSegmentApprovals": 0
-  }
-}
-```
+### ~~GET `/api/admin/maintenance/versions`~~ (NOT IMPLEMENTED)
 
-### GET `/api/admin/maintenance/versions`
+Planned to return current app, DB schema, config schema, and deployment schema versions. Not shipped.
 
-Returns current app, DB schema, config schema, and deployment schema versions.
+### POST `/api/admin/operations/backup` (SHIPPED)
 
-### POST `/api/admin/backups`
+See `/api/admin/operations/backup` under §7. Starts backup operation.
 
-Starts MVP server-side backup.
+### ~~GET `/api/admin/backups`~~ (NOT IMPLEMENTED)
 
-Request:
+Planned to list backup artifacts. Use `/api/admin/operations/backups/{archiveName}` to retrieve a specific backup file.
 
-```json
-{
-  "backupType": "full",
-  "offerDownload": true
-}
-```
+### ~~GET `/api/admin/backups/{backupId}`~~ (NOT IMPLEMENTED)
 
-Response: accepted operation.
+Planned to return backup artifact detail. Not shipped.
 
-### GET `/api/admin/backups`
+### ~~POST `/api/admin/backups/{backupId}/verify`~~ (NOT IMPLEMENTED)
 
-Lists backup artifacts.
+Planned to queue backup verification/dry-run checks. Not shipped.
 
-### GET `/api/admin/backups/{backupId}`
+### ~~GET `/api/admin/upgrade/preview`~~ (NOT IMPLEMENTED)
 
-Returns backup artifact detail.
+Planned to return migration/config/deployment/derived-data preview and risk level. Not shipped.
 
-### POST `/api/admin/backups/{backupId}/verify`
+### ~~POST `/api/admin/upgrade/apply-migrations`~~ (NOT IMPLEMENTED)
 
-Queues backup verification/dry-run checks where practical.
+Planned to apply allowed app/config/DB migrations when deployment compatibility checks pass.
+High-risk infrastructure migrations should point to guided/manual runbooks. Not shipped.
 
-### GET `/api/admin/upgrade/preview`
+### ~~POST `/api/admin/derived-data/reprocess`~~ (NOT IMPLEMENTED)
 
-Returns migration/config/deployment/derived-data preview and risk level.
-
-### POST `/api/admin/upgrade/apply-migrations`
-
-Applies allowed app/config/DB migrations when deployment compatibility checks pass. High-risk infrastructure migrations should point to guided/manual runbooks.
-
-### POST `/api/admin/derived-data/reprocess`
-
-Queues reprocessing of stale search documents, embeddings, aggregate vectors, or index rebuilds.
+Planned to queue reprocessing of stale search documents, embeddings, aggregate vectors, or index rebuilds.
+Use `POST /api/admin/operations/embeddings/reprocess` (§7) for embedding reprocessing.
 
 ## 19. Matrix notification dispatch (shipped: in-process)
 
