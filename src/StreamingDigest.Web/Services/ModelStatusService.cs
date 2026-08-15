@@ -24,6 +24,7 @@ public sealed class ModelStatusService : IAsyncDisposable
     private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan ConnectedPollingInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DegradedPollingInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan SseRestartAfterPauseDuration = TimeSpan.FromMinutes(5);
 
     private readonly SearchUiSessionService _session;
     private readonly IJSRuntime? _jsRuntime;
@@ -34,6 +35,7 @@ public sealed class ModelStatusService : IAsyncDisposable
     private Task? _pollingTask;
     private DotNetObjectReference<ModelStatusService>? _browserSseCallback;
     private string? _browserSseHandle;
+    private DateTime? _sseEnteredPausedAt;
 
     // ── Public surface ────────────────────────────────────────────────────────────────────
 
