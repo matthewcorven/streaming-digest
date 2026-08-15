@@ -18,6 +18,7 @@ using StreamingDigest.Infrastructure;
 using StreamingDigest.Infrastructure.AudioToText;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
+using StreamingDigest.Infrastructure.Services.Health;
 using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
 
@@ -65,6 +66,9 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<BootstrapAdminUserService>();
         services.AddSingleton<AppAuthService>();
         services.AddSingleton<AppReadinessStateService>();
+        services.AddSingleton<CompositeServiceHealthProvider>(sp => new CompositeServiceHealthProvider(
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger<CompositeServiceHealthProvider>()));
+        services.AddScoped<UpgradeCompatibilityStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
         services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), sp.GetRequiredService<IConfiguration>()));

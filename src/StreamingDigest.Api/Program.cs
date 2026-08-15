@@ -163,6 +163,7 @@ app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
 app.MapStaticAssets();
 app.MapChannelEndpoints();
 app.MapHealthEndpoints(databaseStatus);
+app.MapAdminHealthEndpoints();
 app.MapAdminOperationEndpoints(applicationConfiguration, builder.Environment.ContentRootPath);
 app.MapIngestionRunEndpoints();
 app.MapDashboardEndpoints();
