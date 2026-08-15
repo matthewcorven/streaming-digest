@@ -18,6 +18,7 @@ namespace StreamingDigest.Worker.ModelDownload;
 public sealed class ModelDownloadHostedService : BackgroundService
 {
     private static readonly JsonSerializerOptions SummaryJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan DefaultStartupRecoveryThreshold = TimeSpan.FromMinutes(2);
 
     private readonly ChannelModelDownloadQueue _queue;
     private readonly IModelRuntimeClient _runtimeClient;
@@ -27,6 +28,7 @@ public sealed class ModelDownloadHostedService : BackgroundService
     private readonly string _connectionString;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ModelDownloadHostedService> _logger;
+    private readonly TimeSpan _startupRecoveryThreshold;
 
     public ModelDownloadHostedService(
         ChannelModelDownloadQueue queue,
@@ -36,7 +38,8 @@ public sealed class ModelDownloadHostedService : BackgroundService
         AppReadinessStateService readinessStateService,
         string connectionString,
         IServiceProvider serviceProvider,
-        ILogger<ModelDownloadHostedService> logger)
+        ILogger<ModelDownloadHostedService> logger,
+        TimeSpan? startupRecoveryThreshold = null)
     {
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
         _runtimeClient = runtimeClient ?? throw new ArgumentNullException(nameof(runtimeClient));
@@ -46,11 +49,13 @@ public sealed class ModelDownloadHostedService : BackgroundService
         _connectionString = string.IsNullOrWhiteSpace(connectionString) ? throw new ArgumentNullException(nameof(connectionString)) : connectionString;
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _startupRecoveryThreshold = startupRecoveryThreshold ?? DefaultStartupRecoveryThreshold;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Model download hosted service started; pull concurrency is 1.");
+        await RecoverActiveDownloadsAsync(stoppingToken);
 
         await foreach (var command in _queue.ReadAllAsync(stoppingToken))
         {
@@ -110,6 +115,14 @@ public sealed class ModelDownloadHostedService : BackgroundService
                 if (percent != lastReportedProgress)
                 {
                     lastReportedProgress = percent;
+                    _logger.LogDebug(
+                        "Model download progress observed (operation {OperationId}, {Provider}/{ModelId}, percent {Percent}, stage {Stage}).",
+                        command.OperationId,
+                        command.Provider,
+                        command.ModelId,
+                        progress.Percent,
+                        progress.Status);
+
                     await UpsertStateAsync(
                         command,
                         ModelDownloadStatuses.Running,
@@ -123,6 +136,16 @@ public sealed class ModelDownloadHostedService : BackgroundService
                             ["completedBytes"] = progress.Completed
                         },
                         cancellationToken);
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "Model download emitted duplicate progress (operation {OperationId}, {Provider}/{ModelId}, percent {Percent}, stage {Stage}).",
+                        command.OperationId,
+                        command.Provider,
+                        command.ModelId,
+                        progress.Percent,
+                        progress.Status);
                 }
             }
         }
@@ -217,6 +240,107 @@ public sealed class ModelDownloadHostedService : BackgroundService
                 command.OperationId,
                 command.Provider,
                 command.ModelId);
+        }
+    }
+
+    private async Task RecoverActiveDownloadsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var activeOperations = await _operationStore.GetActiveByTypeAsync("model.download", cancellationToken);
+            var states = await _stateRepository.GetAllAsync(cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+
+            foreach (var operation in activeOperations)
+            {
+                var state = states.FirstOrDefault(candidate => candidate.CurrentOperationId == operation.Id);
+                if (state is null)
+                {
+                    _logger.LogDebug(
+                        "Active model download operation has no matching runtime state (operation {OperationId}).",
+                        operation.Id);
+                    continue;
+                }
+
+                if (!string.Equals(state.Provider, "ollama", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug(
+                        "Active model download recovery skipped unsupported provider (operation {OperationId}, provider {Provider}).",
+                        operation.Id,
+                        state.Provider);
+                    continue;
+                }
+
+                if (state.Status is not (ModelDownloadStatuses.Queued or ModelDownloadStatuses.Running or "downloading"))
+                {
+                    _logger.LogDebug(
+                        "Active model download recovery skipped terminal state (operation {OperationId}, state {State}).",
+                        operation.Id,
+                        state.Status);
+                    continue;
+                }
+
+                var age = now - state.UpdatedAt;
+                var command = new ModelDownloadCommand(
+                    operation.Id,
+                    state.Provider,
+                    state.ModelId,
+                    state.RuntimeRole,
+                    operation.CreatedAt);
+
+                if (age >= _startupRecoveryThreshold)
+                {
+                    _logger.LogDebug(
+                        "Active model download recovery marked stale operation failed (operation {OperationId}, {Provider}/{ModelId}, age {AgeSeconds}s).",
+                        operation.Id,
+                        state.Provider,
+                        state.ModelId,
+                        age.TotalSeconds);
+
+                    await FailAsync(
+                        command,
+                        state.UpdatedAt,
+                        $"Model download stalled with no progress for {Math.Round(age.TotalSeconds)} seconds and was recovered as failed on worker startup.",
+                        cancellationToken);
+                    continue;
+                }
+
+                if (_queue.TryEnqueue(command, out var droppedBecauseFull))
+                {
+                    _logger.LogDebug(
+                        "Active model download recovery re-enqueued operation (operation {OperationId}, {Provider}/{ModelId}, state {State}).",
+                        operation.Id,
+                        state.Provider,
+                        state.ModelId,
+                        state.Status);
+                    continue;
+                }
+
+                if (droppedBecauseFull)
+                {
+                    _logger.LogDebug(
+                        "Active model download recovery could not re-enqueue because the channel is full (operation {OperationId}, {Provider}/{ModelId}).",
+                        operation.Id,
+                        state.Provider,
+                        state.ModelId);
+                    continue;
+                }
+
+                _logger.LogDebug(
+                    "Active model download recovery skipped enqueue because the model is already pending (operation {OperationId}, {Provider}/{ModelId}).",
+                    operation.Id,
+                    state.Provider,
+                    state.ModelId);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug("Active model download recovery canceled during worker startup.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Active model download recovery failed during worker startup.");
         }
     }
 

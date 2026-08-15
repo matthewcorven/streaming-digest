@@ -61,11 +61,11 @@
         {
             if (AuthenticationService.IsAuthenticated)
             {
-                NavigationManager.NavigateTo(await DeterminePostLoginRouteAsync(), true);
+                NavigationManager.NavigateTo(await DeterminePostLoginRouteAsync());
                 return;
             }
 
-            NavigationManager.NavigateTo("/login", true);
+            NavigationManager.NavigateTo("/login");
         }
     }
 
@@ -88,13 +88,13 @@
         var result = await AuthenticationService.InitializeFirstUserAsync(_model.Username, _model.Password);
         if (result.ResultType == AuthenticationService.FirstUserSetupResultType.Success)
         {
-            NavigationManager.NavigateTo("/login?setup=success", true);
+            NavigationManager.NavigateTo("/login?setup=success");
             return;
         }
 
         if (result.ResultType == AuthenticationService.FirstUserSetupResultType.AlreadyInitialized)
         {
-            NavigationManager.NavigateTo("/login", true);
+            NavigationManager.NavigateTo("/login");
             return;
         }
 

@@ -26,7 +26,6 @@ public sealed class ModelDiscoveryServiceTests
     {
         var service = new ModelDiscoveryService(new AppReadinessStateService());
 
-        Assert.Throws<ArgumentException>(() => service.ResolveDownloadableModel(null, "text-embedding-3-small"));
         Assert.Throws<ArgumentException>(() => service.ResolveDownloadableModel(null, "whisper"));
     }
 
@@ -39,7 +38,7 @@ public sealed class ModelDiscoveryServiceTests
 
         Assert.NotEmpty(models);
         Assert.Contains(models, m => m.Id == "bge-m3");
-        Assert.Contains(models, m => m.Id == "text-embedding-3-small");
+        Assert.Contains(models, m => m.Id == "nomic-embed-text");
         Assert.Contains(models, m => m.Id == "llama3.1:8b");
         Assert.Contains(models, m => m.Id == "qwen2.5:7b");
         Assert.Contains(models, m => m.Id == "whisper");
@@ -59,17 +58,17 @@ public sealed class ModelDiscoveryServiceTests
     }
 
     [Fact]
-    public void GetSupportedModels_TextEmbedding3SmallIsOpenAI()
+    public void GetSupportedModels_NomicEmbedTextIsOllama()
     {
         var service = new ModelDiscoveryService(new AppReadinessStateService());
 
         var models = service.GetSupportedModels();
-        var textEmbedding3Small = models.First(m => m.Id == "text-embedding-3-small");
+        var nomicEmbedText = models.First(m => m.Id == "nomic-embed-text");
 
-        Assert.Equal(ModelProvider.OpenAI, textEmbedding3Small.Provider);
-        Assert.False(textEmbedding3Small.Downloadable);
-        Assert.Null(textEmbedding3Small.InstallCommand);
-        Assert.Null(textEmbedding3Small.MountPath);
+        Assert.Equal(ModelProvider.Ollama, nomicEmbedText.Provider);
+        Assert.True(nomicEmbedText.Downloadable);
+        Assert.Equal("ollama pull nomic-embed-text", nomicEmbedText.InstallCommand);
+        Assert.Equal("/mnt/models/embedding", nomicEmbedText.MountPath);
     }
 
     [Fact]
@@ -88,7 +87,7 @@ public sealed class ModelDiscoveryServiceTests
 
     [Theory]
     [InlineData("bge-m3", RuntimeRole.Embedding)]
-    [InlineData("text-embedding-3-small", RuntimeRole.Embedding)]
+    [InlineData("nomic-embed-text", RuntimeRole.Embedding)]
     [InlineData("llama3.1:8b", RuntimeRole.LLM)]
     [InlineData("qwen2.5:7b", RuntimeRole.LLM)]
     [InlineData("whisper", RuntimeRole.Audio)]
@@ -238,18 +237,20 @@ public sealed class ModelDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task VerifyModelAsync_OpenAiModel_ReportsNoLocalProbe()
+    public async Task VerifyModelAsync_NomicEmbedTextPresent_ReturnsVerifiedAndPersistsReadyState()
     {
+        var runtimeClient = new StubModelRuntimeClient(new ModelPresence("ollama", "nomic-embed-text", "sha256:nomic", 768000000));
         var repository = new InMemoryModelRuntimeStateRepository();
-        var service = new ModelDiscoveryService(new AppReadinessStateService(), modelRuntimeClient: null, repository);
+        var service = new ModelDiscoveryService(new AppReadinessStateService(), runtimeClient, repository);
 
-        var result = await service.VerifyModelAsync(string.Empty, "embedding", "text-embedding-3-small");
+        var result = await service.VerifyModelAsync(string.Empty, "embedding", "nomic-embed-text");
 
-        Assert.False(result.Verified);
-        Assert.Contains("managed externally", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Verified);
+        Assert.Equal("verified", result.Status);
         var state = Assert.Single(repository.States);
-        Assert.Equal("openai", state.Provider);
-        Assert.Equal("failed", state.Status);
+        Assert.Equal("ollama", state.Provider);
+        Assert.Equal("nomic-embed-text", state.ModelId);
+        Assert.Equal("ready", state.Status);
     }
 
     [Fact]

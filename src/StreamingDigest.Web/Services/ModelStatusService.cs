@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.JSInterop;
 using StreamingDigest.Web.Models;
 
 namespace StreamingDigest.Web.Services;
@@ -20,10 +21,18 @@ namespace StreamingDigest.Web.Services;
 /// </summary>
 public sealed class ModelStatusService : IAsyncDisposable
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan ConnectedPollingInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DegradedPollingInterval = TimeSpan.FromSeconds(2);
+
     private readonly SearchUiSessionService _session;
+    private readonly IJSRuntime? _jsRuntime;
     private readonly List<ModelRowViewModel> _models = [];
     private CancellationTokenSource? _sseCts;
     private Task? _sseTask;
+    private Task? _pollingTask;
+    private DotNetObjectReference<ModelStatusService>? _browserSseCallback;
+    private string? _browserSseHandle;
 
     // ── Public surface ────────────────────────────────────────────────────────────────────
 
@@ -43,9 +52,10 @@ public sealed class ModelStatusService : IAsyncDisposable
     /// <summary>Raised whenever any row state or the connection state changes.</summary>
     public event Action? Changed;
 
-    public ModelStatusService(SearchUiSessionService session)
+    public ModelStatusService(SearchUiSessionService session, IJSRuntime? jsRuntime = null)
     {
         _session = session;
+        _jsRuntime = jsRuntime;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────────────────
@@ -56,10 +66,11 @@ public sealed class ModelStatusService : IAsyncDisposable
     /// </summary>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        await StopSseAsync();
+        await StopObservationAsync();
 
         await LoadSnapshotAsync(cancellationToken);
         StartSse();
+        StartPolling();
         NotifyChanged();
     }
 
@@ -107,7 +118,7 @@ public sealed class ModelStatusService : IAsyncDisposable
             }
 
             var payload = await response.Content.ReadFromJsonAsync<DownloadAcceptedPayload>(
-                JsonSerializerOptions.Default, cancellationToken);
+                WebJsonOptions, cancellationToken);
 
             row.ApplyDownloadQueued(payload?.OperationId ?? Guid.Empty);
             NotifyChanged();
@@ -152,7 +163,7 @@ public sealed class ModelStatusService : IAsyncDisposable
             }
 
             var payload = await response.Content.ReadFromJsonAsync<VerifyPayload>(
-                JsonSerializerOptions.Default, cancellationToken);
+                WebJsonOptions, cancellationToken);
 
             if (payload?.Verified == true)
             {
@@ -176,7 +187,7 @@ public sealed class ModelStatusService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await StopSseAsync();
+        await StopObservationAsync();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────────────────
@@ -215,13 +226,14 @@ public sealed class ModelStatusService : IAsyncDisposable
                     provider: option.Provider ?? "ollama",
                     family: option.Family ?? "",
                     runtimeRole: option.RuntimeRole ?? "",
-                    downloadable: option.Downloadable);
+                    downloadable: option.Downloadable,
+                    supportsVerify: SupportsLocalVerify(option.Provider));
 
                 // Apply the status snapshot if one exists.
                 var key = $"{option.Provider}:{option.Id}";
                 if (statusByKey.TryGetValue(key, out var state))
                 {
-                    row.ApplyStatusSnapshot(state.Status, state.ProgressPercent, state.LastErrorSummary);
+                    row.ApplyStatusSnapshot(state.Status, state.ProgressPercent, state.LastErrorSummary, state.DetailsJson);
                 }
 
                 _models.Add(row);
@@ -260,7 +272,7 @@ public sealed class ModelStatusService : IAsyncDisposable
                 var key = $"{row.Provider}:{row.Id}";
                 if (statusByKey.TryGetValue(key, out var state))
                 {
-                    row.ApplyStatusSnapshot(state.Status, state.ProgressPercent, state.LastErrorSummary);
+                    row.ApplyStatusSnapshot(state.Status, state.ProgressPercent, state.LastErrorSummary, state.DetailsJson);
                 }
             }
         }
@@ -274,10 +286,23 @@ public sealed class ModelStatusService : IAsyncDisposable
     {
         _sseCts = new CancellationTokenSource();
         var token = _sseCts.Token;
-        _sseTask = Task.Run(() => RunSseLoopAsync(token), token);
+        _sseTask = OperatingSystem.IsBrowser() && _jsRuntime is not null
+            ? RunBrowserSseLoopAsync(token)
+            : Task.Run(() => RunSseLoopAsync(token), token);
     }
 
-    private async Task StopSseAsync()
+    private void StartPolling()
+    {
+        if (_sseCts is null)
+        {
+            return;
+        }
+
+        var token = _sseCts.Token;
+        _pollingTask = Task.Run(() => RunPollingLoopAsync(token), token);
+    }
+
+    private async Task StopObservationAsync()
     {
         if (_sseCts is not null)
         {
@@ -298,10 +323,98 @@ public sealed class ModelStatusService : IAsyncDisposable
                 }
             }
 
+            if (_pollingTask is not null)
+            {
+                try
+                {
+                    await _pollingTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected.
+                }
+                catch
+                {
+                    // Best-effort cleanup.
+                }
+            }
+
             _sseCts.Dispose();
             _sseCts = null;
             _sseTask = null;
+            _pollingTask = null;
         }
+
+        if (_browserSseHandle is not null && _jsRuntime is not null)
+        {
+            try
+            {
+                await _jsRuntime.InvokeVoidAsync("streamingDigestModelEvents.stop", _browserSseHandle);
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+
+            _browserSseHandle = null;
+        }
+
+        _browserSseCallback?.Dispose();
+        _browserSseCallback = null;
+    }
+
+    private async Task RunBrowserSseLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _browserSseCallback = DotNetObjectReference.Create(this);
+            var eventStreamUrl = new Uri(_session.GetApiBaseAddress() ?? new Uri("http://localhost:5149"), "/api/models/events").ToString();
+            _browserSseHandle = await _jsRuntime!.InvokeAsync<string>(
+                "streamingDigestModelEvents.start",
+                cancellationToken,
+                _browserSseCallback,
+                eventStreamUrl);
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected during disposal/reinitialize.
+        }
+        finally
+        {
+            SetConnectionState(SseConnectionState.Disconnected);
+        }
+    }
+
+    [JSInvokable]
+    public Task HandleBrowserSseOpenedAsync()
+    {
+        SetConnectionState(SseConnectionState.Connected);
+        NotifyChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task HandleBrowserSseMessageAsync(string eventName, string data)
+    {
+        _ = eventName;
+        _ = data;
+        await ReconcileFromStatusEndpointAsync(CancellationToken.None);
+        NotifyChanged();
+    }
+
+    [JSInvokable]
+    public Task HandleBrowserSseErrorAsync(int readyState)
+    {
+        SetConnectionState(readyState switch
+        {
+            0 => SseConnectionState.Reconnecting,
+            2 => SseConnectionState.Paused,
+            _ => SseConnectionState.Connecting
+        });
+        NotifyChanged();
+        return Task.CompletedTask;
     }
 
     private async Task RunSseLoopAsync(CancellationToken cancellationToken)
@@ -355,6 +468,8 @@ public sealed class ModelStatusService : IAsyncDisposable
                     await ReconcileFromStatusEndpointAsync(cancellationToken);
                     NotifyChanged();
                 }
+
+                throw new InvalidOperationException("SSE stream closed unexpectedly.");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -402,6 +517,42 @@ public sealed class ModelStatusService : IAsyncDisposable
         }
 
         SetConnectionState(SseConnectionState.Disconnected);
+    }
+
+    private async Task RunPollingLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (ShouldPollStatus())
+                {
+                    await ReconcileFromStatusEndpointAsync(cancellationToken);
+                    NotifyChanged();
+                }
+
+                var delay = ConnectionState == SseConnectionState.Connected
+                    ? ConnectedPollingInterval
+                    : DegradedPollingInterval;
+
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch
+            {
+                try
+                {
+                    await Task.Delay(DegradedPollingInterval, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
     }
 
     private static async IAsyncEnumerable<SseEvent> ReadSseEventsAsync(
@@ -452,6 +603,12 @@ public sealed class ModelStatusService : IAsyncDisposable
         }
     }
 
+    private bool ShouldPollStatus()
+        => ActiveOperationsCount > 0
+            || ConnectionState is SseConnectionState.Disconnected
+                               or SseConnectionState.Reconnecting
+                               or SseConnectionState.Paused;
+
     private void NotifyChanged() => Changed?.Invoke();
 
     private static async Task<string?> TryReadErrorDetailAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -459,7 +616,7 @@ public sealed class ModelStatusService : IAsyncDisposable
         try
         {
             var body = await response.Content.ReadFromJsonAsync<ErrorDetailPayload>(
-                JsonSerializerOptions.Default, cancellationToken);
+                WebJsonOptions, cancellationToken);
             return body?.Detail ?? body?.Title ?? $"HTTP {(int)response.StatusCode}";
         }
         catch
@@ -501,6 +658,7 @@ public sealed class ModelStatusService : IAsyncDisposable
         public int? ProgressPercent { get; set; }
         public DateTimeOffset? LastVerifiedAt { get; set; }
         public string? LastErrorSummary { get; set; }
+        public string? DetailsJson { get; set; }
     }
 
     private sealed class DownloadAcceptedPayload
@@ -525,6 +683,14 @@ public sealed class ModelStatusService : IAsyncDisposable
     }
 
     private sealed record SseEvent(string Name, string Data);
+
+    private static bool SupportsLocalVerify(string? provider)
+        => provider?.ToLowerInvariant() switch
+        {
+            "ollama" => true,
+            "whisper" => true,
+            _ => false
+        };
 }
 
 /// <summary>State of the SSE stream connection for the Settings page connection strip.</summary>

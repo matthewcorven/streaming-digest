@@ -339,11 +339,85 @@ public sealed class ModelDownloadHostedServiceTests
         Assert.Equal("ready", state.StatusFor("llama3.1:8b"));
     }
 
+    [Fact]
+    public async Task Download_StalledProgress_MarksFailed()
+    {
+        var runtime = new StubRuntimeClient
+        {
+            PullException = new TimeoutException("Model pull stalled after no progress for 50 seconds.")
+        };
+        var state = new InMemoryStateRepository();
+        var operations = new InMemoryOperationStore();
+        var queue = new ChannelModelDownloadQueue();
+        using var service = CreateService(
+            queue,
+            runtime,
+            state,
+            operations,
+            startupRecoveryThreshold: TimeSpan.FromMinutes(1));
+        var command = new ModelDownloadCommand(Guid.NewGuid(), "ollama", "qwen2.5:7b", "llm", DateTimeOffset.UtcNow);
+
+        await service.StartAsync(CancellationToken.None);
+        queue.TryEnqueue(command);
+        await WaitForAsync(() => state.Current?.Status == "failed");
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal("failed", state.Current?.Status);
+        Assert.Contains("stalled", state.Current?.LastErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("failed", operations.Get(command.OperationId)?.Status);
+    }
+
+    [Fact]
+    public async Task StartupRecovery_StaleRunningDownload_MarksFailed()
+    {
+        var runtime = new StubRuntimeClient();
+        var state = new InMemoryStateRepository();
+        var operations = new InMemoryOperationStore();
+        var queue = new ChannelModelDownloadQueue();
+        var operationId = Guid.NewGuid();
+        var staleAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        state.Seed(new ModelRuntimeState
+        {
+            Id = Guid.NewGuid(),
+            Provider = "ollama",
+            ModelId = "qwen2.5:7b",
+            RuntimeRole = "llm",
+            Status = "running",
+            CurrentOperationId = operationId,
+            ProgressPercent = 21,
+            UpdatedAt = staleAt
+        });
+        operations.Seed(new OperationRecord
+        {
+            Id = operationId,
+            OperationType = "model.download",
+            Status = "running",
+            CreatedAt = staleAt,
+            UpdatedAt = staleAt
+        });
+
+        using var service = CreateService(
+            queue,
+            runtime,
+            state,
+            operations,
+            startupRecoveryThreshold: TimeSpan.FromSeconds(1));
+
+        await service.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => state.StatusFor("qwen2.5:7b") == "failed");
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal("failed", state.StatusFor("qwen2.5:7b"));
+        Assert.Contains("recovered as failed", state.Current?.LastErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("failed", operations.Get(operationId)?.Status);
+    }
+
     private static ModelDownloadHostedService CreateService(
         ChannelModelDownloadQueue queue,
         StubRuntimeClient runtime,
         InMemoryStateRepository state,
-        InMemoryOperationStore operations)
+        InMemoryOperationStore operations,
+        TimeSpan? startupRecoveryThreshold = null)
     {
         var services = new ServiceCollection().BuildServiceProvider();
         return new ModelDownloadHostedService(
@@ -354,7 +428,8 @@ public sealed class ModelDownloadHostedServiceTests
             new AppReadinessStateService(),
             "Host=unused;Database=unused",
             services,
-            NullLogger<ModelDownloadHostedService>.Instance);
+                NullLogger<ModelDownloadHostedService>.Instance,
+                startupRecoveryThreshold);
     }
 
     private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 5000)
@@ -418,6 +493,8 @@ public sealed class ModelDownloadHostedServiceTests
         private readonly Dictionary<string, ModelRuntimeState> _states = new(StringComparer.OrdinalIgnoreCase);
         public List<string> History { get; } = [];
         public ModelRuntimeState? Current => _states.Values.LastOrDefault();
+
+        public void Seed(ModelRuntimeState state) => _states[state.ModelId] = state;
 
         public Task UpsertAsync(ModelRuntimeState state, CancellationToken cancellationToken = default)
         {

@@ -16,6 +16,7 @@ namespace StreamingDigest.Infrastructure;
 public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
 {
     internal const string ProviderName = "ollama";
+    private static readonly TimeSpan PullProgressTimeout = TimeSpan.FromMinutes(2);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -87,9 +88,28 @@ public sealed class OllamaModelRuntimeClient : Application.IModelRuntimeClient
         using var streamContent = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(streamContent);
 
-        string? line;
-        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        while (true)
         {
+            string? line;
+            using (var lineTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                lineTimeoutCts.CancelAfter(PullProgressTimeout);
+
+                try
+                {
+                    line = await reader.ReadLineAsync(lineTimeoutCts.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"Ollama pull for '{model}' stalled after no progress for {PullProgressTimeout.TotalSeconds:0} seconds.");
+                }
+            }
+
+            if (line is null)
+            {
+                yield break;
+            }
+
             if (string.IsNullOrWhiteSpace(line))
             {
                 continue;

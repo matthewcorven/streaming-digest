@@ -37,6 +37,10 @@
         </div>
         <div class="action-buttons">
             <button class="action-button" type="button" disabled="@(_isLoading || _isSaving)" @onclick="ReloadAsync">Refresh</button>
+            @if (CurrentIssues.Count > 0)
+            {
+                <button class="secondary-button" type="button" @onclick="OpenIssuesDialog">View issues (@CurrentIssues.Count)</button>
+            }
         </div>
         @if (!string.IsNullOrWhiteSpace(_statusMessage))
         {
@@ -188,6 +192,38 @@
     </section>
 </div>
 
+@if (_showIssuesDialog && CurrentIssues.Count > 0)
+{
+    <div class="modal-backdrop" @onclick="CloseIssuesDialogIfBackdrop">
+        <div class="modal-panel modal-panel--narrow" @onclick:stopPropagation="true" role="dialog" aria-modal="true" aria-labelledby="settings-issues-title">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">Status issues</p>
+                    <h2 id="settings-issues-title">Warnings and errors</h2>
+                </div>
+                <button class="modal-close" type="button" @onclick="CloseIssuesDialog" aria-label="Close">✕</button>
+            </div>
+
+            <ul class="stack-list" aria-label="Current warnings and errors">
+                @foreach (var issue in CurrentIssues)
+                {
+                    <li class="model-row">
+                        <div class="list-title-row">
+                            <strong>@issue.Title</strong>
+                            <span class="status-pill @(issue.Severity == "error" ? "status-danger" : "status-warning")">@issue.Severity</span>
+                        </div>
+                        <p class="model-error">@issue.Message</p>
+                    </li>
+                }
+            </ul>
+
+            <div class="action-buttons">
+                <button class="action-button" type="button" @onclick="CloseIssuesDialog">Dismiss</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private bool _isLoading;
     private bool _isSaving;
@@ -199,6 +235,14 @@
     private string _runtimeEnvironment = "—";
     private string _deployMode = "—";
     private IReadOnlyList<string> _features = Array.Empty<string>();
+    private bool _showIssuesDialog;
+    private string? _dismissedIssueSignature;
+
+    private IReadOnlyList<SettingsIssue> CurrentIssues => SettingsIssueCatalog.BuildIssues(
+        _statusTone,
+        _statusMessage,
+        ModelStatusService.ConnectionState,
+        ModelStatusService.Models);
 
     protected override async Task OnInitializedAsync()
     {
@@ -215,6 +259,7 @@
 
     private void OnModelStateChanged()
     {
+        SyncIssueDialogState();
         InvokeAsync(StateHasChanged);
     }
 
@@ -254,12 +299,14 @@
         finally
         {
             _isLoading = false;
+            SyncIssueDialogState();
         }
     }
 
     private async Task RefreshModelsAsync()
     {
         await ModelStatusService.RefreshAsync();
+        SyncIssueDialogState();
         StateHasChanged();
     }
 
@@ -309,11 +356,59 @@
         finally
         {
             _isSaving = false;
+            SyncIssueDialogState();
         }
     }
 
     private Task EnsureApiSessionAsync()
         => SearchUiSessionService.EnsureAuthenticatedSessionAsync();
+
+    private void OpenIssuesDialog()
+    {
+        if (CurrentIssues.Count == 0)
+        {
+            return;
+        }
+
+        _showIssuesDialog = true;
+    }
+
+    private void CloseIssuesDialog()
+    {
+        _dismissedIssueSignature = GetIssueSignature();
+        _showIssuesDialog = false;
+    }
+
+    private void CloseIssuesDialogIfBackdrop()
+    {
+        CloseIssuesDialog();
+    }
+
+    private void SyncIssueDialogState()
+    {
+        var currentSignature = GetIssueSignature();
+        if (string.IsNullOrWhiteSpace(currentSignature))
+        {
+            _showIssuesDialog = false;
+            _dismissedIssueSignature = null;
+            return;
+        }
+
+        if (!string.Equals(currentSignature, _dismissedIssueSignature, StringComparison.Ordinal))
+        {
+            _showIssuesDialog = true;
+        }
+    }
+
+    private string? GetIssueSignature()
+    {
+        if (CurrentIssues.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join("||", CurrentIssues.Select(issue => $"{issue.Severity}|{issue.SourceKey}|{issue.Message}"));
+    }
 
     // ── Connection strip helpers ───────────────────────────────────────────────────────────
 

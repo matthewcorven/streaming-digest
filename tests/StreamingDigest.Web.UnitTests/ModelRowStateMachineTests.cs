@@ -18,6 +18,9 @@ public sealed class ModelRowStateMachineTests
     private static ModelRowViewModel ExternalRow(string id = "whisper") =>
         new(id, "Whisper Base", "whisper", "audio", "audio", downloadable: false);
 
+    private static ModelRowViewModel UnsupportedExternalRow(string id = "external-embedding-model") =>
+        new(id, "External embedding model", "external", "embedding", "embedding", downloadable: false, supportsVerify: false);
+
     // ── Initial state ──────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -35,6 +38,15 @@ public sealed class ModelRowStateMachineTests
         Assert.False(row.Downloadable);
         Assert.False(row.ShowDownloadCta);
         Assert.True(row.ShowVerifyCta);
+    }
+
+    [Fact]
+    public void UnsupportedExternalRow_StartsUnknown_NoVerifyCta()
+    {
+        var row = UnsupportedExternalRow();
+
+        Assert.Equal(ModelRowState.Unknown, row.RowState);
+        Assert.False(row.ShowVerifyCta);
     }
 
     // ── Unknown → Submitting ───────────────────────────────────────────────────────────────
@@ -338,6 +350,53 @@ public sealed class ModelRowStateMachineTests
         var row = OllamaRow();
         row.ApplyStatusSnapshot("failed", null, "Disk full");
         Assert.Equal("Disk full", row.ErrorMessage);
+    }
+
+    [Fact]
+    public void ApplyStatusSnapshot_FailedAfterVerify_PreservesVerifyFailedState()
+    {
+        var row = OllamaRow();
+        row.TryBeginVerify();
+        row.ApplyVerifyFailed("Model not found in /api/tags");
+
+        row.ApplyStatusSnapshot("failed", null, "Model not found in /api/tags");
+
+        Assert.Equal(ModelRowState.VerifyFailed, row.RowState);
+        Assert.Equal("Model not found in /api/tags", row.ErrorMessage);
+    }
+
+    [Fact]
+    public void ApplyStatusSnapshot_FailedVerifyProbeSnapshot_MapsToVerifyFailed()
+    {
+        var row = OllamaRow();
+
+        row.ApplyStatusSnapshot("failed", null, "Verify returned not-ready.", "{\"probe\":\"verify\"}");
+
+        Assert.Equal(ModelRowState.VerifyFailed, row.RowState);
+        Assert.Equal("Verify returned not-ready.", row.ErrorMessage);
+    }
+
+    [Fact]
+    public void ApplyStatusSnapshot_FailedExternalModel_MapsToVerifyFailed()
+    {
+        var row = ExternalRow();
+
+        row.ApplyStatusSnapshot("failed", null, "Verify returned not-ready.");
+
+        Assert.Equal(ModelRowState.VerifyFailed, row.RowState);
+        Assert.Equal("Verify returned not-ready.", row.ErrorMessage);
+    }
+
+    [Fact]
+    public void ApplyStatusSnapshot_FailedUnsupportedExternalModel_ResetsToUnknown()
+    {
+        var row = UnsupportedExternalRow();
+
+        row.ApplyStatusSnapshot("failed", null, "Managed externally.");
+
+        Assert.Equal(ModelRowState.Unknown, row.RowState);
+        Assert.Null(row.ErrorMessage);
+        Assert.False(row.ShowVerifyCta);
     }
 
     [Fact]

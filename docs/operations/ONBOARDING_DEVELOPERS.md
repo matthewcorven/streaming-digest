@@ -114,6 +114,13 @@ The web app is hosted from the `streaming-digest-api` service:
 
 For architectural details on routing and SPA hosting, see [ARCHITECTURE.md § 5.2 - Routing model](../architecture/ARCHITECTURE.md#52-blazor-wasm).
 
+**Endpoint configuration notes:**
+
+- Aspire local runs should rely on service discovery. The WebAssembly client reads `services__api__http__0` from the AppHost and does not need a hard-coded API port.
+- Standalone web development uses [src/StreamingDigest.Web/wwwroot/appsettings.Development.json](/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Web/wwwroot/appsettings.Development.json) to point the browser client at the API base URL.
+- Same-origin hosting defaults to `/` via [src/StreamingDigest.Web/wwwroot/appsettings.json](/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Web/wwwroot/appsettings.json), which is the intended production default when the API serves the SPA.
+- Cross-origin development or deployment origins for the API are configured through `Cors:AllowedOrigins` in [src/StreamingDigest.Api/appsettings.Development.json](/Users/core/git/matthewcorven/streaming-digest/src/StreamingDigest.Api/appsettings.Development.json), or via environment variables such as `Cors__AllowedOrigins__0=https://app.example.com`.
+
 **Complete first-run setup:**
 1. Create your user account (the app redirects to `/setup` automatically when no admin password has been set and no bounded-context data exists)
 2. Download embedding model (`bge-m3`) from Settings → Models

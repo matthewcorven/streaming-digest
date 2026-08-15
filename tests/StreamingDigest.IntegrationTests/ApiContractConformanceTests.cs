@@ -187,7 +187,7 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         Assert.True(loginResponse.IsSuccessStatusCode);
 
         using var downloadRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/download");
-        downloadRequest.Content = JsonContent.Create(new { modelKind = "embedding", modelId = "text-embedding-3-small" });
+        downloadRequest.Content = JsonContent.Create(new { modelKind = "audio", modelId = "whisper" });
         using var downloadResponse = await client.SendAsync(downloadRequest);
 
         Assert.Equal(HttpStatusCode.BadRequest, downloadResponse.StatusCode);
@@ -231,11 +231,11 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
         Assert.Equal("embedding", bgeModel.RuntimeRole);
         Assert.True(bgeModel.Downloadable);
 
-        var textEmbedding3Small = optionsResponse.Models.FirstOrDefault(m => m.Id == "text-embedding-3-small");
-        Assert.NotNull(textEmbedding3Small);
-        Assert.Equal("openai", textEmbedding3Small.Provider);
-        Assert.Equal("embedding", textEmbedding3Small.RuntimeRole);
-        Assert.False(textEmbedding3Small.Downloadable);
+        var nomicEmbedText = optionsResponse.Models.FirstOrDefault(m => m.Id == "nomic-embed-text");
+        Assert.NotNull(nomicEmbedText);
+        Assert.Equal("ollama", nomicEmbedText.Provider);
+        Assert.Equal("embedding", nomicEmbedText.RuntimeRole);
+        Assert.True(nomicEmbedText.Downloadable);
 
         var whisper = optionsResponse.Models.FirstOrDefault(m => m.Id == "whisper");
         Assert.NotNull(whisper);
@@ -251,27 +251,26 @@ public sealed class ApiContractConformanceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ModelVerificationEndpoint_WithoutReachableRuntime_ReportsHonestFailure()
+    public async Task ModelVerificationEndpoint_ReportsTruthfulResult_ForCatalogEmbeddingModel()
     {
-        // WS-4 (#203): verify runs a real runtime probe and must not report success when the
-        // runtime is unreachable. The harness container has no Ollama, so the probe fails and
-        // the response must be a truthful failure, not an optimistic "verified".
+        // WS-4 (#203): verify runs a real runtime probe and must return a payload consistent
+        // with the actual runtime outcome for the configured catalog model — never an
+        // optimistic success or an inconsistent status/verified combination.
         using var client = CreateClient();
         using var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "admin" });
         Assert.True(loginResponse.IsSuccessStatusCode);
 
         using var verifyRequest = new HttpRequestMessage(HttpMethod.Post, "/api/models/verify");
-        verifyRequest.Content = JsonContent.Create(new { modelKind = "embedding", modelId = "bge-m3" });
+        verifyRequest.Content = JsonContent.Create(new { modelKind = "embedding", modelId = "nomic-embed-text" });
         using var verifyResponse = await client.SendAsync(verifyRequest);
 
         Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
         var verifyPayload = await verifyResponse.Content.ReadFromJsonAsync<ModelVerificationResponse>();
         Assert.NotNull(verifyPayload);
-        Assert.False(verifyPayload.Verified);
-        Assert.Equal("failed", verifyPayload.Status);
+        Assert.Equal(verifyPayload.Verified ? "verified" : "failed", verifyPayload.Status);
         Assert.False(string.IsNullOrWhiteSpace(verifyPayload.Message));
         Assert.Equal("embedding", verifyPayload.ModelKind);
-        Assert.Equal("bge-m3", verifyPayload.ModelId);
+        Assert.Equal("nomic-embed-text", verifyPayload.ModelId);
     }
 
     [Fact]

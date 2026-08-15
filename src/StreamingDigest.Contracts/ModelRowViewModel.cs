@@ -32,6 +32,12 @@ public sealed class ModelRowViewModel
     /// </summary>
     public bool Downloadable { get; }
 
+    /// <summary>
+    /// True when the settings UI can perform a truthful local verify probe.
+    /// Unsupported external providers stay informational only.
+    /// </summary>
+    public bool SupportsVerify { get; }
+
     // ── Mutable runtime state ─────────────────────────────────────────────────────────────
 
     public ModelRowState RowState { get; private set; } = ModelRowState.Unknown;
@@ -57,7 +63,8 @@ public sealed class ModelRowViewModel
         string provider,
         string family,
         string runtimeRole,
-        bool downloadable)
+        bool downloadable,
+        bool supportsVerify = true)
     {
         Id = id;
         Label = label;
@@ -65,6 +72,7 @@ public sealed class ModelRowViewModel
         Family = family;
         RuntimeRole = runtimeRole;
         Downloadable = downloadable;
+        SupportsVerify = supportsVerify;
     }
 
     // ── State transitions ─────────────────────────────────────────────────────────────────
@@ -156,11 +164,20 @@ public sealed class ModelRowViewModel
     /// <paramref name="status"/> string to the closest row state. Safe to call any time,
     /// including from LiveUpdatesPaused (reconnect reconcile).
     /// </summary>
-    public void ApplyStatusSnapshot(string? status, int? progressPercent, string? lastErrorSummary)
+    public void ApplyStatusSnapshot(string? status, int? progressPercent, string? lastErrorSummary, string? detailsJson = null)
     {
+        if (!SupportsVerify && status is not null && (status.Equals("failed", StringComparison.OrdinalIgnoreCase) || status.Equals("error", StringComparison.OrdinalIgnoreCase)))
+        {
+            ProgressPercent = null;
+            ErrorMessage = null;
+            RowState = ModelRowState.Unknown;
+            StateBeforePause = ModelRowState.Unknown;
+            return;
+        }
+
         ProgressPercent = progressPercent;
         ErrorMessage = lastErrorSummary;
-        RowState = MapStatus(status);
+        RowState = MapStatus(status, detailsJson);
         StateBeforePause = ModelRowState.Unknown;
     }
 
@@ -219,6 +236,7 @@ public sealed class ModelRowViewModel
     /// rejects verify from paused (which would cause a silent no-op if the button were shown).
     /// </summary>
     public bool ShowVerifyCta =>
+        SupportsVerify &&
         RowState is ModelRowState.Unknown or
                     ModelRowState.Ready or
                     ModelRowState.VerifyFailed;
@@ -242,15 +260,45 @@ public sealed class ModelRowViewModel
 
     // ── Private helpers ───────────────────────────────────────────────────────────────────
 
-    private static ModelRowState MapStatus(string? status) => status?.ToLowerInvariant() switch
+    private ModelRowState MapStatus(string? status, string? detailsJson) => status?.ToLowerInvariant() switch
     {
         "ready" => ModelRowState.Ready,
         "running" or "downloading" => ModelRowState.Running,
         "queued" => ModelRowState.Queued,
         "verifying" => ModelRowState.Verifying,
-        "failed" or "error" => ModelRowState.DownloadFailed,
+        "verify-failed" => ModelRowState.VerifyFailed,
+        "failed" or "error" => IsVerifyFailureSnapshot(detailsJson) ? ModelRowState.VerifyFailed : ModelRowState.DownloadFailed,
         _ => ModelRowState.Unknown
     };
+
+    private bool IsVerifyFailureSnapshot(string? detailsJson)
+    {
+        if (RowState is ModelRowState.Verifying or ModelRowState.VerifyFailed)
+        {
+            return true;
+        }
+
+        if (!Downloadable)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(detailsJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var details = System.Text.Json.JsonDocument.Parse(detailsJson);
+            return details.RootElement.TryGetProperty("probe", out var probe)
+                && string.Equals(probe.GetString(), "verify", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
 
     private static string BadgeTextForState(ModelRowState state) => state switch
     {

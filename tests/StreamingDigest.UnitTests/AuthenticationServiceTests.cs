@@ -48,6 +48,8 @@ public sealed class AuthenticationServiceTests
     {
         var handler = new StubHandler(request =>
         {
+            AssertBrowserCredentialsIncluded(request);
+
             return request.RequestUri?.AbsolutePath switch
             {
                 "/api/auth/login" => new HttpResponseMessage(HttpStatusCode.OK)
@@ -66,6 +68,47 @@ public sealed class AuthenticationServiceTests
         Assert.Equal(AuthenticationService.LoginResult.RequiresPasswordChange, result);
         Assert.True(service.IsAuthenticated);
         Assert.True(service.RequiresPasswordChange);
+    }
+
+    [Fact]
+    public async Task GetAuthenticatedJsonAsync_includes_browser_credentials_on_all_auth_requests()
+    {
+        var credentialModes = new List<string?>();
+
+        var handler = new StubHandler(request =>
+        {
+            credentialModes.Add(GetBrowserCredentialMode(request));
+
+            return request.RequestUri?.AbsolutePath switch
+            {
+                "/api/auth/me" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { username = "admin", mustChangePassword = false })
+                },
+                "/api/auth/csrf" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { token = "csrf-123" })
+                },
+                "/api/search-ui/settings" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new SearchUiSettings
+                    {
+                        TextWeight = 0.4,
+                        VectorWeight = 0.6
+                    })
+                },
+                _ => throw new InvalidOperationException($"Unexpected path: {request.RequestUri?.AbsolutePath}")
+            };
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://example.test") };
+        var service = new AuthenticationService(httpClient);
+
+        var settings = await service.GetAuthenticatedJsonAsync<SearchUiSettings>("/api/search-ui/settings");
+
+        Assert.NotNull(settings);
+        Assert.Equal(3, credentialModes.Count);
+        Assert.All(credentialModes, mode => Assert.Equal("include", mode));
     }
 
     [Fact]
@@ -110,6 +153,23 @@ public sealed class AuthenticationServiceTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(handler(request));
+    }
+
+    private static void AssertBrowserCredentialsIncluded(HttpRequestMessage request)
+    {
+        Assert.Equal("include", GetBrowserCredentialMode(request));
+    }
+
+    private static string? GetBrowserCredentialMode(HttpRequestMessage request)
+    {
+        if (!request.Options.TryGetValue(new HttpRequestOptionsKey<IDictionary<string, object>>("WebAssemblyFetchOptions"), out var options))
+        {
+            return null;
+        }
+
+        return options.TryGetValue("credentials", out var credentials)
+            ? credentials?.ToString()
+            : null;
     }
 }
 

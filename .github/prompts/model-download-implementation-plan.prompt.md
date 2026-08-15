@@ -25,7 +25,6 @@ The only real model acquisition today is the `ollama-bootstrap` container in `sr
 
 The catalog in `src/StreamingDigest.Infrastructure/Persistence/ModelDiscoveryService.cs` also contains **two lies** that must be corrected as part of this work:
 
-- `text-embedding-3-small` is listed with `ollama pull text-embedding-3-small`. That is an OpenAI hosted model and is **not** pullable via Ollama.
 - `whisper` is listed with `ollama pull whisper` and family `audio`. The real audio-to-text runtime (`LocalWhisperAudioToTextProvider`) is a **separate whisper HTTP service** (`STREAMINGDIGEST_WHISPER_BASE_URL`), not Ollama. Ollama cannot serve this model to the runtime.
 
 Any plan that only "wires the button to a real pull" is insufficient. We must also make the catalog honest, model provider differences explicitly, and cover every runtime seam that consumes these models.
@@ -83,7 +82,7 @@ No SSE exists today. Add one API SSE endpoint. The UI subscribes for live patche
 
 ### D6. Embedding-model changes are a governed transition, not a casual download
 
-Per ADR-0008 (single active embedding model with declared transition) and ADR-0011 (embedding transition ingestion pause with catch-up): downloading a *new* embedding model does **not** silently switch the active model or invalidate the vector index. Acquiring `text-embedding-3-small` or any non-active embedding model must be treated as "available for a declared transition," never an implicit cutover. The plan must not break the dimension guard in `OllamaEmbeddingService` (`STREAMINGDIGEST_EMBEDDING_EXPECTED_DIMENSIONS`) or the pgvector column dimensions.
+Per ADR-0008 (single active embedding model with declared transition) and ADR-0011 (embedding transition ingestion pause with catch-up): downloading a *new* embedding model does **not** silently switch the active model or invalidate the vector index. Acquiring `nomic-embed-text` or any non-active embedding model must be treated as "available for a declared transition," never an implicit cutover. The plan must not break the dimension guard in `OllamaEmbeddingService` (`STREAMINGDIGEST_EMBEDDING_EXPECTED_DIMENSIONS`) or the pgvector column dimensions.
 
 ### D7. Inference standardizes on Microsoft.Extensions.AI; Semantic Kernel orchestrates where it earns it; acquisition uses neither
 
@@ -264,7 +263,7 @@ stateDiagram-v2
 
 - Connection strip: `Live updates connected` / `Reconnecting…` / `Live updates paused` + `Refresh all`.
 - Active-operations count: `N model operations in progress`.
-- **Non-ollama models** (`whisper`, `text-embedding-3-small`) render with a "Managed externally" hint and expose only **Verify now** — no fake Download button.
+- **Non-ollama models** (`whisper`) render with a "Managed externally" hint and expose only **Verify now** — no fake Download button.
 - First positive acknowledgement copy after a click must read `Queued for download` / `Download request accepted`, never `Downloaded`.
 
 ---
@@ -332,7 +331,7 @@ flowchart TD
 
 ### 9.2 Phase 0 — Foundations (sequential)
 
-- **WS-0 Catalog + provider model.** Extend `ModelOptionDefinition` with `provider`, `runtimeRole`, `downloadable`; correct `text-embedding-3-small` (openai, verify-only) and `whisper` (whisper, verify-only).
+- **WS-0 Catalog + provider model.** Extend `ModelOptionDefinition` with `provider`, `runtimeRole`, `downloadable`; ensure embedding and LLM catalog entries are honest about Ollama downloads, and keep `whisper` as verify-only.
   - Tests — Unit: catalog validation, non-ollama marked non-downloadable. Integration: `GET /api/models/options` returns provider/role/downloadable. E2E: deferred to WS-5.
 - **WS-1 `IModelRuntimeClient` + `OllamaModelRuntimeClient`.** `/api/tags`, `/api/pull` (streamed), `/api/show`.
   - Tests — Unit: tags/pull JSON parsing with mocked `HttpClient`. Integration: against a throwaway Ollama container, `tags` lists installed models. E2E: via WS-5.

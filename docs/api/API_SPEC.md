@@ -340,15 +340,15 @@ Response:
       "mountPath": "/mnt/models/embedding"
     },
     {
-      "id": "text-embedding-3-small",
+      "id": "nomic-embed-text",
       "family": "embedding",
-      "provider": "openai",
+      "provider": "ollama",
       "runtimeRole": "embedding",
-      "downloadable": false,
+      "downloadable": true,
       "status": "available",
-      "label": "OpenAI text-embedding-3-small",
-      "installCommand": null,
-      "mountPath": null
+      "label": "Nomic Embed Text",
+      "installCommand": "ollama pull nomic-embed-text",
+      "mountPath": "/mnt/models/embedding"
     },
     {
       "id": "llama3.1:8b",

@@ -17,4 +17,16 @@
     <ProjectReference Include="..\StreamingDigest.Contracts\StreamingDigest.Contracts.csproj" />
   </ItemGroup>
 
+  <Target Name="CreateDotnetJsAlias" AfterTargets="Build">
+    <ItemGroup>
+      <BootDotnetJsCandidate Include="$(TargetDir)wwwroot\_framework\dotnet.*.js"
+                             Exclude="$(TargetDir)wwwroot\_framework\dotnet.native.*.js;$(TargetDir)wwwroot\_framework\dotnet.runtime.*.js;$(TargetDir)wwwroot\_framework\dotnet.js" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(BootDotnetJsCandidate)"
+          DestinationFiles="@(BootDotnetJsCandidate->'$(TargetDir)wwwroot\_framework\dotnet.js')"
+          SkipUnchangedFiles="true"
+          Condition="'@(BootDotnetJsCandidate)' != ''" />
+  </Target>
+
 </Project>

@@ -14,7 +14,7 @@ public static class ModelCatalog
     public static readonly IReadOnlyList<ModelOptionDefinition> SupportedModels =
     [
         new("bge-m3", "embedding", "available", "BAAI bge-m3", ModelProvider.Ollama, RuntimeRole.Embedding, true, "ollama pull bge-m3", "/mnt/models/embedding"),
-        new("text-embedding-3-small", "embedding", "available", "OpenAI text-embedding-3-small", ModelProvider.OpenAI, RuntimeRole.Embedding, false, null, null),
+        new("nomic-embed-text", "embedding", "available", "Nomic Embed Text", ModelProvider.Ollama, RuntimeRole.Embedding, true, "ollama pull nomic-embed-text", "/mnt/models/embedding"),
         new("llama3.1:8b", "llm", "available", "Llama 3.1 8B", ModelProvider.Ollama, RuntimeRole.LLM, true, "ollama pull llama3.1:8b", "/mnt/models/llm"),
         new("qwen2.5:7b", "llm", "available", "Qwen 2.5 7B", ModelProvider.Ollama, RuntimeRole.LLM, true, "ollama pull qwen2.5:7b", "/mnt/models/llm"),
         new("whisper", "audio", "available", "Whisper Base", ModelProvider.Whisper, RuntimeRole.Audio, false, null, null)

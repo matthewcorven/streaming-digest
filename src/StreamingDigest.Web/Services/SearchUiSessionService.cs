@@ -19,6 +19,8 @@ public sealed class SearchUiSessionService
     public Task<T?> GetAuthenticatedJsonAsync<T>(string requestUri, CancellationToken cancellationToken = default)
         => _authenticationService.GetAuthenticatedJsonAsync<T>(requestUri, cancellationToken);
 
+    public Uri? GetApiBaseAddress() => _authenticationService.ApiBaseAddress;
+
     public string? GetLastSelectedModeRoute() => _lastSelectedModeRoute;
 
     public void RememberSelectedMode(string route)
