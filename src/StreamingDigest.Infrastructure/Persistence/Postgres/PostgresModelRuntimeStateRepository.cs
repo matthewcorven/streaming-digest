@@ -69,6 +69,26 @@ public sealed class PostgresModelRuntimeStateRepository : IModelRuntimeStateRepo
                 last_error_summary = EXCLUDED.last_error_summary,
                 details_json = EXCLUDED.details_json,
                 updated_at = EXCLUDED.updated_at;
+            
+            -- Notify API hosts listening on model_state_changed channel with the cross-process event
+            SELECT pg_notify(
+                'model_state_changed',
+                json_build_object(
+                    'name', 'model:status',
+                    'provider', @provider,
+                    'modelId', @model_id,
+                    'runtimeRole', @runtime_role,
+                    'status', @status,
+                    'updatedAt', @updated_at,
+                    'dataJson', json_build_object(
+                        'provider', @provider,
+                        'modelId', @model_id,
+                        'status', @status,
+                        'currentOperationId', @current_operation_id,
+                        'progressPercent', @progress_percent
+                    )
+                )::text
+            );
             """,
             connection);
 

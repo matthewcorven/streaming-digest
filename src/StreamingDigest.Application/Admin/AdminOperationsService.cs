@@ -210,7 +210,15 @@ public sealed class AdminOperationsService : IAdminOperationsService
         }
 
         await _searchDocumentRegenerationService.RegenerateAllAsync(cancellationToken);
-        return await CreateCompletedResultAsync("reprocess.embeddings", target, "Embedding reprocessing completed successfully.", "healthy", cancellationToken);
+        var result = await CreateCompletedResultAsync("reprocess.embeddings", target, "Embedding reprocessing completed successfully.", "healthy", cancellationToken);
+
+        // ADR-0011: enqueue the catch-up run when embedding regeneration completes
+        if (_ingestionJobScheduler is not null)
+        {
+            _ingestionJobScheduler.EnqueueOnDemandRun(null, "scheduled", "system.catchup");
+        }
+
+        return result;
     }
 
     public async Task<AdminActionResult> PurgeScreenshotsAsync(string? target = null, CancellationToken cancellationToken = default)
