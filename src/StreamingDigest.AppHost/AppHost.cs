@@ -284,6 +284,7 @@ var lokiHttpEndpoint = loki.GetEndpoint("http");
 var tempoHttpEndpoint = tempo.GetEndpoint("http");
 
 var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
+    .WithImageTag(shortCommitId)
     .WithExternalHttpEndpoints()
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
@@ -306,6 +307,7 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("observability:services:otelCollector:url", otelCollectorGrpcEndpoint);
 
 builder.AddProject<Projects.StreamingDigest_Worker>("worker")
+    .WithImageTag(shortCommitId)
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
     .WaitFor(scraper)
@@ -322,6 +324,7 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
 
 // Blazor WebAssembly frontend
 builder.AddProject<Projects.StreamingDigest_Web>("web")
+    .WithImageTag(shortCommitId)
     .WithReference(api)
     .WaitFor(api)
     .WithExternalHttpEndpoints();
