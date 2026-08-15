@@ -27,6 +27,7 @@ if ! "$docker_bin" info >/dev/null 2>&1; then
   exit 0
 fi
 
+# Remove stale scraper containers
 matched_containers=$($docker_bin ps -aq --filter "name=streaming-digest-scraper" || true)
 if [ -n "$matched_containers" ]; then
   printf '[scraper-prune] Removing stale scraper containers:\n%s\n' "$matched_containers"
@@ -35,6 +36,26 @@ if [ -n "$matched_containers" ]; then
 else
   printf '[scraper-prune] No stale scraper containers found.\n'
 fi
+
+# Remove old commit-hash-tagged images (keep only the most recent 3)
+for image_name in scraper streaming-digest-api streaming-digest-worker streaming-digest-whisper; do
+  printf '[scraper-prune] Pruning old %s images (keeping 3 most recent)...\n' "$image_name"
+  
+  # Get images and their creation times, sorted newest first
+  old_images=$($docker_bin images --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" --filter "reference=${image_name}*" 2>/dev/null || true)
+  
+  # If more than 3 images exist, remove the oldest ones
+  if [ -n "$old_images" ]; then
+    image_count=$(printf '%s' "$old_images" | tail -n +2 | wc -l)
+    if [ "$image_count" -gt 3 ]; then
+      # Sort by date (descending), skip header and first 3 lines, extract image names
+      printf '%s' "$old_images" | tail -n +2 | sort -k2 -r | tail -n +4 | awk '{print $1}' | while read -r img; do
+        printf '[scraper-prune] Removing old image: %s\n' "$img"
+        $docker_bin rmi "$img" >/dev/null 2>&1 || true
+      done
+    fi
+  fi
+done
 
 printf '[scraper-prune] Pruning unused Docker containers and images.\n'
 $docker_bin container prune -f >/dev/null

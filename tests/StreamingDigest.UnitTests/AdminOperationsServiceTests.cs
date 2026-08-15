@@ -156,6 +156,27 @@ public sealed class AdminOperationsServiceTests
     }
 
     [Fact]
+    public async Task ReprocessEmbeddingsAsync_WithDispatcher_EnqueuesADR0011CatchupRun()
+    {
+        // ADR-0011: when embedding regeneration completes, the catch-up run should be enqueued.
+        var regenerationService = new RecordingSearchDocumentRegenerationService();
+        var dispatcher = new RecordingIngestionJobScheduler();
+        var service = new AdminOperationsService(
+            searchDocumentRegenerationService: regenerationService,
+            ingestionJobScheduler: dispatcher);
+
+        var result = await service.ReprocessEmbeddingsAsync();
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("reprocess.embeddings", result.OperationType);
+        Assert.True(regenerationService.Invoked);
+        // Verify the catch-up run was enqueued with correct parameters
+        Assert.Null(dispatcher.LastChannelId);
+        Assert.Equal("scheduled", dispatcher.LastRunType);
+        Assert.Equal("system.catchup", dispatcher.LastTriggeredBy);
+    }
+
+    [Fact]
     public async Task RetryFailedLinkAsync_WithInvalidLinkId_ReturnsFailedResult()
     {
         var service = new AdminOperationsService();
@@ -639,10 +660,16 @@ public sealed class AdminOperationsServiceTests
     private sealed class RecordingIngestionJobScheduler : IIngestionJobScheduler
     {
         private int _count;
+        public Guid? LastChannelId { get; private set; }
+        public string? LastRunType { get; private set; }
+        public string? LastTriggeredBy { get; private set; }
 
         public string EnqueueOnDemandRun(Guid? channelId, string runType, string triggeredBy)
         {
             _count++;
+            LastChannelId = channelId;
+            LastRunType = runType;
+            LastTriggeredBy = triggeredBy;
             return $"job-{_count}";
         }
 

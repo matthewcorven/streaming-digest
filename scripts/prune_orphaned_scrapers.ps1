@@ -25,6 +25,7 @@ catch {
     exit 0
 }
 
+# Remove stale scraper containers
 $containers = & $dockerCmd ps -aq --filter "name=streaming-digest-scraper"
 if ($LASTEXITCODE -ne 0) {
     $containers = @()
@@ -37,6 +38,32 @@ if ($containers.Count -gt 0) {
 }
 else {
     Write-Output '[scraper-prune] No stale scraper containers found.'
+}
+
+# Remove old commit-hash-tagged images (keep only the most recent 3)
+foreach ($imageName in @('scraper', 'streaming-digest-api', 'streaming-digest-worker', 'streaming-digest-whisper')) {
+    Write-Output "[scraper-prune] Pruning old $imageName images (keeping 3 most recent)..."
+    
+    $imageList = & $dockerCmd images --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" --filter "reference=$imageName*" 2> $null
+    if ($LASTEXITCODE -eq 0 -and $imageList.Count -gt 3) {
+        # Skip header line and parse results
+        $images = @()
+        $imageList | Select-Object -Skip 1 | ForEach-Object {
+            $parts = $_ -split '\s{2,}'
+            if ($parts.Count -ge 2) {
+                $images += @{ Image = $parts[0]; Created = [datetime]$parts[1] }
+            }
+        }
+        
+        # Sort by creation time descending and keep only the 3 most recent
+        $toDelete = $images | Sort-Object -Property Created -Descending | Select-Object -Skip 3
+        if ($toDelete.Count -gt 0) {
+            foreach ($img in $toDelete) {
+                Write-Output "[scraper-prune] Removing old image: $($img.Image)"
+                & $dockerCmd rmi "$($img.Image)" *> $null
+            }
+        }
+    }
 }
 
 Write-Output '[scraper-prune] Pruning unused Docker containers and images.'

@@ -33,13 +33,16 @@ const string composeProjectName = "streaming-digest";
 const string defaultEmbeddingModel = "bge-m3";
 const string defaultLlmModel = "llama3.1:8b";
 const string ollamaDataVolumeName = "streamingdigest-ollama-data";
+const string imageNamePrefix = "streaming-digest";
+var shortCommitId = GetShortCommitId();
+const string defaultImageTag = "latest";
 // Whisper (audio-to-text) runtime — issue #210.
 // The whisper service is an OPTIONAL runtime: caption-less videos need it; captioned
 // ingestion proceeds with a warning when it is absent (PRD §2.4). For that reason api/worker
 // do NOT WaitFor(whisper). Uses locally built MLX Whisper image (see issue #210 for Dockerfile.whisper creation).
 // TODO: Add Dockerfile.whisper to repository and document build steps for Apple Silicon.
 const string whisperImage = "streaming-digest-whisper";
-const string whisperImageTag = "latest";
+var whisperImageTag = shortCommitId;
 const int whisperPort = 8080;
 
 var postgresUsername = builder.AddParameterFromConfiguration(
@@ -266,6 +269,7 @@ var tempo = builder.AddContainer("tempo", "grafana/tempo")
     .WithHttpEndpoint(targetPort: 3200, port: 3200);
 
 var scraper = builder.AddDockerfile("scraper", "../StreamingDigest.Scraper")
+    .WithImageTag(shortCommitId)
     .WithEnvironment("NODE_ENV", "production")
     .WithEnvironment("PORT", "3000")
     .WithHttpEndpoint(env: "PORT", targetPort: 3000)
@@ -282,6 +286,8 @@ var lokiHttpEndpoint = loki.GetEndpoint("http");
 var tempoHttpEndpoint = tempo.GetEndpoint("http");
 
 var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
+    .WithImage($"{imageNamePrefix}-api")
+    .WithImageTag(shortCommitId)
     .WithExternalHttpEndpoints()
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
@@ -304,6 +310,8 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("observability:services:otelCollector:url", otelCollectorGrpcEndpoint);
 
 builder.AddProject<Projects.StreamingDigest_Worker>("worker")
+    .WithImage($"{imageNamePrefix}-worker")
+    .WithImageTag(shortCommitId)
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
     .WaitFor(scraper)
@@ -429,4 +437,40 @@ static string FindRepositoryRoot()
     }
 
     throw new InvalidOperationException("Unable to find the repository root while resolving the scraper prune script.");
+}
+
+static string GetShortCommitId()
+{
+    try
+    {
+        var repoRoot = FindRepositoryRoot();
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "rev-parse --short HEAD",
+                WorkingDirectory = repoRoot,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true
+            }
+        };
+        process.Start();
+        var commitId = process.StandardOutput.ReadToEnd().Trim();
+        process.WaitForExit();
+        
+        if (string.IsNullOrEmpty(commitId))
+        {
+            Console.Error.WriteLine("Warning: Unable to get git commit ID, defaulting to 'latest'");
+            return "latest";
+        }
+        
+        return commitId;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Warning: Failed to get git commit ID: {ex.Message}, defaulting to 'latest'");
+        return "latest";
+    }
 }
