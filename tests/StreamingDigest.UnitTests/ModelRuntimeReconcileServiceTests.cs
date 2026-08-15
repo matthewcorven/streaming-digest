@@ -41,6 +41,34 @@ public sealed class ModelRuntimeReconcileServiceTests
     }
 
     [Fact]
+    public async Task ReconcileAsync_NormalizesImplicitLatestTag_ToCatalogModelId()
+    {
+        var existing = new ModelRuntimeState
+        {
+            Id = Guid.NewGuid(),
+            Provider = "ollama",
+            ModelId = "bge-m3",
+            RuntimeRole = "embedding",
+            Status = "failed",
+            LastErrorSummary = "previous failure",
+            UpdatedAt = DateTimeOffset.UtcNow.AddHours(-1)
+        };
+        var client = new StubRuntimeClient(new ModelPresence("ollama", "bge-m3:latest", "sha256:abc", 1234));
+        var repository = new StubStateRepository(existing);
+        var service = new ModelRuntimeReconcileService(client);
+
+        var result = await service.ReconcileAsync(repository);
+
+        Assert.True(result.Succeeded);
+        var state = repository.States[("ollama", "bge-m3")];
+        Assert.Equal("ready", state.Status);
+        Assert.Equal("bge-m3", state.ModelId);
+        Assert.Null(state.LastErrorSummary);
+        using var details = JsonDocument.Parse(state.DetailsJson!);
+        Assert.Equal("sha256:abc", details.RootElement.GetProperty("digest").GetString());
+    }
+
+    [Fact]
     public async Task ReconcileAsync_SetsUnknownRuntimeRole_ForModelAbsentFromCatalog()
     {
         var client = new StubRuntimeClient(new ModelPresence("ollama", "user-side-pull:7b", null, null));
@@ -166,7 +194,7 @@ public sealed class ModelRuntimeReconcileServiceTests
     public async Task ReconcileAsync_IgnoresNonOllamaProviders()
     {
         var client = new StubRuntimeClient(
-            new ModelPresence("openai", "text-embedding-3-small", null, null),
+            new ModelPresence("external", "external-embedding-model", null, null),
             new ModelPresence("whisper", "whisper", null, null));
         var repository = new StubStateRepository();
         var service = new ModelRuntimeReconcileService(client);
