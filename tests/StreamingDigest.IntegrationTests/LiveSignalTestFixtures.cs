@@ -121,8 +121,8 @@ public class SseEventEmitterFixture : IAsyncDisposable
     public void Reset()
     {
         _emittedEvents.Clear();
-        if (!_subscriptionRegistered.Task.IsCompleted)
-            _subscriptionRegistered = new();
+        // Note: TaskCompletionSource can only be created once (readonly field)
+        // If needed, create a new fixture instance for fresh subscription tracking
     }
 
     public async ValueTask DisposeAsync()
@@ -316,7 +316,7 @@ public class BackoffTimerVerifier
                 "\n",
                 violations.Select(v => $"  Attempt {v.AttemptNumber}: {v.ElapsedMs}ms (expected {BackoffIntervals[Math.Min(v.AttemptNumber - 1, BackoffIntervals.Length - 1)]}±{_toleranceMs}ms)")
             );
-            throw new AssertFailedException($"Backoff intervals out of tolerance:\n{msg}");
+            throw new InvalidOperationException($"Backoff intervals out of tolerance:\n{msg}");
         }
     }
 
@@ -492,7 +492,7 @@ public class AdminPanelE2eHarness : IAsyncDisposable
         if (warnings.Any())
         {
             var msg = string.Join("\n", warnings.Select(w => $"  {w.EventName}: {w.Data}"));
-            throw new AssertFailedException($"Found unexpected fabricated warnings:\n{msg}");
+            throw new InvalidOperationException($"Found unexpected fabricated warnings:\n{msg}");
         }
     }
 

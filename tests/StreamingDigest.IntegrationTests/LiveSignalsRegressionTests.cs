@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace StreamingDigest.IntegrationTests;
 
@@ -60,7 +59,6 @@ namespace StreamingDigest.IntegrationTests;
 /// - Manual resume triggers new backoff sequence
 /// - Recovery path after successful reconnection
 /// </summary>
-[TestClass]
 public sealed class ReconnectionProtocolTests : IAsyncLifetime
 {
     private LiveSignalsFixtureBundle _fixtures = null!;
@@ -82,7 +80,7 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
     /// Phase 1a: Verify first reconnection attempt uses 500ms backoff.
     /// Validates backoff sequence initialization.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task FirstReconnectionAttempt_Uses500msBackoff()
     {
         var backoff = _fixtures.BackoffVerifier;
@@ -91,14 +89,14 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
         
         var result = backoff.VerifyBackoffInterval(1);
         
-        Assert.IsTrue(result, "First reconnection attempt should use 500ms backoff");
+        Assert.True(result, "First reconnection attempt should use 500ms backoff");
     }
 
     /// <summary>
     /// Phase 1b: Verify exponential backoff escalation (500ms → 1s → 2s).
     /// Validates timing through first 3 attempts.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task ExponentialBackoff_Escalates500msTo2s()
     {
         var backoff = _fixtures.BackoffVerifier;
@@ -106,24 +104,24 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
         // Attempt 1: 500ms
         backoff.StartAttempt();
         await Task.Delay(500, _testCts.Token);
-        Assert.IsTrue(backoff.VerifyBackoffInterval(1), "Attempt 1: 500ms");
+        Assert.True(backoff.VerifyBackoffInterval(1), "Attempt 1: 500ms");
 
         // Attempt 2: 1s
         backoff.StartAttempt();
         await Task.Delay(1000, _testCts.Token);
-        Assert.IsTrue(backoff.VerifyBackoffInterval(2), "Attempt 2: 1s");
+        Assert.True(backoff.VerifyBackoffInterval(2), "Attempt 2: 1s");
 
         // Attempt 3: 2s
         backoff.StartAttempt();
         await Task.Delay(2000, _testCts.Token);
-        Assert.IsTrue(backoff.VerifyBackoffInterval(3), "Attempt 3: 2s");
+        Assert.True(backoff.VerifyBackoffInterval(3), "Attempt 3: 2s");
     }
 
     /// <summary>
     /// Phase 1c: Verify 3-strike limit triggers pause state.
     /// After 3 consecutive failures, client enters paused state and halts reconnection.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task ThreeStrikesLimit_TransitionsToPausedState()
     {
         var harness = _fixtures.E2eHarness;
@@ -140,34 +138,32 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
         // Transition to paused (client halts reconnection)
         await harness.MutateStateAsync(HealthState.Paused, _testCts.Token);
 
-        Assert.AreEqual(HealthState.Paused, harness.GetCurrentState(), 
-            "After 3 failed attempts, client should enter paused state");
+        Assert.Equal(HealthState.Paused, harness.GetCurrentState());
     }
 
     /// <summary>
     /// Phase 1d: Verify manual resume capability after pause.
     /// Admin can explicitly resume client even after pause.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task ManualResume_AfterPause_EnablesReconnection()
     {
         var harness = _fixtures.E2eHarness;
 
         // Enter paused state
         await harness.MutateStateAsync(HealthState.Paused, _testCts.Token);
-        Assert.AreEqual(HealthState.Paused, harness.GetCurrentState());
+        Assert.Equal(HealthState.Paused, harness.GetCurrentState());
 
         // Admin triggers manual resume
         await harness.MutateStateAsync(HealthState.Reconnecting, _testCts.Token);
-        Assert.AreEqual(HealthState.Reconnecting, harness.GetCurrentState(),
-            "Manual resume should transition to Reconnecting state");
+        Assert.Equal(HealthState.Reconnecting, harness.GetCurrentState());
     }
 
     /// <summary>
     /// Phase 1e: Verify recovery path post-successful-reconnection.
     /// After successful reconnection, client transitions to Ready and resumes normal operation.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task SuccessfulReconnection_TransitionsToReady()
     {
         var harness = _fixtures.E2eHarness;
@@ -180,13 +176,13 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
         await harness.MutateStateAsync(HealthState.Ready, _testCts.Token);
 
         // Verify Ready state and event flow resumed
-        Assert.AreEqual(HealthState.Ready, harness.GetCurrentState());
+        Assert.Equal(HealthState.Ready, harness.GetCurrentState());
 
         // Emit test event
         await emitter.EmitAsync("admin.health", "ready", delayMs: 50);
 
         var events = emitter.GetEmittedEvents();
-        Assert.IsTrue(events.Any(e => e.EventName == "admin.health"),
+        Assert.True(events.Any(e => e.EventName == "admin.health"),
             "After transition to Ready, events should flow normally");
     }
 
@@ -194,7 +190,7 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
     /// Phase 1f: Verify pause state persists across subscriber reconnections.
     /// Pause is a client-side state machine; it persists until manual resume.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task PauseState_PersistsAcrossReconnectionAttempts()
     {
         var harness = _fixtures.E2eHarness;
@@ -205,7 +201,7 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
         var stateHistory = harness.GetStateHistory();
         var pausedTransitions = stateHistory.Where(s => s.NewState == HealthState.Paused).ToList();
 
-        Assert.IsTrue(pausedTransitions.Any(), "State history should record transition to Paused");
+        Assert.True(pausedTransitions.Any(), "State history should record transition to Paused");
     }
 }
 
@@ -223,7 +219,6 @@ public sealed class ReconnectionProtocolTests : IAsyncLifetime
 /// - Concurrent subscriber safety (multi-listener coordination)
 /// - Event loss detection (buffer overflow scenarios)
 /// </summary>
-[TestClass]
 public sealed class StateSignalPropagationTests : IAsyncLifetime
 {
     private LiveSignalsFixtureBundle _fixtures = null!;
@@ -245,7 +240,7 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
     /// Phase 2a: Verify buffer capacity (max 256 events).
     /// Beyond 256 events, oldest events are evicted (ring buffer).
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task BufferCapacity_Enforces256EventLimit()
     {
         var emitter = _fixtures.Emitter;
@@ -256,7 +251,7 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
 
         var events = emitter.GetEmittedEvents();
         
-        Assert.IsTrue(events.Count <= BufferCapacity,
+        Assert.True(events.Count <= BufferCapacity,
             $"Buffer should hold max {BufferCapacity} events, got {events.Count}");
     }
 
@@ -264,7 +259,7 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
     /// Phase 2b: Verify FIFO event ordering (events delivered in emission order).
     /// Each subscriber receives events in the sequence they were emitted.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task EventOrdering_MaintainsFifoSequence()
     {
         var emitter = _fixtures.Emitter;
@@ -281,7 +276,7 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
         // Verify order: event_0, event_1, ..., event_9
         for (int i = 0; i < sequenceEvents.Count; i++)
         {
-            Assert.IsTrue(sequenceEvents[i].Data.Contains(i.ToString()),
+            Assert.True(sequenceEvents[i].Data.Contains(i.ToString()),
                 $"Event at position {i} should be event_{i}");
         }
     }
@@ -290,7 +285,7 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
     /// Phase 2c: Verify field naming consistency across state transitions.
     /// Event names and data formats remain consistent.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task FieldNaming_ConsistentAcrossTransitions()
     {
         var harness = _fixtures.E2eHarness;
@@ -307,12 +302,12 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
 
         // Verify consistent event naming: admin.health_state_change
         var stateChangeEvents = events.Where(e => e.EventName.Contains("health_state_change")).ToList();
-        Assert.IsTrue(stateChangeEvents.Any(), "State transitions should emit health_state_change events");
+        Assert.True(stateChangeEvents.Any(), "State transitions should emit health_state_change events");
 
         // Verify data format consistency (lowercase state names)
         foreach (var evt in stateChangeEvents)
         {
-            Assert.IsTrue(
+            Assert.True(
                 evt.Data.Equals("ready", StringComparison.OrdinalIgnoreCase) ||
                 evt.Data.Equals("degraded", StringComparison.OrdinalIgnoreCase) ||
                 evt.Data.Equals("reconnecting", StringComparison.OrdinalIgnoreCase),
@@ -324,7 +319,7 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
     /// Phase 2d: Verify concurrent subscriber safety (multi-listener coordination).
     /// Multiple subscribers receive the same events without interference.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task ConcurrentSubscribers_ReceiveSameEvents()
     {
         var emitter = _fixtures.Emitter;
@@ -344,14 +339,14 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
 
         // In real implementation, this would verify HTTP stream delivery to 3 clients
         // For now, verify event buffer is stable
-        Assert.IsTrue(emittedEvents.Count == 5, "All emitted events should be in buffer");
+        Assert.True(emittedEvents.Count == 5, "All emitted events should be in buffer");
     }
 
     /// <summary>
     /// Phase 2e: Verify no fabricated warnings appear in signal stream.
     /// Only legitimate state transitions are emitted, not synthetic warnings.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task NoFabricatedWarnings_InSignalStream()
     {
         var harness = _fixtures.E2eHarness;
@@ -366,14 +361,14 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
         var events = _fixtures.Emitter.GetEmittedEvents();
         var warningCount = events.Count(e => e.EventName.Contains("warning", StringComparison.OrdinalIgnoreCase));
 
-        Assert.AreEqual(0, warningCount, "Should not emit fabricated warnings");
+        Assert.Equal(0, warningCount);
     }
 
     /// <summary>
     /// Phase 2f: Verify event loss detection (buffer overflow scenarios).
     /// If buffer overflows, oldest events are discarded; subscribers should detect gap.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task BufferOverflow_DetectableBySubscribers()
     {
         var emitter = _fixtures.Emitter;
@@ -385,7 +380,7 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
         var events = emitter.GetEmittedEvents();
 
         // Verify buffer size capped at 256
-        Assert.IsTrue(events.Count <= 256, 
+        Assert.True(events.Count <= 256, 
             $"Buffer should be capped at 256, but has {events.Count} events");
 
         // If implementation tracks event IDs, subscribers would detect missing IDs
@@ -407,7 +402,6 @@ public sealed class StateSignalPropagationTests : IAsyncLifetime
 /// - Polling fallback intervals (5s healthy, 2s degraded)
 /// - Reconnection after extended downtime
 /// </summary>
-[TestClass]
 public sealed class RestartRecoveryTests : IAsyncLifetime
 {
     private LiveSignalsFixtureBundle _fixtures = null!;
@@ -429,7 +423,7 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
     /// Phase 3a: Verify queued signals replay on resubscription.
     /// When client reconnects, buffered signals are delivered before new events.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task Resubscription_ReplaysQueuedSignals()
     {
         var emitter = _fixtures.Emitter;
@@ -450,14 +444,14 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
         var events = emitter.GetEmittedEvents();
         var queuedEvents = events.Where(e => e.EventName == "queued").ToList();
 
-        Assert.AreEqual(2, queuedEvents.Count, "Both queued signals should be replayed");
+        Assert.Equal(2, queuedEvents.Count);
     }
 
     /// <summary>
     /// Phase 3b: Verify cleanup of stale subscriber references.
     /// When subscriber disconnects, its entry is removed from tracking.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task DisconnectedSubscriber_RemovalCleansUpReferences()
     {
         var harness = _fixtures.E2eHarness;
@@ -470,14 +464,14 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
         var stateHistory = harness.GetStateHistory();
         var pausedState = stateHistory.FirstOrDefault(s => s.NewState == HealthState.Paused);
 
-        Assert.IsTrue(pausedState != default, "Paused state should be recorded");
+        Assert.True(pausedState != default, "Paused state should be recorded");
     }
 
     /// <summary>
     /// Phase 3c: Verify eventual consistency after restart.
     /// After server restart, client state synchronizes with server within bounded time.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task ServerRestart_AchievesEventualConsistency()
     {
         var emitter = _fixtures.Emitter;
@@ -495,7 +489,7 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
         await emitter.EmitAsync("recovery", "consistent", delayMs: 50);
 
         var events = emitter.GetEmittedEvents();
-        Assert.IsTrue(events.Any(e => e.EventName == "recovery"),
+        Assert.True(events.Any(e => e.EventName == "recovery"),
             "Recovery signal should be emitted after reconnection");
     }
 
@@ -503,7 +497,7 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
     /// Phase 3d: Verify polling fallback — 5s interval when healthy.
     /// When SSE connection is healthy, polling is disabled (but available as fallback).
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task PollingFallback_5sInterval_WhenHealthy()
     {
         var harness = _fixtures.E2eHarness;
@@ -513,15 +507,14 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
 
         // In healthy state, polling would be disabled (5s is theoretical max)
         // Verify state is Ready (not Degraded, which would trigger 2s polling)
-        Assert.AreEqual(HealthState.Ready, harness.GetCurrentState(),
-            "Healthy state should disable polling");
+        Assert.Equal(HealthState.Ready, harness.GetCurrentState());
     }
 
     /// <summary>
     /// Phase 3e: Verify polling fallback — 2s interval when degraded.
     /// When SSE connection drops, polling escalates to 2s intervals.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task PollingFallback_2sInterval_WhenDegraded()
     {
         var harness = _fixtures.E2eHarness;
@@ -535,15 +528,14 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
         await Task.Delay(2000, _testCts.Token);
         var result = backoff.VerifyBackoffInterval(1); // First polling attempt after 2s
 
-        Assert.AreEqual(HealthState.Degraded, harness.GetCurrentState(),
-            "Degraded state should trigger 2s polling");
+        Assert.Equal(HealthState.Degraded, harness.GetCurrentState());
     }
 
     /// <summary>
     /// Phase 3f: Verify reconnection after extended downtime.
     /// If server is down for >16s (max backoff), client continues polling until recovery.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task ExtendedDowntime_ContinuesPollingUntilRecovery()
     {
         var harness = _fixtures.E2eHarness;
@@ -560,8 +552,7 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
         await harness.MutateStateAsync(HealthState.Reconnecting, _testCts.Token);
         await harness.MutateStateAsync(HealthState.Ready, _testCts.Token);
 
-        Assert.AreEqual(HealthState.Ready, harness.GetCurrentState(),
-            "After extended downtime, client should recover to Ready state");
+        Assert.Equal(HealthState.Ready, harness.GetCurrentState());
     }
 }
 
@@ -585,8 +576,6 @@ public sealed class RestartRecoveryTests : IAsyncLifetime
 /// 3. Testcontainers PostgreSQL integration
 /// 4. Cross-process signal injection helpers
 /// </summary>
-[TestClass]
-[Ignore("Phase 4: Awaiting Tank #271 + Trinity #272 research integration")]
 public sealed class CrossProcessCoordinationTests : IAsyncLifetime
 {
     private LiveSignalsFixtureBundle _fixtures = null!;
@@ -610,8 +599,7 @@ public sealed class CrossProcessCoordinationTests : IAsyncLifetime
     /// When one process emits signal (NOTIFY), other listeners receive it.
     /// [BLOCKED: Requires Tank #271 database wiring]
     /// </summary>
-    [TestMethod]
-    [Ignore("Requires Tank #271 database channel implementation")]
+    [Fact(Skip = "Requires Tank #271 database channel implementation")]
     public async Task PostgresNotify_PropagatesToListeners()
     {
         // Pseudocode:
@@ -620,7 +608,7 @@ public sealed class CrossProcessCoordinationTests : IAsyncLifetime
         // 
         // Expect listener to receive event within 100ms
         
-        Assert.Inconclusive("Waiting for Tank #271 endpoint + Trinity #272 LISTEN/NOTIFY patterns");
+        Assert.True(false, "Waiting for Tank #271 endpoint + Trinity #272 LISTEN/NOTIFY patterns");
     }
 
     /// <summary>
@@ -628,11 +616,10 @@ public sealed class CrossProcessCoordinationTests : IAsyncLifetime
     /// Two processes exchange signals via LISTEN/NOTIFY; both see consistent state.
     /// [BLOCKED: Requires cross-process test infrastructure]
     /// </summary>
-    [TestMethod]
-    [Ignore("Requires multi-process test harness")]
+    [Fact(Skip = "Requires multi-process test harness")]
     public async Task MultiProcess_SignalSynchronization()
     {
-        Assert.Inconclusive("Waiting for Trinity #272 multi-process test patterns");
+        Assert.True(false, "Waiting for Trinity #272 multi-process test patterns");
     }
 
     /// <summary>
@@ -640,11 +627,10 @@ public sealed class CrossProcessCoordinationTests : IAsyncLifetime
     /// Events from multiple processes maintain global ordering (via database sequence).
     /// [BLOCKED: Requires event sequence tracking]
     /// </summary>
-    [TestMethod]
-    [Ignore("Requires database-backed event sequence")]
+    [Fact(Skip = "Requires database-backed event sequence")]
     public async Task EventOrdering_ConsistentAcrossProcesses()
     {
-        Assert.Inconclusive("Waiting for Tank #271 event sequence mechanism");
+        Assert.True(false, "Waiting for Tank #271 event sequence mechanism");
     }
 
     /// <summary>
@@ -652,11 +638,10 @@ public sealed class CrossProcessCoordinationTests : IAsyncLifetime
     /// When subscriber shuts down gracefully, server removes its entry from tracking.
     /// [BLOCKED: Requires grace shutdown implementation]
     /// </summary>
-    [TestMethod]
-    [Ignore("Requires grace shutdown wiring")]
+    [Fact(Skip = "Requires grace shutdown wiring")]
     public async Task GraceShutdown_CleansUpSubscribers()
     {
-        Assert.Inconclusive("Waiting for Tank #271 grace shutdown implementation");
+        Assert.True(false, "Waiting for Tank #271 grace shutdown implementation");
     }
 }
 
@@ -674,7 +659,6 @@ public sealed class CrossProcessCoordinationTests : IAsyncLifetime
 /// 3. Fake Warning Regression: health status stability under load
 /// 4. Degraded Path: polling fallback activation
 /// </summary>
-[TestClass]
 public sealed class LiveSignalsScenariosTests : IAsyncLifetime
 {
     private LiveSignalsFixtureBundle _fixtures = null!;
@@ -697,7 +681,7 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
     /// Events flow continuously without reconnects — baseline happy path.
     /// Validates: No connection drops, FIFO event delivery, field naming consistency.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task Scenario1_LiveReadyPath_ContinuousEventFlow()
     {
        var harness = _fixtures.E2eHarness;
@@ -712,16 +696,16 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
 
        // Assert: Verify no connection drops, all events received in order
        var events = emitter.GetEmittedEvents();
-       Assert.IsTrue(events.Count >= 3, "Should emit at least 3 events (ready, state, check)");
+       Assert.True(events.Count >= 3, "Should emit at least 3 events (ready, state, check)");
 
        // Verify field naming consistency
        var readyEvents = events.Where(e => e.EventName.Contains("ready", StringComparison.OrdinalIgnoreCase)).ToList();
-       Assert.IsTrue(readyEvents.Any(), "Should emit admin.health event with 'ready' status");
+       Assert.True(readyEvents.Any(), "Should emit admin.health event with 'ready' status");
 
        // Verify FIFO: events are in chronological order
        for (int i = 1; i < events.Count; i++)
        {
-           Assert.IsTrue(events[i].Timestamp >= events[i - 1].Timestamp,
+           Assert.True(events[i].Timestamp >= events[i - 1].Timestamp,
                "Events should be in chronological order (FIFO)");
        }
     }
@@ -731,7 +715,7 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
     /// Connection drops → exponential backoff (500ms, 1s, 2s) → recovery.
     /// Validates: Backoff timing, 3-strike limit, pause state, recovery path.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task Scenario2_ReconnectPath_ExponentialBackoff()
     {
        var harness = _fixtures.E2eHarness;
@@ -764,13 +748,11 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
        backoff.AssertAllIntervalsValid();
 
        // Verify pause state recorded
-       Assert.AreEqual(HealthState.Paused, harness.GetCurrentState(),
-           "After 3 failed attempts, should enter paused state");
+       Assert.Equal(HealthState.Paused, harness.GetCurrentState());
 
        // Verify manual resume works
        await harness.MutateStateAsync(HealthState.Reconnecting, _testCts.Token);
-       Assert.AreEqual(HealthState.Reconnecting, harness.GetCurrentState(),
-           "Manual resume should transition to Reconnecting");
+       Assert.Equal(HealthState.Reconnecting, harness.GetCurrentState());
     }
 
     /// <summary>
@@ -778,7 +760,7 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
     /// Verify health status doesn't flip to Degraded unexpectedly.
     /// Validates: No spurious state transitions, field consistency, warning absence.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task Scenario3_FakeWarningRegression_NoSpuriousStateFlips()
     {
        var harness = _fixtures.E2eHarness;
@@ -798,15 +780,14 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
        harness.VerifyNoFabricatedWarnings();
 
        // Verify state remained Ready (no spurious Degraded transition)
-       Assert.AreEqual(HealthState.Ready, harness.GetCurrentState(),
-           "Health state should remain Ready without spurious transitions");
+       Assert.Equal(HealthState.Ready, harness.GetCurrentState());
 
        var events = emitter.GetEmittedEvents();
-       Assert.AreEqual(10, events.Count, "All emitted events should be in buffer");
+       Assert.Equal(10, events.Count);
 
        // Verify no warning-like events in stream
        var warningEvents = events.Where(e => e.EventName.Contains("warning", StringComparison.OrdinalIgnoreCase)).ToList();
-       Assert.AreEqual(0, warningEvents.Count, "Should not emit any warning events");
+       Assert.Equal(0, warningEvents.Count);
     }
 
     /// <summary>
@@ -814,7 +795,7 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
     /// Network loss → events lag → polling fallback activates (2s intervals).
     /// Validates: Degraded state transition, polling interval, eventual recovery.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task Scenario4_DegradedPath_PollingFallbackActivates()
     {
        var harness = _fixtures.E2eHarness;
@@ -828,20 +809,19 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
        await harness.SimulateDegradedPathAsync(TimeSpan.FromMilliseconds(200), _testCts.Token);
 
        // Assert: Verify Degraded state and polling setup
-       Assert.AreEqual(HealthState.Degraded, harness.GetCurrentState(),
-           "Should transition to Degraded on network issues");
+       Assert.Equal(HealthState.Degraded, harness.GetCurrentState());
 
        var events = emitter.GetEmittedEvents();
        var degradedEvent = events.FirstOrDefault(e => 
            e.EventName.Contains("degraded", StringComparison.OrdinalIgnoreCase) ||
            e.EventName.Contains("health", StringComparison.OrdinalIgnoreCase));
         
-       Assert.IsNotNull(degradedEvent, "Should emit degraded health event");
+       Assert.NotNull(degradedEvent);
 
        // Verify state history records the transition
        var stateHistory = harness.GetStateHistory();
        var degradedTransition = stateHistory.FirstOrDefault(s => s.NewState == HealthState.Degraded);
-       Assert.IsTrue(degradedTransition != default, "State history should record Degraded transition");
+       Assert.True(degradedTransition != default, "State history should record Degraded transition");
     }
 
     /// <summary>
@@ -849,7 +829,7 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
     /// Emit 256+ events; verify buffer enforces capacity limit.
     /// Validates: Ring buffer behavior, no memory leak, FIFO ordering under load.
     /// </summary>
-    [TestMethod]
+    [Fact]
     public async Task Bonus_BufferCapacity_Enforces256Limit()
     {
        var emitter = _fixtures.Emitter;
@@ -860,7 +840,7 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
 
        // Assert: Buffer should be capped at 256
        var events = emitter.GetEmittedEvents();
-       Assert.IsTrue(events.Count <= 256, 
+       Assert.True(events.Count <= 256, 
            $"Buffer should hold max 256 events, got {events.Count}");
 
        // Verify FIFO ordering (newest 256 should be present, oldest 44 evicted)
@@ -875,7 +855,7 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
            // Verify ordering of remaining events
            for (int i = 1; i < eventNumbers.Count; i++)
            {
-               Assert.IsTrue(eventNumbers[i] >= eventNumbers[i - 1],
+               Assert.True(eventNumbers[i] >= eventNumbers[i - 1],
                    "Remaining events should maintain FIFO ordering");
            }
        }
