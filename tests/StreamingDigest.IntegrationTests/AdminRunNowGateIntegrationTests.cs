@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Hangfire;
 using Hangfire.Storage;
+using Hangfire.States;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +39,7 @@ public sealed class AdminRunNowGateIntegrationTests : IAsyncLifetime
     private HttpClient? _client;
     private StreamingDigestDbContext? _context;
     private IngestionRunRepository? _runRepository;
+    private BackgroundJobServer? _jobServer;
 
     public async Task InitializeAsync()
     {
@@ -50,6 +52,7 @@ public sealed class AdminRunNowGateIntegrationTests : IAsyncLifetime
 
         _factory = new AdminRunNowWebApplicationFactory(_connectionString);
         _client = _factory.CreateClient();
+        _jobServer = ((AdminRunNowWebApplicationFactory)_factory).GetJobServer();
 
         var options = new DbContextOptionsBuilder<StreamingDigestDbContext>()
             .UseNpgsql(_connectionString)
@@ -61,6 +64,11 @@ public sealed class AdminRunNowGateIntegrationTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        if (_jobServer is not null)
+        {
+            _jobServer.Dispose();
+        }
+
         if (_context is not null)
         {
             await _context.DisposeAsync();
@@ -110,6 +118,40 @@ public sealed class AdminRunNowGateIntegrationTests : IAsyncLifetime
         using var connection = storage.GetConnection();
         var jobDetails = connection.GetJobData(hangfireJobId);
         Assert.NotNull(jobDetails);
+    }
+
+    [Fact]
+    public async Task RunIngestionNow_JobExecutesAndCompletes()
+    {
+        // This test verifies the full path: admin API → Hangfire enqueue → job picked up → ingestion run persisted with terminal status.
+        // Requires BackgroundJobServer running (initialized in factory).
+
+        // Arrange - precondition: no runs exist yet
+        var existingRuns = await _runRepository!.GetListAsync(limit: 100);
+        Assert.Empty(existingRuns);
+
+        // Act - call admin API to run ingestion now
+        var response = await _client!.PostAsync("/api/admin/operations/ingestion/run", null);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        var responseBody = await response.Content.ReadFromJsonAsync<AdminOperationResponse>();
+        Assert.NotNull(responseBody);
+        var jobId = responseBody.JobId;
+        Assert.NotNull(jobId);
+        var runId = responseBody.OperationId;
+
+        // Act - wait for job to complete (poll job state up to 10 seconds)
+        var jobCompleted = await WaitForJobCompletionAsync(jobId, timeoutSeconds: 10);
+        Assert.True(jobCompleted, $"Job {jobId} did not reach a terminal state within 10 seconds");
+
+        // Assert - ingestion run transitioned from "running" to terminal status
+        var completedRun = await _runRepository!.GetByIdAsync(runId);
+        Assert.NotNull(completedRun);
+        Assert.NotEqual("running", completedRun!.Status);
+        Assert.True(
+            completedRun.Status is "completed" or "completed_with_warnings" or "failed",
+            $"Expected terminal status, got '{completedRun.Status}'");
+        Assert.NotNull(completedRun.CompletedAt);
     }
 
     [Fact]
@@ -257,8 +299,45 @@ public sealed class AdminRunNowGateIntegrationTests : IAsyncLifetime
         return ((System.Net.IPEndPoint)socket.LocalEndPoint!).Port;
     }
 
+    /// <summary>
+    /// Polls a Hangfire job's state until it reaches a terminal state (Succeeded/Failed)
+    /// or the timeout expires. Terminal states are those from which the job will not
+    /// transition again (not Enqueued or Processing).
+    /// </summary>
+    private static async Task<bool> WaitForJobCompletionAsync(string jobId, int timeoutSeconds = 10)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var storage = JobStorage.Current;
+
+        while (stopwatch.Elapsed.TotalSeconds < timeoutSeconds)
+        {
+            using var connection = storage.GetConnection();
+            var jobData = connection.GetJobData(jobId);
+
+            if (jobData is null)
+            {
+                // Job not found; might have been cleaned up. Consider this a timeout.
+                return false;
+            }
+
+            var state = jobData.State;
+            // Terminal states: succeeded, failed, deleted, etc.
+            // Non-terminal states: enqueued, processing, scheduled, etc.
+            if (state is "Succeeded" or "Failed" or "Deleted")
+            {
+                return true;
+            }
+
+            await Task.Delay(100); // Poll every 100ms
+        }
+
+        return false; // Timeout
+    }
+
     private sealed class AdminRunNowWebApplicationFactory(string connectionString) : WebApplicationFactory<Program>
     {
+        private BackgroundJobServer? _jobServer;
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
@@ -273,6 +352,35 @@ public sealed class AdminRunNowGateIntegrationTests : IAsyncLifetime
                 });
             });
         }
+
+        protected override void ConfigureClient(HttpClient client)
+        {
+            base.ConfigureClient(client);
+            // Start the Hangfire background job server after the app is created
+            if (_jobServer is null)
+            {
+                var app = this.Services;
+                var storage = app.GetRequiredService<JobStorage>();
+                _jobServer = new BackgroundJobServer(
+                    new BackgroundJobServerOptions
+                    {
+                        WorkerCount = 1,
+                        Queues = new[] { EnqueuedState.DefaultQueue },
+                    },
+                    storage);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _jobServer is not null)
+            {
+                _jobServer.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        public BackgroundJobServer? GetJobServer() => _jobServer;
     }
 
     private sealed record AdminOperationResponse(
