@@ -454,6 +454,228 @@ See `docs/operations/UPGRADE_PATHS.md` for secret rotation and management proced
 - **Transcript cache:** 1-5GB (text storage)
 - **Observability data:** 5-10GB (Prometheus, Loki retention)
 
+## Deployment Decision Tree
+
+Choosing the right deployment model depends on team capability, scale requirements, and observability depth. The decision tree below guides selection:
+
+```
+START: Deployment Path Selection
+│
+├─ Question 1: Is this local development for a contributor?
+│  │
+│  ├─ YES → Use **Aspire AppHost** (Development)
+│  │        • Hot reload, live dashboards, full observability
+│  │        • Prerequisite: .NET 8 SDK + Docker Desktop
+│  │        • ETA to running: 5-10 minutes
+│  │        • Best for: Feature development, debugging, architecture exploration
+│  │
+│  └─ NO → Continue to Question 2
+│
+├─ Question 2: Do you need Kubernetes or cloud-native scaling?
+│  │
+│  ├─ YES (Kubernetes) → Use **Kubernetes Deployment** (Future)
+│  │        • Production multi-node orchestration
+│  │        • Rolling updates, health checks, autoscaling
+│  │        • Prerequisite: kubectl, Helm, cluster access
+│  │        • ETA to running: 30-60 minutes (after images pushed to registry)
+│  │        • Best for: Multi-region, high-availability, enterprise deployments
+│  │
+│  ├─ YES (Azure Serverless) → Use **Azure Container Apps** (Future)
+│  │        • Managed serverless containers on Azure
+│  │        • Automatic scaling, managed HTTPS, built-in observability
+│  │        • Prerequisite: Azure subscription, az CLI
+│  │        • ETA to running: 15-25 minutes (after images pushed to ACR)
+│  │        • Best for: Small-to-medium self-hosted deployments, minimal ops
+│  │
+│  └─ NO → Continue to Question 3
+│
+├─ Question 3: Do you need to run on a single machine (self-hosted)?
+│  │
+│  └─ YES → Use **Docker Compose** (Single-host Production)
+│           • Recommended: Single-machine deployments with persistent storage
+│           • Prerequisite: Docker Engine, docker-compose CLI
+│           • ETA to running: 15-25 minutes
+│           • Best for: Self-hosters, small teams, CI/CD testing
+│
+└─ END: Deploy using selected topology
+```
+
+### Decision Factors
+
+| Factor | Aspire Dev | Compose | Kubernetes | Azure Container Apps |
+|--------|-----------|---------|-----------|----------------------|
+| **Setup Time** | 5-10 min | 15-25 min | 30-60 min | 15-25 min |
+| **Complexity** | Low | Medium | High | Medium |
+| **Scalability** | Single host | Single host | Multi-node | Multi-region |
+| **Observability** | Dashboard UI | Prometheus/Loki | Native | Azure Monitor |
+| **Cost** | Free (dev) | Minimal (infra) | Medium-high | Pay-per-execution |
+| **Infrastructure** | Local Docker | Docker + volumes | K8s cluster | Azure account |
+| **Team Capability** | Developers | SREs/DevOps | Platform Eng | Cloud DevOps |
+
+---
+
+## Deployment Patterns: High-Level Strategies
+
+### Pattern 1: Health Checking Strategy
+
+Health checks allow orchestrators (Docker Compose, Kubernetes) to detect service failures and take corrective action.
+
+**Streaming Digest Health Check Pattern:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                  Service Health Check Flow               │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  1. Orchestrator periodically polls /health/live        │
+│     (every 10 seconds, timeout 5 seconds)               │
+│                                                          │
+│  2. API service responds with probe results:            │
+│     • Database connectivity (query SELECT 1)            │
+│     • Ollama service reachability (HTTP HEAD)           │
+│     • Whisper service availability (HTTP HEAD)          │
+│     • Message queue connectivity (Hangfire state)       │
+│     • Observability stack readiness (metrics export)    │
+│                                                          │
+│  3. Aggregated response:                                │
+│     ├─ 200 OK + HealthStatus.Healthy                    │
+│     │  → All dependencies operational                   │
+│     │                                                   │
+│     ├─ 200 OK + HealthStatus.Degraded                   │
+│     │  → Core service running, some deps unavailable    │
+│     │  → Orchestrator logs warning, continues serving   │
+│     │                                                   │
+│     └─ 503 Unavailable + HealthStatus.Unhealthy         │
+│        → Critical dependency failed                     │
+│        → Orchestrator removes from load balancer,       │
+│           attempts restart, eventually removes          │
+│                                                          │
+│  4. Orchestrator action:                                │
+│     • Healthy → Keep running, route traffic             │
+│     • Degraded → Keep running, emit metric              │
+│     • Unhealthy → Restart container, retry              │
+│                  If persist: remove and alert           │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Docker Compose Configuration:**
+
+```yaml
+services:
+  api:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart_policy:
+      condition: on-failure
+      max_attempts: 5
+      window: 120s
+```
+
+**Kubernetes Probe Configuration:**
+
+```yaml
+containers:
+- name: api
+  livenessProbe:
+    httpGet:
+      path: /health/live
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+```
+
+### Pattern 2: Zero-Downtime Deployment
+
+Zero-downtime deployment ensures active requests complete gracefully before a service restarts. This pattern applies to Compose and Kubernetes deployments.
+
+**Streaming Digest Zero-Downtime Process:**
+
+```
+Timeline (seconds)     Event
+──────────────────────────────────────────────────────
+T+0:   Orchestrator initiates rolling update
+       │
+       ├─ New pod/container created, waits for readiness
+       │
+T+5:   New instance passes readiness probe
+       │
+       ├─ Load balancer begins routing NEW requests to new instance
+       ├─ OLD instance still receives in-flight requests (no new ones)
+       │
+T+10:  Graceful shutdown signal (SIGTERM) sent to old instance
+       │
+       ├─ Old instance stops accepting new connections
+       ├─ Waits up to 30 seconds for active requests to complete
+       ├─ Long-running ingestion jobs timeout after 5 minutes
+       │  (orchestrator will eventually force-kill)
+       │
+T+40:  All requests drained from old instance, shutdown complete
+       │
+       ├─ Next old instance begins same process
+       │
+T+80:  Deployment complete, all instances updated
+```
+
+**Graceful Shutdown Configuration:**
+
+- **Shutdown timeout:** 30 seconds (environment: `ASPNETCORE_SHUTDOWN_TIMEOUT=30`)
+- **Background job timeout:** 5 minutes (for long-running ingestion)
+- **Connection draining:** HTTP/1.1 keep-alive connections closed, no new requests accepted
+- **Queue flushing:** Hangfire jobs finish in-progress work or queue for retry
+
+**Docker Compose Shutdown Sequence:**
+
+```yaml
+services:
+  api:
+    stop_grace_period: 30s  # Wait 30s before SIGKILL
+    environment:
+      ASPNETCORE_SHUTDOWN_TIMEOUT: 30
+```
+
+### Pattern 3: Scaling Considerations
+
+Streaming Digest scales along multiple dimensions:
+
+**Horizontal Scaling (adding instances):**
+- API tier: Stateless, scales 1→10+ (load balancer distributes)
+- Worker tier: Scales 1→5+ (Hangfire distributes jobs)
+- Database: Single PostgreSQL instance (vertical scale up to 32GB+ RAM)
+- Ollama/Whisper: May need separate dedicated nodes (GPU-intensive)
+
+**Vertical Scaling (increasing resources per instance):**
+- Worker service benefits most from additional CPU (job parallelism)
+- API service benefits from additional RAM (in-memory caching)
+- PostgreSQL benefits from SSD storage + RAM (query performance)
+- Ollama/Whisper critical on GPU availability
+
+**Scalability Bottlenecks:**
+
+| Component | Bottleneck | Solution |
+|-----------|-----------|----------|
+| **PostgreSQL** | Single-node throughput | Vertical scale + read replicas (future) |
+| **Hangfire Queue** | Job processing latency | Increase worker instances/parallelism |
+| **Ollama/Whisper** | Model inference time | GPU acceleration, larger models |
+| **Network I/O** | Inter-service latency | Collocate services, use fast networks |
+| **Observability** | Cardinality explosion | Limit high-cardinality labels, retention policies |
+
+---
+
 ## Next Steps
 
 See:
