@@ -119,12 +119,13 @@ public sealed class ModelRuntimeReconcileService
         CancellationToken cancellationToken)
     {
         var provider = ModelCatalog.ToProviderName(ModelProvider.Ollama);
-        var catalogEntry = ModelCatalog.FindById(presence.ModelId);
+        var catalogEntry = ResolveCatalogEntry(presence.ModelId);
+        var persistedModelId = catalogEntry?.Id ?? presence.ModelId;
         var runtimeRole = catalogEntry is null
             ? "unknown"
             : ModelCatalog.ToRuntimeRoleName(catalogEntry.RuntimeRole);
 
-        var existing = await repository.GetByProviderAndModelIdAsync(provider, presence.ModelId, cancellationToken);
+        var existing = await repository.GetByProviderAndModelIdAsync(provider, persistedModelId, cancellationToken);
         var detailsJson = BuildDetailsJson(presence, catalogEntry);
 
         if (existing is not null && InFlightStatuses.Contains(existing.Status))
@@ -142,7 +143,7 @@ public sealed class ModelRuntimeReconcileService
         {
             Id = Guid.NewGuid(),
             Provider = provider,
-            ModelId = presence.ModelId,
+            ModelId = persistedModelId,
             RuntimeRole = runtimeRole,
             Status = "ready",
             UpdatedAt = reconciledAt
@@ -164,6 +165,18 @@ public sealed class ModelRuntimeReconcileService
 
         await repository.UpsertAsync(state, cancellationToken);
         return ReconcileOutcome.MarkedReady;
+    }
+
+    private static ModelOptionDefinition? ResolveCatalogEntry(string runtimeModelId)
+    {
+        var exact = ModelCatalog.FindById(runtimeModelId);
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        return ModelCatalog.SupportedModels.FirstOrDefault(model =>
+            runtimeModelId.StartsWith($"{model.Id}:", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? BuildDetailsJson(ModelPresence presence, ModelOptionDefinition? catalogEntry)

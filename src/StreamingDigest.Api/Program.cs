@@ -160,6 +160,7 @@ app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
     Authorization = new[] { new PassThroughDashboardAuthorizationFilter() }
 });
 
+app.MapStaticAssets();
 app.MapChannelEndpoints();
 app.MapHealthEndpoints(databaseStatus);
 app.MapAdminOperationEndpoints(applicationConfiguration, builder.Environment.ContentRootPath);

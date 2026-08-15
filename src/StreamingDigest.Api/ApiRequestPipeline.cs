@@ -7,7 +7,11 @@ internal static class ApiRequestPipeline
 {
     public static void Configure(WebApplication app, AppAuthService authService, string connectionString)
     {
-        app.UseHttpsRedirection();
+        if (!app.Environment.IsDevelopment())
+        {
+            app.UseHttpsRedirection();
+        }
+
         app.UseRouting();
         app.Use(RejectDirectSpaDocumentRequests);
         app.UseBlazorFrameworkFiles();

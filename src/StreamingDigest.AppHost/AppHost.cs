@@ -271,6 +271,16 @@ var scraper = builder.AddDockerfile("scraper", "../StreamingDigest.Scraper")
     .WithHttpEndpoint(env: "PORT", targetPort: 3000)
     .WithHttpHealthCheck("/health");
 
+var scraperHttpEndpoint = scraper.GetEndpoint("http");
+var ollamaHttpEndpoint = ollama.GetEndpoint("http");
+var whisperHttpEndpoint = whisper.GetEndpoint("http");
+var otelCollectorGrpcEndpoint = otelCollector.GetEndpoint("grpc");
+var grafanaHttpEndpoint = grafana.GetEndpoint("http");
+var pgAdminHttpEndpoint = pgadmin.GetEndpoint("http");
+var prometheusHttpEndpoint = prometheus.GetEndpoint("http");
+var lokiHttpEndpoint = loki.GetEndpoint("http");
+var tempoHttpEndpoint = tempo.GetEndpoint("http");
+
 var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithExternalHttpEndpoints()
     .WithReference(streamingDigestDatabase)
@@ -279,19 +289,19 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WaitFor(ollama)
     .WaitForCompletion(ollamaBootstrap)
     .WaitFor(otelCollector)
-    .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+    .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otelCollectorGrpcEndpoint)
     .WithEnvironment("STREAMINGDIGEST_OBSERVABILITY_ENABLED", "true")
     .WithEnvironment("STREAMINGDIGEST_EMBEDDING_MODEL", defaultEmbeddingModel)
     .WithEnvironment("STREAMINGDIGEST_LLM_MODEL", defaultLlmModel)
-    .WithEnvironment("Scraper__BaseUrl", "http://scraper:3000")
-    .WithEnvironment("llm__baseUrl", "http://ollama:11434")
-    .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", "http://whisper:" + whisperPort.ToString(CultureInfo.InvariantCulture))
-    .WithEnvironment("observability:services:grafana:url", "http://grafana:3000")
-    .WithEnvironment("observability:services:pgadmin:url", "http://pgadmin:5050")
-    .WithEnvironment("observability:services:prometheus:url", "http://prometheus:9090")
-    .WithEnvironment("observability:services:loki:url", "http://loki:3100")
-    .WithEnvironment("observability:services:tempo:url", "http://tempo:3200")
-    .WithEnvironment("observability:services:otelCollector:url", "http://otel-collector:4317");
+    .WithEnvironment("Scraper__BaseUrl", scraperHttpEndpoint)
+    .WithEnvironment("llm__baseUrl", ollamaHttpEndpoint)
+    .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", whisperHttpEndpoint)
+    .WithEnvironment("observability:services:grafana:url", grafanaHttpEndpoint)
+    .WithEnvironment("observability:services:pgadmin:url", pgAdminHttpEndpoint)
+    .WithEnvironment("observability:services:prometheus:url", prometheusHttpEndpoint)
+    .WithEnvironment("observability:services:loki:url", lokiHttpEndpoint)
+    .WithEnvironment("observability:services:tempo:url", tempoHttpEndpoint)
+    .WithEnvironment("observability:services:otelCollector:url", otelCollectorGrpcEndpoint);
 
 builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WithReference(streamingDigestDatabase)
@@ -300,13 +310,13 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WaitFor(ollama)
     .WaitForCompletion(ollamaBootstrap)
     .WaitFor(otelCollector)
-    .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+    .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otelCollectorGrpcEndpoint)
     .WithEnvironment("STREAMINGDIGEST_OBSERVABILITY_ENABLED", "true")
     .WithEnvironment("STREAMINGDIGEST_EMBEDDING_MODEL", defaultEmbeddingModel)
     .WithEnvironment("STREAMINGDIGEST_LLM_MODEL", defaultLlmModel)
-    .WithEnvironment("Scraper__BaseUrl", "http://scraper:3000")
-    .WithEnvironment("llm__baseUrl", "http://ollama:11434")
-    .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", "http://whisper:" + whisperPort.ToString(CultureInfo.InvariantCulture));
+    .WithEnvironment("Scraper__BaseUrl", scraperHttpEndpoint)
+    .WithEnvironment("llm__baseUrl", ollamaHttpEndpoint)
+    .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", whisperHttpEndpoint);
 
 // Blazor WebAssembly frontend
 builder.AddProject<Projects.StreamingDigest_Web>("web")
