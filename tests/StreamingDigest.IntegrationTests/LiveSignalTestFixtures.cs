@@ -386,6 +386,9 @@ public class AdminPanelE2eHarness : IAsyncDisposable
     {
         Debug.WriteLine("[E2E] Entering Live Ready Path");
 
+        // Transition to Ready state
+        MutateState(HealthState.Ready);
+
         // Emit sequence: ready → search_active → health_check_passed
         await _emitter.EmitAsync("admin.health", "ready", delayMs: 100);
         await _emitter.EmitAsync("admin.state", "search_active", delayMs: 200);
@@ -400,6 +403,9 @@ public class AdminPanelE2eHarness : IAsyncDisposable
     public async Task SimulateDegradedPathAsync(TimeSpan outageWindow, CancellationToken ct = default)
     {
         Debug.WriteLine($"[E2E] Entering Degraded Path (outage {outageWindow.TotalSeconds}s)");
+
+        // Transition to Degraded state
+        MutateState(HealthState.Degraded);
 
         // Emit health_degraded signal
         await _emitter.EmitAsync("admin.health", "health_degraded", delayMs: 50);
@@ -418,6 +424,9 @@ public class AdminPanelE2eHarness : IAsyncDisposable
     {
         Debug.WriteLine("[E2E] Entering Reconnect Path");
 
+        // Transition to Reconnecting state
+        MutateState(HealthState.Reconnecting);
+
         // Strike 1
         _backoffVerifier.StartAttempt();
         await Task.Delay(500, ct); // 500ms backoff
@@ -433,10 +442,45 @@ public class AdminPanelE2eHarness : IAsyncDisposable
         await Task.Delay(2000, ct); // 2s backoff
         _backoffVerifier.VerifyBackoffInterval(3);
 
+        // Transition to Paused state
+        MutateState(HealthState.Paused);
         await _emitter.EmitAsync("admin.state", "paused", delayMs: 100);
 
         _panelStateTransitions.Add("reconnect_path");
     }
+
+    /// <summary>
+    /// Mutate health state and emit SSE event (mirrors /api/admin/health state machine).
+    /// </summary>
+    public async Task MutateStateAsync(HealthState newState, CancellationToken ct = default)
+    {
+        MutateState(newState);
+        await _emitter.EmitAsync("admin.health_state_change", newState.ToString().ToLowerInvariant(), delayMs: 50);
+    }
+
+    /// <summary>
+    /// Internal: record state transition without emitting event.
+    /// </summary>
+    private void MutateState(HealthState newState)
+    {
+        if (_currentState != newState)
+        {
+            _stateHistory.Add((DateTimeOffset.UtcNow, _currentState, newState));
+            Debug.WriteLine($"[State] {_currentState} → {newState}");
+            _currentState = newState;
+        }
+    }
+
+    /// <summary>
+    /// Retrieve current health state.
+    /// </summary>
+    public HealthState GetCurrentState() => _currentState;
+
+    /// <summary>
+    /// Retrieve state transition history for verification.
+    /// </summary>
+    public IReadOnlyList<(DateTimeOffset Timestamp, HealthState PreviousState, HealthState NewState)> GetStateHistory()
+        => _stateHistory.AsReadOnly();
 
     /// <summary>
     /// Verify no fabricated warnings appear in signal stream.
