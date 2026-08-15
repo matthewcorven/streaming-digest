@@ -67,8 +67,6 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<BootstrapAdminUserService>();
         services.AddSingleton<AppAuthService>();
         services.AddSingleton<AppReadinessStateService>();
-        services.AddSingleton<CompositeServiceHealthProvider>(sp => new CompositeServiceHealthProvider(
-            sp.GetRequiredService<ILoggerFactory>().CreateLogger<CompositeServiceHealthProvider>()));
         services.AddScoped<IBackupManifestChecker>(sp => new BackupManifestChecker(
             sp.GetRequiredService<ApplicationConfiguration>(),
             sp.GetRequiredService<ILogger<BackupManifestChecker>>()));
