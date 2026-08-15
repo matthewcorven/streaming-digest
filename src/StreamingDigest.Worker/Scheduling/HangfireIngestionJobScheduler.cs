@@ -8,6 +8,11 @@ namespace StreamingDigest.Worker.Scheduling;
 /// Wraps <see cref="IBackgroundJobClient"/> (on-demand) and
 /// <see cref="IRecurringJobManager"/> (schedule) so the Application layer stays
 /// free of a Hangfire reference.
+///
+/// Both <see cref="EnqueueOnDemandRun"/> (manual/catch-up runs) and
+/// <see cref="SetRecurringJob"/> (6AM recurring) dispatch through the unified
+/// <see cref="IngestionJob"/> class, which consolidates recurring and on-demand
+/// logic into parameterized entry points.
 /// </summary>
 public sealed class HangfireIngestionJobScheduler(
     IBackgroundJobClient backgroundJobClient,
