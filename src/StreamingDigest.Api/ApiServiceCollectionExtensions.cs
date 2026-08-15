@@ -94,9 +94,7 @@ internal static class ApiServiceCollectionExtensions
             sp.GetRequiredService<IVideoClusterEmbeddingStore>(),
             rankingService: null));
         services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
-        // Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
-        // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
-        services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), configuration));
+        services.AddMeaiEmbeddingServiceAdapter(configuration);
         // The runtime client builds its absolute request URI from config (embedding:ollamaEndpoint,
         // OLLAMA_HOST, ...) rather than from HttpClient.BaseAddress, matching OllamaEmbeddingService.
         // Named client (not a captured singleton HttpClient) so handler rotation refreshes DNS for

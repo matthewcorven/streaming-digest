@@ -78,6 +78,10 @@ public sealed class PostgresModelLifecycleEventListener : IAsyncDisposable
         {
             try
             {
+                if (_connection.State == System.Data.ConnectionState.Open)
+                {
+                    _connection.Notification -= HandleConnectionNotification;
+                }
                 await _connection.CloseAsync();
                 await _connection.DisposeAsync();
             }
@@ -99,9 +103,16 @@ public sealed class PostgresModelLifecycleEventListener : IAsyncDisposable
         {
             try
             {
-                await _connection?.CloseAsync()!;
+                if (_connection is not null)
+                {
+                    await _connection.CloseAsync();
+                }
+
                 _connection = new NpgsqlConnection(_connectionString);
                 await _connection.OpenAsync(cancellationToken);
+
+                // Subscribe to notifications
+                _connection.Notification += HandleConnectionNotification;
 
                 // Subscribe to the model_state_changed channel
                 using var command = _connection.CreateCommand();
@@ -111,25 +122,8 @@ public sealed class PostgresModelLifecycleEventListener : IAsyncDisposable
                 _logger.LogInformation("PostgreSQL listener connected and listening on channel: model_state_changed");
                 reconnectDelayMs = 1_000;
 
-                // Wait for notifications
-                while (!cancellationToken.IsCancellationRequested && _connection is not null && _connection.State == System.Data.ConnectionState.Open)
-                {
-                    if (_connection.Poll(5000)) // Poll every 5 seconds
-                    {
-                        if (_connection.Notification != null)
-                        {
-                            var notification = _connection.Notification;
-                            try
-                            {
-                                await HandleNotificationAsync(notification, cancellationToken);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Error processing PostgreSQL notification");
-                            }
-                        }
-                    }
-                }
+                // Keep the connection alive - just wait for cancellation
+                await Task.Delay(Timeout.Infinite, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -154,32 +148,36 @@ public sealed class PostgresModelLifecycleEventListener : IAsyncDisposable
         _logger.LogInformation("PostgreSQL listener stopped");
     }
 
-    private async Task HandleNotificationAsync(NpgsqlNotification notification, CancellationToken cancellationToken)
+    private void HandleConnectionNotification(object sender, NpgsqlNotificationEventArgs e)
     {
-        if (string.IsNullOrEmpty(notification.Payload))
-        {
-            _logger.LogDebug("Received empty notification on channel {Channel}", notification.Channel);
-            return;
-        }
-
         try
         {
+            if (string.IsNullOrEmpty(e.Payload))
+            {
+                Debug.WriteLine($"[PostgresModelLifecycleEventListener] Received empty notification on channel {e.Channel}");
+                return;
+            }
+
             var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-            var modelEvent = JsonSerializer.Deserialize<ModelLifecycleEvent>(notification.Payload, options);
+            var modelEvent = JsonSerializer.Deserialize<ModelLifecycleEvent>(e.Payload, options);
 
             if (modelEvent is not null)
             {
-                Debug.WriteLine($"[PostgresModelLifecycleEventListener] Publishing cross-process model event: {modelEvent.Name} ({modelEvent.Provider}/{modelEvent.ModelId})");
+                Debug.WriteLine($"[PostgresModelLifecycleEventListener] Publishing cross-process model event: {modelEvent.Name}");
                 _broadcaster.Publish(modelEvent);
             }
             else
             {
-                _logger.LogWarning("Failed to deserialize model event from notification: {Payload}", notification.Payload);
+                _logger.LogWarning("Failed to deserialize model event from notification: {Payload}", e.Payload);
             }
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "Invalid JSON in notification payload: {Payload}", notification.Payload);
+            _logger.LogWarning(ex, "Invalid JSON in notification payload: {Payload}", e.Payload);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error handling notification");
         }
     }
 }
