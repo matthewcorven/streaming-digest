@@ -34,6 +34,63 @@ public sealed class ModelStatusServiceTests
         Assert.Null(row.ErrorMessage);
     }
 
+    [Fact]
+    public async Task Download_TransitionsRowToQueued()
+    {
+        using var handler = new StubHttpMessageHandler();
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:5149")
+        };
+
+        var authenticationService = new AuthenticationService(httpClient);
+        var searchUiSessionService = new SearchUiSessionService(authenticationService);
+        await using var service = new ModelStatusService(searchUiSessionService);
+        var row = new ModelRowViewModel(
+            id: "whisper",
+            label: "Whisper Base",
+            provider: "ollama",
+            family: "audio",
+            runtimeRole: "audio",
+            downloadable: true);
+
+        var success = await service.Download(row);
+
+        Assert.True(success);
+        Assert.Equal(ModelRowState.Queued, row.RowState);
+        Assert.NotEqual(Guid.Empty, row.CurrentOperationId);
+    }
+
+    [Fact]
+    public async Task Download_FailsWhenAlreadyDownloading()
+    {
+        using var handler = new StubHttpMessageHandler();
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:5149")
+        };
+
+        var authenticationService = new AuthenticationService(httpClient);
+        var searchUiSessionService = new SearchUiSessionService(authenticationService);
+        await using var service = new ModelStatusService(searchUiSessionService);
+        var row = new ModelRowViewModel(
+            id: "whisper",
+            label: "Whisper Base",
+            provider: "ollama",
+            family: "audio",
+            runtimeRole: "audio",
+            downloadable: true);
+
+        // First download succeeds
+        var firstSuccess = await service.Download(row);
+        Assert.True(firstSuccess);
+        Assert.Equal(ModelRowState.Queued, row.RowState);
+
+        // Second download fails (row is not in Unknown/DownloadFailed/VerifyFailed state)
+        var secondSuccess = await service.Download(row);
+        Assert.False(secondSuccess);
+    }
+
     private sealed class StubHttpMessageHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -42,6 +99,8 @@ public sealed class ModelStatusServiceTests
             {
                 "/api/auth/me" => Task.FromResult(JsonResponse(new { username = "admin", mustChangePassword = false })),
                 "/api/auth/csrf" => Task.FromResult(JsonResponse(new { token = "csrf-token" })),
+                "/api/models/options" => Task.FromResult(JsonResponse(new { models = Array.Empty<object>() })),
+                "/api/models/status" => Task.FromResult(JsonResponse(new { models = Array.Empty<object>() })),
                 "/api/models/verify" => Task.FromResult(JsonResponse(new
                 {
                     status = "verified",
@@ -49,6 +108,11 @@ public sealed class ModelStatusServiceTests
                     modelId = "whisper",
                     verified = true,
                     message = "Whisper service is reachable."
+                })),
+                "/api/models/download" => Task.FromResult(JsonResponse(new
+                {
+                    operationId = Guid.NewGuid(),
+                    status = "Queued"
                 })),
                 _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound))
             };
