@@ -157,14 +157,11 @@ builder.Services.AddSingleton<RuntimeModelReadinessGuard>(sp => new ModelReadine
 builder.Services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
-builder.Services.AddMeaiEmbeddingGenerator(builder.Configuration);
+builder.Services.AddMeaiEmbeddingServiceAdapter(builder.Configuration);
 // Note: AddMeaiChatClient is commented out because OllamaSharp's IChatClient implementation has compatibility issues with MEAI 10.5.0.
 // Instead, we use MeaiChatClientWrapper which does raw HTTP calls directly.
 // builder.Services.AddMeaiChatClient(builder.Configuration);
 builder.Services.AddMeaiChatClientWrapper(builder.Configuration);
-// Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
-// TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
-builder.Services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), builder.Configuration));
 // The runtime client builds its absolute request URI from config rather than HttpClient.BaseAddress, matching OllamaEmbeddingService.
 // Named client (not a captured singleton HttpClient) so handler rotation refreshes DNS for
 // containerized Ollama; infinite client timeout because model pulls are long-running —

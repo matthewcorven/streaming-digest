@@ -33,9 +33,7 @@ const string composeProjectName = "streaming-digest";
 const string defaultEmbeddingModel = "bge-m3";
 const string defaultLlmModel = "llama3.1:8b";
 const string ollamaDataVolumeName = "streamingdigest-ollama-data";
-const string imageNamePrefix = "streaming-digest";
 var shortCommitId = GetShortCommitId();
-const string defaultImageTag = "latest";
 // Whisper (audio-to-text) runtime — issue #210.
 // The whisper service is an OPTIONAL runtime: caption-less videos need it; captioned
 // ingestion proceeds with a warning when it is absent (PRD §2.4). For that reason api/worker
