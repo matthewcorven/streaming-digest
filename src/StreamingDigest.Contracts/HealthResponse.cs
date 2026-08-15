@@ -1,39 +1,40 @@
 namespace StreamingDigest.Web.Models;
 
 /// <summary>
-/// Live health status response for the admin health endpoint.
-/// Sections marked as "Live" are backed by real runtime data via ModelStatusService.
-/// Sections marked as "Preview" represent expected state but may be ahead of operational confirmation.
+/// Live health status response for the admin health endpoint (ADR-0018).
+/// Sections with <c>PreviewMode = false</c> are backed by live runtime data.
+/// Sections with <c>PreviewMode = true</c> represent expected state; actual verification is pending.
+/// UI must render preview signals with (?) badge + tooltip explaining why preview.
 /// </summary>
 public sealed class HealthResponse
 {
     /// <summary>
-    /// Settings configuration status (Live data from system configuration).
+    /// Settings configuration status (Live: app &amp; DB schema version from current deployment).
     /// </summary>
     public SettingsSection Settings { get; init; } = new();
 
     /// <summary>
-    /// Runtime model status (Live data from ModelStatusService).
+    /// Runtime model status (Live: per-model state from database, same source as GET /api/models/status).
     /// </summary>
     public ModelsSection Models { get; init; } = new();
 
     /// <summary>
-    /// Observability pipeline status (Live data from telemetry collection).
+    /// Observability pipeline status (Live: telemetry probe results).
     /// </summary>
     public ObservabilitySection Observability { get; init; } = new();
 
     /// <summary>
-    /// Database and storage status (Preview - based on last successful connection).
+    /// Database and storage status (Live: Postgres connectivity probe results).
     /// </summary>
     public StorageSection Storage { get; init; } = new();
 
     /// <summary>
-    /// Backup readiness (Preview - based on last backup manifest, not live verification).
+    /// Backup readiness (Preview: static expected state; actual manifest check pending #271).
     /// </summary>
     public BackupReadinessSection BackupReadiness { get; init; } = new();
 
     /// <summary>
-    /// Overall system health determination. Ready if Settings/Models/Observability are healthy, otherwise reflects critical issue.
+    /// Overall system health determination. Ready if all live signals (Settings/Models/Observability/Storage) are healthy.
     /// </summary>
     public HealthState OverallHealth { get; init; } = HealthState.Ready;
 
@@ -56,10 +57,15 @@ public sealed class SettingsSection
 
     /// <summary>Details about specific settings that may have issues.</summary>
     public IReadOnlyList<string> Details { get; init; } = [];
+
+    /// <summary>
+    /// False: live data from database. True: preview/static data (ADR-0018).
+    /// </summary>
+    public bool PreviewMode { get; init; } = false;
 }
 
 /// <summary>
-/// Runtime models health (Live from ModelStatusService).
+/// Runtime models health (Live from IModelRuntimeStateRepository, same source as GET /api/models/status).
 /// </summary>
 public sealed class ModelsSection
 {
@@ -74,6 +80,11 @@ public sealed class ModelsSection
 
     /// <summary>Count of models actively running operations (regeneration, updates).</summary>
     public int ActiveOperationCount { get; init; } = 0;
+
+    /// <summary>
+    /// False: live data from model_runtime_states table. True: preview/static data (ADR-0018).
+    /// </summary>
+    public bool PreviewMode { get; init; } = false;
 }
 
 /// <summary>
@@ -119,6 +130,11 @@ public sealed class ObservabilitySection
 
     /// <summary>Optional warning details if any signal is degraded.</summary>
     public IReadOnlyList<string> Details { get; init; } = [];
+
+    /// <summary>
+    /// False: live data from service health probes. True: preview/static data (ADR-0018).
+    /// </summary>
+    public bool PreviewMode { get; init; } = false;
 }
 
 /// <summary>
