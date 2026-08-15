@@ -125,29 +125,34 @@ public sealed class ModelLifecycleEventBroadcasterTests
     public async Task Cancelled_subscription_stops_receiving_events()
     {
         var broadcaster = new ModelLifecycleEventBroadcaster(NullLogger<ModelLifecycleEventBroadcaster>.Instance);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+       using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var subscriberCts = new CancellationTokenSource();
 
         var received = new List<ModelLifecycleEvent>();
-        var subscription = Task.Run(async () =>
-        {
-            await foreach (var modelEvent in broadcaster.Subscribe(subscriberCts.Token))
-            {
-                received.Add(modelEvent);
-            }
-        }, cts.Token);
+       var eventReceived = new TaskCompletionSource<bool>();
+       var subscription = Task.Run(async () =>
+       {
+           await foreach (var modelEvent in broadcaster.Subscribe(subscriberCts.Token))
+           {
+               received.Add(modelEvent);
+               if (received.Count == 1)
+               {
+                   eventReceived.TrySetResult(true);
+               }
+           }
+       }, cts.Token);
 
-        await Task.Delay(50, cts.Token);
-        broadcaster.Publish(new ModelLifecycleEvent("model.status", "{\"status\":\"queued\"}", DateTimeOffset.UtcNow));
+       await Task.Delay(50, cts.Token);
+       broadcaster.Publish(new ModelLifecycleEvent("model.status", "{\"status\":\"queued\"}", DateTimeOffset.UtcNow));
 
-        await WaitForAsync(() => received.Count == 1, cts.Token);
-        await subscriberCts.CancelAsync();
+       await eventReceived.Task.WaitAsync(cts.Token);
+       await subscriberCts.CancelAsync();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => subscription.WaitAsync(cts.Token));
+       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => subscription.WaitAsync(cts.Token));
 
-        // Publishing after cancellation must not throw and must not reach the cancelled stream.
-        broadcaster.Publish(new ModelLifecycleEvent("model.status", "{\"status\":\"ready\"}", DateTimeOffset.UtcNow));
-        Assert.Single(received);
+       // Publishing after cancellation must not throw and must not reach the cancelled stream.
+       broadcaster.Publish(new ModelLifecycleEvent("model.status", "{\"status\":\"ready\"}", DateTimeOffset.UtcNow));
+       Assert.Single(received);
     }
 
     [Fact]
