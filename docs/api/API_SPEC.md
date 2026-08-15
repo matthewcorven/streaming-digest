@@ -1338,117 +1338,65 @@ Re-runs resource processing (scrape/classify/repository association) for a succe
 
 ## 17. Admin health/test endpoints
 
-> ⚠️ **Status: These endpoints are not implemented in shipped code.**
-> Test functionality has been consolidated under `/api/admin/operations/` (§7).
-> This section documents legacy routes from pre-MVP planning; see issue #251.
+> ⚠️ **Status: Legacy test endpoints consolidated under `/api/admin/operations/` (§7).**
+> `GET /api/admin/health` is shipped (see above). Pre-MVP-era test endpoints (`test-matrix`, `test-embedding`, etc.) have been retired in favor of operation-based probes.
+> This section documents the migration path for clients; see issue #251.
 
-### ~~GET `/api/admin/health`~~ (NOT IMPLEMENTED)
+### GET `/api/admin/health` (SHIPPED)
 
-Documented in §17 as returning dependency health summary, but not shipped.
-See `GET /api/health`, `/api/db-health`, `/api/overview` (basic health) or
-`POST /api/admin/operations/notifications/matrix/test`, etc. (operation-based testing).
+Returns live admin health status including dependency health summary, model states, observability pipeline, and storage systems. **This endpoint is implemented and shipped.**
 
-### ~~POST `/api/admin/test-matrix`~~ (NOT IMPLEMENTED)
+See also: `GET /api/health`, `/api/db-health`, `/api/overview` (basic health endpoints).
 
-Use `POST /api/admin/operations/notifications/matrix/test` instead (§7).
+### Legacy test endpoints (retired)
 
-### ~~POST `/api/admin/test-embedding`~~ (NOT IMPLEMENTED)
+The following pre-MVP test endpoints have been consolidated into `/api/admin/operations/` (§7). Use the listed modern alternatives:
 
-Use `POST /api/admin/operations/embeddings/test` instead (§7).
-
-### ~~POST `/api/admin/test-audio-to-text`~~ (NOT IMPLEMENTED)
-
-Use `POST /api/admin/operations/audio-to-text/test` instead (§7).
-Performs a real `GET /health` probe against the configured whisper service
-(`STREAMINGDIGEST_WHISPER_BASE_URL`) via `IAudioToTextProvider.CheckHealthAsync`
-and reports the truthful status. The previous behavior (a fake `completed`/`healthy`
-without probing) has been removed (issue #210).
-
-Response shape is the standard admin-action-result envelope. The `status`,
-`healthStatus`, and `message` fields reflect the probe outcome:
-
-| Probe outcome | `status` | `healthStatus` | `message` |
-| --- | --- | --- | --- |
-| `/health` returned 2xx | `completed` | `healthy` | Engine + endpoint + "succeeded" |
-| Whisper unavailable (no runtime, no provider registered, 5xx, connection refused, stub) | `completed` | `warning` | Engine + endpoint + "unavailable" + degrade note |
-| Probe threw (genuine fault) | `failed` | `error` | Failure detail |
-
-When whisper is unavailable, caption-less videos degrade to `unavailable_captions`
-with a `transcript_ingest_failed` domain event (notify); captioned ingestion proceeds
-with a warning (PRD §2.4). An unconfigured whisper runtime (no `IAudioToTextProvider`
-registered) is treated as the expected degrade state, not a fault, so it returns
-`completed`/`warning` (HTTP 200); HTTP 500 is reserved for genuine probe exceptions only.
-
-### ~~POST `/api/admin/test-scraper`~~ (NOT IMPLEMENTED)
-
-Documented as running scraper health test against a controlled URL or fixture.
-Not shipped; no equivalent endpoint exists.
-
-### ~~POST `/api/admin/test-repository-provider`~~ (NOT IMPLEMENTED)
-
-Documented as running repository-provider health test, GitHub for MVP.
-Not shipped; no equivalent endpoint exists.
-
-### ~~POST `/api/admin/test-youtube-ingestion`~~ (NOT IMPLEMENTED)
-
-Documented as running lightweight YouTube adapter verification without ingesting a full video.
-Not shipped; no equivalent endpoint exists.
-
-### ~~GET `/api/admin/observability-links`~~ (NOT IMPLEMENTED)
-
-Documented as returning Grafana, Prometheus, Hangfire, Loki, and Tempo URLs.
-Not shipped; observability URLs are available via environment configuration instead.
+| Legacy endpoint | Modern equivalent | Notes |
+| --- | --- | --- |
+| ~~`POST /api/admin/test-matrix`~~ | `POST /api/admin/operations/notifications/matrix/test` | Matrix notification health check (§7) |
+| ~~`POST /api/admin/test-embedding`~~ | `POST /api/admin/operations/embeddings/test` | Embedding service health check (§7) |
+| ~~`POST /api/admin/test-audio-to-text`~~ | `POST /api/admin/operations/audio-to-text/test` | Whisper service health check with real probe against `STREAMINGDIGEST_WHISPER_BASE_URL` (§7); unconfigured state returns `completed`/`warning` (HTTP 200), probe exceptions return `failed`/`error` (HTTP 500) |
+| ~~`POST /api/admin/test-scraper`~~ | None shipped | Scraper health test not implemented in MVP |
+| ~~`POST /api/admin/test-repository-provider`~~ | None shipped | Repository provider health test not implemented in MVP |
+| ~~`POST /api/admin/test-youtube-ingestion`~~ | None shipped | YouTube adapter verification not implemented in MVP |
+| ~~`GET /api/admin/observability-links`~~ | Environment configuration | Observability URLs available via configuration, not HTTP endpoint
 
 ## 18. Backup and upgrade/maintenance endpoints
 
-> ⚠️ **Status: Most of these endpoints are not implemented in shipped code.**
-> Only backup/restore operations are available under `/api/admin/operations/`.
-> This section documents planned maintenance/upgrade workflows (MVP+ scope).
-> See issue #251.
+> ⚠️ **Status: MVP+ scope. Only backup/restore are shipped under `/api/admin/operations/` (§7).**
+> This section documents planned maintenance, upgrade, and inventory workflows for future releases.
+> See issue #251 for scope consolidation.
 
-MVP maturity rule (design intent, not yet shipped):
+### Shipped endpoints (MVP)
 
-- Status, versions, backup creation/list/detail, upgrade preview, and derived-data regeneration endpoints are planned MVP contracts.
-- `apply-migrations` is a planned MVP contract for app/config/DB migrations that are safe to run in-app after compatibility checks pass.
-- High-risk infrastructure migrations, such as PostgreSQL major upgrades, pgvector extension upgrades, large volume moves, or Matrix crypto-store migrations after E2EE is enabled, must return a manual/guided runbook requirement instead of attempting unsafe fully automated mutation.
+#### POST `/api/admin/operations/backup` (SHIPPED)
 
-### ~~GET `/api/admin/maintenance/status`~~ (NOT IMPLEMENTED)
+Starts backup operation. See `/api/admin/operations/backup` under §7.
 
-Planned to return versions, compatibility, backup status, migration status, derived-data status, and post-upgrade checklist state. Not shipped.
+#### GET `/api/admin/operations/backups/{archiveName}` (SHIPPED)
 
-### ~~GET `/api/admin/maintenance/versions`~~ (NOT IMPLEMENTED)
+Downloads a backup archive. See §7.
 
-Planned to return current app, DB schema, config schema, and deployment schema versions. Not shipped.
+### Planned endpoints (MVP+)
 
-### POST `/api/admin/operations/backup` (SHIPPED)
+The following endpoints are not yet implemented. They are documented here to guide future work on maintenance, upgrade, and derived-data workflows:
 
-See `/api/admin/operations/backup` under §7. Starts backup operation.
+| Planned endpoint | Purpose | Status |
+| --- | --- | --- |
+| ~~`GET /api/admin/maintenance/status`~~ | Return versions, compatibility, backup status, migration status, derived-data status, and post-upgrade checklist state | Design only |
+| ~~`GET /api/admin/maintenance/versions`~~ | Return current app, DB schema, config schema, and deployment schema versions | Design only |
+| ~~`GET /api/admin/backups`~~ | List backup artifacts | Design only |
+| ~~`GET /api/admin/backups/{backupId}`~~ | Return backup artifact detail | Design only |
+| ~~`POST /api/admin/backups/{backupId}/verify`~~ | Queue backup verification/dry-run checks | Design only |
+| ~~`GET /api/admin/upgrade/preview`~~ | Return migration/config/deployment/derived-data preview and risk level | Design only |
+| ~~`POST /api/admin/upgrade/apply-migrations`~~ | Apply allowed app/config/DB migrations after compatibility checks; high-risk infrastructure migrations require manual runbooks | Design only |
+| ~~`POST /api/admin/derived-data/reprocess`~~ | Queue bulk reprocessing of stale search documents, embeddings, aggregate vectors, or index rebuilds | Use `POST /api/admin/operations/embeddings/reprocess` (§7) for embeddings only |
 
-### ~~GET `/api/admin/backups`~~ (NOT IMPLEMENTED)
-
-Planned to list backup artifacts. Use `/api/admin/operations/backups/{archiveName}` to retrieve a specific backup file.
-
-### ~~GET `/api/admin/backups/{backupId}`~~ (NOT IMPLEMENTED)
-
-Planned to return backup artifact detail. Not shipped.
-
-### ~~POST `/api/admin/backups/{backupId}/verify`~~ (NOT IMPLEMENTED)
-
-Planned to queue backup verification/dry-run checks. Not shipped.
-
-### ~~GET `/api/admin/upgrade/preview`~~ (NOT IMPLEMENTED)
-
-Planned to return migration/config/deployment/derived-data preview and risk level. Not shipped.
-
-### ~~POST `/api/admin/upgrade/apply-migrations`~~ (NOT IMPLEMENTED)
-
-Planned to apply allowed app/config/DB migrations when deployment compatibility checks pass.
-High-risk infrastructure migrations should point to guided/manual runbooks. Not shipped.
-
-### ~~POST `/api/admin/derived-data/reprocess`~~ (NOT IMPLEMENTED)
-
-Planned to queue reprocessing of stale search documents, embeddings, aggregate vectors, or index rebuilds.
-Use `POST /api/admin/operations/embeddings/reprocess` (§7) for embedding reprocessing.
+**MVP+ maturity rules (design intent):**
+- Status, versions, backup creation/list/detail, upgrade preview, and derived-data regeneration endpoints are planned for future releases.
+- `apply-migrations` is a planned contract for app/config/DB migrations safe to run in-app after compatibility checks.
+- High-risk infrastructure migrations (PostgreSQL major upgrades, pgvector extension upgrades, large volume moves) must return a manual/guided runbook requirement instead of attempting unsafe fully automated mutation.
 
 ## 19. Matrix notification dispatch (shipped: in-process)
 
