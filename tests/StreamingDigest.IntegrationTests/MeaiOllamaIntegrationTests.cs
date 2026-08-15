@@ -93,9 +93,9 @@ public sealed class MeaiOllamaIntegrationTests : IAsyncLifetime
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("ollama", result.ModelProvider);
-        Assert.NotEmpty(result.Embedding);
-        _output.WriteLine($"Embedding generated with {result.Embedding.Count} dimensions");
+        Assert.Equal("ollama", result.Provider);
+        Assert.NotEmpty(result.Values);
+        _output.WriteLine($"Embedding generated with {result.Dimensions} dimensions");
     }
 
     [Fact(Skip = "Requires Docker and Ollama; runs locally only.")]
