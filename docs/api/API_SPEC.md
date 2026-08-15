@@ -1338,15 +1338,129 @@ Re-runs resource processing (scrape/classify/repository association) for a succe
 
 ## 17. Admin health/test endpoints
 
-> ⚠️ **Status: These endpoints are not implemented in shipped code.**
+> ⚠️ **Status: Legacy endpoints documented below are not implemented in shipped code.**
 > Test functionality has been consolidated under `/api/admin/operations/` (§7).
 > This section documents legacy routes from pre-MVP planning; see issue #251.
+> **NEW in #270:** `/api/admin/health` is now implemented with live signal support (see below).
 
-### ~~GET `/api/admin/health`~~ (NOT IMPLEMENTED)
+### GET `/api/admin/health` (Live Implementation)
 
-Documented in §17 as returning dependency health summary, but not shipped.
-See `GET /api/health`, `/api/db-health`, `/api/overview` (basic health) or
-`POST /api/admin/operations/notifications/matrix/test`, etc. (operation-based testing).
+Returns comprehensive live and preview health status for admin settings page and operations dashboard.
+Endpoint responses include a `PreviewMode` flag per section to distinguish authoritative live signals from static/expected data.
+Reference: ADR-0018 (admin-health-contract-live-vs-preview-signals.md).
+
+**Request:**
+```
+GET /api/admin/health
+Authorization: Cookie (session required)
+```
+
+**Response (200 OK — All systems ready):**
+```json
+{
+  "settings": {
+    "state": "Ready",
+    "summary": "Version 1.0.0 ready",
+    "details": [],
+    "previewMode": false
+  },
+  "models": {
+    "state": "Ready",
+    "summary": "All models operational",
+    "models": [
+      {
+        "name": "embedding",
+        "state": "Ready",
+        "status": "ready",
+        "version": "nomic-embed-text:latest",
+        "details": "100% complete"
+      }
+    ],
+    "activeOperationCount": 0,
+    "previewMode": false
+  },
+  "observability": {
+    "state": "Ready",
+    "summary": "Telemetry collection and export operational",
+    "tracesStatus": "Operational",
+    "metricsStatus": "Operational",
+    "logsStatus": "Operational",
+    "details": [],
+    "previewMode": false
+  },
+  "storage": {
+    "state": "Ready",
+    "summary": "PostgreSQL database operational with pgvector enabled",
+    "postgresStatus": "Ready",
+    "details": [
+      "PostgreSQL 16.3",
+      "pgvector 0.8.0",
+      "Database latency: 2ms"
+    ],
+    "previewMode": false
+  },
+  "backupReadiness": {
+    "state": "Ready",
+    "summary": "Backup system operational (live verification pending)",
+    "lastBackupAt": null,
+    "timeSinceLastBackup": "Unknown",
+    "retentionStatus": "Not yet verified",
+    "details": ["Backup verification is preview state; live verification is pending."],
+    "previewMode": true
+  },
+  "overallHealth": "Ready",
+  "lastUpdatedAt": "2026-08-15T22:00:00Z"
+}
+```
+
+**Response (202 Accepted — Service reconnecting):**
+Same schema as above, but HTTP 202 indicates one or more services are recovering from connectivity issues.
+Caller should retry with exponential backoff.
+
+**Response (503 Service Unavailable — Critical failure):**
+One or more critical services (database, core observability pipeline, or model runtime) is unavailable.
+Returned as plain text error detail; payload is not guaranteed.
+
+**Response (500 Internal Server Error):**
+Unexpected error generating health snapshot. Retry after delay; investigate logs.
+
+**Signal Definitions (all backed by live runtime state unless PreviewMode=true):**
+
+| Section | Source | Live | Details |
+|---------|--------|------|---------|
+| Settings | `UpgradeCompatibilityStateService.ReadVersionStateAsync()` + database | Yes | App version + DB schema version from app_version table |
+| Models | `IModelRuntimeStateRepository.GetAllAsync()` + model_runtime_states table | Yes | Same source as `/api/models/status` (embedded or audio runtime models) |
+| Observability | `CompositeServiceHealthProvider.ProbeAllAsync()` + TelemetryProbe | Yes | Traces, metrics, logs collection and OTLP export readiness |
+| Storage | `CompositeServiceHealthProvider.ProbeAllAsync()` + PostgresProbe | Yes | PostgreSQL connectivity, latency, pgvector extension presence |
+| BackupReadiness | `UpgradeMaintenanceSnapshotService` (hardcoded demo) | **No** | Static placeholder; live backup manifest verification pending #271 |
+
+**PreviewMode Flag Semantics:**
+
+- `previewMode: false` (default): Signal is authoritative and backed by live runtime APIs, database queries, or active health probes. Operator should act on this state for operational decisions (e.g., alerting, capacity planning).
+- `previewMode: true`: Signal is expected/demo state and NOT live-verified. UI should render with (?) badge and tooltip: "This signal is preview state; live verification is pending." Operator should not depend on this for operational decisions until live implementation lands.
+
+**Health State Enum:**
+
+| State | Code | Meaning |
+|-------|------|---------|
+| Ready | 0 | Fully operational |
+| Degraded | 1 | Operational with warnings (e.g., high latency, partial failure) |
+| Reconnecting | 2 | Recovering from transient connectivity issue |
+| Paused | 3 | Admin-paused (e.g., during maintenance) |
+| Error | 4 | Not operational (unrecoverable failure) |
+
+**Authorization & Auditability:**
+
+- Requires authenticated session (cookie-based).
+- Debug logging at `Debug` level includes per-section probe details and timing.
+- No PII or secrets in response or logs (except correlation ID).
+
+**Related:**
+
+- ADR-0018: Admin health contract and live vs. preview signals
+- #270: Define the live admin health contract
+- #271: Replace static maintenance snapshot with live backend health data (pending)
+- #272: Guarantee model and observability status signals propagate reliably via SSE (pending)
 
 ### ~~POST `/api/admin/test-matrix`~~ (NOT IMPLEMENTED)
 

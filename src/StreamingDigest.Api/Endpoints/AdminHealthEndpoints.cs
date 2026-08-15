@@ -2,6 +2,7 @@ using System.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Services.Health;
 using StreamingDigest.Domain.Health;
 using StreamingDigest.Infrastructure.Persistence;
@@ -29,6 +30,7 @@ internal static class AdminHealthEndpoints
     private static async Task<IResult> GetAdminHealth(
         CompositeServiceHealthProvider compositeProbe,
         UpgradeCompatibilityStateService upgradeService,
+        IModelRuntimeStateRepository modelStateRepository,
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -52,7 +54,7 @@ internal static class AdminHealthEndpoints
             var health = new HealthResponse
             {
                 Settings = await BuildSettingsSection(upgradeService, connectionString, logger, cancellationToken),
-                Models = BuildModelsSection(logger),
+                Models = await BuildModelsSection(modelStateRepository, logger, cancellationToken),
                 Observability = BuildObservabilitySection(probes, logger),
                 Storage = BuildStorageSection(probes, logger),
                 BackupReadiness = await BuildBackupReadinessSection(logger, cancellationToken),
@@ -89,7 +91,7 @@ internal static class AdminHealthEndpoints
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        logger.LogDebug("Building settings section");
+        logger.LogDebug("Building settings section from live database state");
 
         try
         {
@@ -100,7 +102,8 @@ internal static class AdminHealthEndpoints
                 {
                     State = ApiHealthState.Degraded,
                     Summary = "Settings are not yet available because the database connection string is missing.",
-                    Details = ["Database connection string is unavailable."]
+                    Details = ["Database connection string is unavailable."],
+                    PreviewMode = false
                 };
             }
 
@@ -120,7 +123,7 @@ internal static class AdminHealthEndpoints
                 state = ApiHealthState.Degraded;
             }
 
-            logger.LogDebug("Settings section built: state={State}, appVersion={AppVersion}, dbSchemaVersion={DbSchemaVersion}", state, versionState.AppVersion ?? "null", versionState.DbSchemaVersion ?? "null");
+            logger.LogDebug("Settings section built (live): state={State}, appVersion={AppVersion}, dbSchemaVersion={DbSchemaVersion}", state, versionState.AppVersion ?? "null", versionState.DbSchemaVersion ?? "null");
 
             return new SettingsSection
             {
@@ -128,7 +131,8 @@ internal static class AdminHealthEndpoints
                 Summary = state == ApiHealthState.Ready
                     ? $"Version {versionState.AppVersion} ready"
                     : "Some settings require verification",
-                Details = details
+                Details = details,
+                PreviewMode = false
             };
         }
         catch (Exception ex)
@@ -138,35 +142,69 @@ internal static class AdminHealthEndpoints
             {
                 State = ApiHealthState.Error,
                 Summary = "Error loading settings configuration",
-                Details = [ex.Message]
+                Details = [ex.Message],
+                PreviewMode = false
             };
         }
     }
 
-    private static ModelsSection BuildModelsSection(ILogger logger)
+    private static async Task<ModelsSection> BuildModelsSection(
+        IModelRuntimeStateRepository modelStateRepository,
+        ILogger logger,
+        CancellationToken cancellationToken)
     {
-        logger.LogDebug("Building models section");
+        logger.LogDebug("Building models section from live model_runtime_states");
 
         try
         {
-            logger.LogWarning("Models section is preview state; runtime model status integration is still pending");
+            var states = await modelStateRepository.GetAllAsync(cancellationToken);
+            logger.LogDebug("Loaded {ModelCount} model states", states.Count);
+
+            var models = states
+                .Select(state => new ModelHealthDetail
+                {
+                    Name = state.RuntimeRole.ToString(),
+                    State = ParseHealthState(state.Status),
+                    Status = state.Status,
+                    Version = state.ModelId,
+                    Details = state.LastErrorSummary is not null
+                        ? $"{state.ProgressPercent}% complete; Error: {state.LastErrorSummary}"
+                        : $"{state.ProgressPercent}% complete"
+                })
+                .ToList();
+
+            var activeOps = states.Count(s => s.CurrentOperationId.HasValue);
+            var overallState = states.Any(s => s.Status == "failed")
+                ? ApiHealthState.Error
+                : states.Any(s => s.Status == "ready")
+                    ? ApiHealthState.Ready
+                    : ApiHealthState.Degraded;
+
+            logger.LogDebug("Models section built (live): {ModelCount} models, {ActiveOps} operations", models.Count, activeOps);
+
             return new ModelsSection
             {
-                State = ApiHealthState.Ready,
-                Summary = "Model status service integration pending (preview state)",
-                Models = Array.Empty<ModelHealthDetail>(),
-                ActiveOperationCount = 0
+                State = overallState,
+                Summary = models.Count == 0
+                    ? "No models configured"
+                    : models.All(m => m.State == ApiHealthState.Ready)
+                        ? "All models operational"
+                        : "Some models require attention",
+                Models = models,
+                ActiveOperationCount = activeOps,
+                PreviewMode = false
             };
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Error building models section");
+            logger.LogDebug(ex, "Error building models section: {ErrorMessage}", ex.Message);
             return new ModelsSection
             {
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving model status",
-                Models = Array.Empty<ModelHealthDetail>(),
-                ActiveOperationCount = 0
+                Models = [],
+                ActiveOperationCount = 0,
+                PreviewMode = false
             };
         }
     }
@@ -186,7 +224,7 @@ internal static class AdminHealthEndpoints
                 details.Add($"Observability error: {errorValue}");
             }
 
-            logger.LogDebug("Observability section built: state={State}", state);
+            logger.LogDebug("Observability section built (live): state={State}", state);
 
             return new ObservabilitySection
             {
@@ -197,7 +235,8 @@ internal static class AdminHealthEndpoints
                 TracesStatus = state == DomainHealthState.Ready ? "Operational" : state.ToString(),
                 MetricsStatus = state == DomainHealthState.Ready ? "Operational" : state.ToString(),
                 LogsStatus = state == DomainHealthState.Ready ? "Operational" : state.ToString(),
-                Details = details
+                Details = details,
+                PreviewMode = false
             };
         }
         catch (Exception ex)
@@ -207,7 +246,8 @@ internal static class AdminHealthEndpoints
             {
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving observability status",
-                Details = [ex.Message]
+                Details = [ex.Message],
+                PreviewMode = false
             };
         }
     }
@@ -232,14 +272,15 @@ internal static class AdminHealthEndpoints
                 details.Add($"pgvector extension: {extensionValue}");
             }
 
-            logger.LogDebug("Storage section built: state={State}, latency={Latency}ms", state, postgresProbe?.LatencyMs);
+            logger.LogDebug("Storage section built (live): state={State}, latency={Latency}ms", state, postgresProbe?.LatencyMs);
 
             return new StorageSection
             {
                 State = ToApiHealthState(state),
                 Summary = state == DomainHealthState.Ready ? "Storage systems operational" : $"Storage {state.ToString().ToLower()}",
                 PostgresStatus = state.ToString(),
-                Details = details
+                Details = details,
+                PreviewMode = false
             };
         }
         catch (Exception ex)
@@ -249,7 +290,8 @@ internal static class AdminHealthEndpoints
             {
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving storage status",
-                Details = [ex.Message]
+                Details = [ex.Message],
+                PreviewMode = false
             };
         }
     }
@@ -272,7 +314,8 @@ internal static class AdminHealthEndpoints
                 LastBackupAt = null,
                 TimeSinceLastBackup = "Unknown",
                 RetentionStatus = "Not yet verified",
-                Details = ["Backup verification is preview state; live verification is pending."]
+                Details = ["Backup verification is preview state; live verification is pending."],
+                PreviewMode = true
             };
         }
         catch (Exception ex)
@@ -282,11 +325,21 @@ internal static class AdminHealthEndpoints
             {
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving backup status",
-                Details = [ex.Message]
+                Details = [ex.Message],
+                PreviewMode = true
             };
         }
     }
 
     private static ApiHealthState ToApiHealthState(DomainHealthState state)
         => (ApiHealthState)state;
+
+    private static ApiHealthState ParseHealthState(string status)
+        => status?.ToLowerInvariant() switch
+        {
+            "ready" => ApiHealthState.Ready,
+            "failed" => ApiHealthState.Error,
+            "paused" => ApiHealthState.Paused,
+            _ => ApiHealthState.Degraded
+        };
 }

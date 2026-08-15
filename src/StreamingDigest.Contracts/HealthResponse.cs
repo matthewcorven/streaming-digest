@@ -167,7 +167,7 @@ public sealed class StorageSection
 }
 
 /// <summary>
-/// Backup system readiness (Preview - based on manifest, not live verification).
+/// Backup system readiness (Preview - expected state; actual manifest verification pending #271).
 /// </summary>
 public sealed class BackupReadinessSection
 {
@@ -188,4 +188,9 @@ public sealed class BackupReadinessSection
 
     /// <summary>Optional details about backup concerns or next action.</summary>
     public IReadOnlyList<string> Details { get; init; } = [];
+
+    /// <summary>
+    /// Always true: preview/static data. Live backup manifest check pending #271 (ADR-0018).
+    /// </summary>
+    public bool PreviewMode { get; init; } = true;
 }
