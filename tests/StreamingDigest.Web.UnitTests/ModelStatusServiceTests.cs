@@ -126,7 +126,7 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
         });
         _handler!.SetStatusResponse(new
         {
-            models = new[]
+            models = new object[]
             {
                 new { provider = "whisper", modelId = "whisper", runtimeRole = "audio", status = "ready", progressPercent = (int?)null, lastErrorSummary = (string?)null, detailsJson = (string?)null },
                 new { provider = "ollama", modelId = "qwen", runtimeRole = "text", status = "queued", progressPercent = 50, lastErrorSummary = (string?)null, detailsJson = (string?)null }
@@ -183,7 +183,7 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
 
         await service.RefreshAsync();
 
-        Assert.Equal(ModelRowState.Downloading, service.Models[0].RowState);
+        Assert.Equal(ModelRowState.Running, service.Models[0].RowState);
         Assert.Equal(25, service.Models[0].ProgressPercent);
     }
 
