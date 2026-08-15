@@ -40,6 +40,29 @@ public static class MeaiServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers the MeaiEmbeddingServiceAdapter as IEmbeddingService.
+    /// Automatically registers the underlying MEAI embedding generator and wires the adapter with dimension validation.
+    /// </summary>
+    public static IServiceCollection AddMeaiEmbeddingServiceAdapter(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        services.AddMeaiEmbeddingGenerator(configuration);
+
+        services.AddSingleton<IEmbeddingService>(sp =>
+        {
+            var generator = sp.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>();
+            var logger = sp.GetService<ILogger<MeaiEmbeddingServiceAdapter>>();
+            return new MeaiEmbeddingServiceAdapter(generator, configuration, logger);
+        });
+
+        return services;
+    }
+
+    /// <summary>
     /// Registers a MEAI chat client backed by OllamaSharp with function invocation, OpenTelemetry, and logging middleware.
     /// Resolves endpoint and model from existing configuration keys.
     /// </summary>

@@ -71,6 +71,18 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
         // Single in-process broadcaster shared by every publisher and SSE subscriber.
         services.AddSingleton<IModelLifecycleEventBroadcaster, ModelLifecycleEventBroadcaster>();
+        // Cross-process listener: PostgreSQL LISTEN/NOTIFY bridge for model state changes.
+        // The listener subscribes to "model_state_changed" channel and forwards notifications
+        // to the broadcaster so SSE clients see real-time events from the worker process.
+        services.AddSingleton<PostgresModelLifecycleEventListener>(sp =>
+            new PostgresModelLifecycleEventListener(
+                connectionString,
+                sp.GetRequiredService<IModelLifecycleEventBroadcaster>(),
+                sp.GetRequiredService<ILogger<PostgresModelLifecycleEventListener>>()));
+        // Register the listener as a hosted service so it starts on app startup.
+        services.AddHostedService<PostgresModelLifecycleEventListenerHostedService>(sp =>
+            new PostgresModelLifecycleEventListenerHostedService(
+                sp.GetRequiredService<PostgresModelLifecycleEventListener>()));
         services.AddSingleton<Application.ModelRuntimeReconcileService>();
         // WS-5: durable operation persistence for the model download handoff.
         services.AddSingleton<IOperationStore>(sp => new PostgresOperationStore(connectionString));

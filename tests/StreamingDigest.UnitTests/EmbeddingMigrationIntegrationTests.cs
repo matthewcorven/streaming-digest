@@ -386,7 +386,11 @@ public sealed class MockMeaiScenarioTests
         var adapter = new MeaiEmbeddingServiceAdapter(mockGenerator.Object, configuration);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-        await Assert.ThrowsAsync<OperationCanceledException>(() => adapter.GenerateEmbeddingAsync("test", cts.Token));
+        // TaskCanceledException is a subclass of OperationCanceledException, so either is valid
+        var ex = await Record.ExceptionAsync(() => adapter.GenerateEmbeddingAsync("test", cts.Token));
+        Assert.NotNull(ex);
+        Assert.True(ex is OperationCanceledException, $"Expected OperationCanceledException or subclass, got {ex.GetType().Name}");
+
     }
 }
 
