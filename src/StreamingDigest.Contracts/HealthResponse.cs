@@ -138,7 +138,7 @@ public sealed class ObservabilitySection
 }
 
 /// <summary>
-/// Storage and database health (Preview - based on last verified state).
+/// Storage and database health (Live probe results).
 /// </summary>
 public sealed class StorageSection
 {
@@ -159,6 +159,11 @@ public sealed class StorageSection
 
     /// <summary>Optional details about storage concerns.</summary>
     public IReadOnlyList<string> Details { get; init; } = [];
+
+    /// <summary>
+    /// False: live data from service health probes. True: preview/static data (ADR-0018).
+    /// </summary>
+    public bool PreviewMode { get; init; } = false;
 }
 
 /// <summary>
