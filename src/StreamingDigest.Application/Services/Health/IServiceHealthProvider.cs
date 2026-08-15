@@ -1,4 +1,4 @@
-using StreamingDigest.Contracts;
+using StreamingDigest.Domain.Health;
 
 namespace StreamingDigest.Application.Services.Health;
 

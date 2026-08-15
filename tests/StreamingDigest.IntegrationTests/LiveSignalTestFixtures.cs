@@ -5,30 +5,85 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
+using StreamingDigest.Domain.Health;
 
 namespace StreamingDigest.IntegrationTests;
 
 /// <summary>
-/// HealthState enum from Tank #271 design.
-/// Used to drive deterministic state transitions in #273 regression tests.
+/// Test double: Service health provider for deterministic HealthState mutation.
+/// Used in unit/integration tests to drive state transitions without real service dependencies.
+/// All mutations logged at Debug level per debug-logging-rule.
 /// </summary>
-public enum HealthState
+public class TestServiceHealthProvider : IServiceHealthProvider
 {
-    /// <summary>All systems operational.</summary>
-    Ready = 0,
+    private readonly Dictionary<string, HealthState> _serviceStates;
 
-    /// <summary>Operational but with warnings (degraded performance, partial outage).</summary>
-    Degraded = 1,
+    public TestServiceHealthProvider()
+    {
+        _serviceStates = new()
+        {
+            { "Api", HealthState.Ready },
+            { "Worker", HealthState.Ready },
+            { "Database", HealthState.Ready },
+            { "Observability", HealthState.Ready }
+        };
+    }
 
-    /// <summary>Active reconnection in progress (post-network loss).</summary>
-    Reconnecting = 2,
+    /// <summary>
+    /// Mutate a service's health state (unit test support).
+    /// </summary>
+    public void SetServiceHealth(string serviceName, HealthState state)
+    {
+        if (_serviceStates.ContainsKey(serviceName))
+        {
+            var previousState = _serviceStates[serviceName];
+            _serviceStates[serviceName] = state;
+            Debug.WriteLine($"[TestHealthProvider] {serviceName}: {previousState} → {state}");
+        }
+    }
 
-    /// <summary>Critical error (e.g., database down, cannot recover).</summary>
-    Error = 3,
+    /// <summary>
+    /// Induce Reconnecting state on a service (simulates network loss scenario).
+    /// </summary>
+    public void InduceReconnecting(string serviceName)
+    {
+        SetServiceHealth(serviceName, HealthState.Reconnecting);
+    }
 
-    /// <summary>Admin paused/maintenance mode (intentional halt).</summary>
-    Paused = 4
+    /// <summary>
+    /// Induce Degraded state on a service (simulates performance warning scenario).
+    /// </summary>
+    public void InduceDegraded(string serviceName)
+    {
+        SetServiceHealth(serviceName, HealthState.Degraded);
+    }
+
+    /// <summary>
+    /// Get overall health (minimum state across all services).
+    /// </summary>
+    public HealthState GetOverallHealth()
+    {
+        var minState = _serviceStates.Values.Min();
+        Debug.WriteLine($"[TestHealthProvider] Overall health: {minState}");
+        return minState;
+    }
+
+    /// <summary>
+    /// Get current state of a specific service.
+    /// </summary>
+    public HealthState GetServiceHealth(string serviceName) =>
+        _serviceStates.TryGetValue(serviceName, out var state) ? state : HealthState.Error;
+}
+
+/// <summary>
+/// Test-doubles interface for service health provider (matches production interface).
+/// </summary>
+public interface IServiceHealthProvider
+{
+    HealthState GetOverallHealth();
+    HealthState GetServiceHealth(string serviceName);
 }
 
 /// <summary>
@@ -49,23 +104,30 @@ public enum HealthState
 
 /// <summary>
 /// Fixture 1: SSE Event Emitter
-/// Simulates SSE stream emission, capturing timing and content for verification.
+/// Simulates SSE stream emission with Channel<T> bounded buffer (256 events max).
 /// Pattern: Mock IEventBroadcaster or wrap real broadcaster with instrumentation.
+/// Includes Trinity #223 Channel<T> pattern for async backpressure + connection drop tracking.
 /// </summary>
 public class SseEventEmitterFixture : IAsyncDisposable
 {
     private readonly List<(DateTimeOffset Timestamp, string EventName, string Data)> _emittedEvents;
     private readonly TaskCompletionSource<bool> _subscriptionRegistered;
+    private readonly Channel<(string EventName, string Data)> _eventChannel;
     private CancellationTokenSource? _emissionCts;
 
     public SseEventEmitterFixture()
     {
         _emittedEvents = new();
         _subscriptionRegistered = new();
+        // Trinity #223 pattern: bounded channel with capacity 256
+        _eventChannel = Channel.CreateBounded<(string, string)>(new BoundedChannelOptions(256)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
     }
 
     /// <summary>
-    /// Emit an SSE event with deterministic timing.
+    /// Emit an SSE event with deterministic timing via bounded Channel<T>.
     /// Format: event: {eventName}\ndata: {data}\n\n
     /// </summary>
     public async Task EmitAsync(string eventName, string data, int delayMs = 0)
@@ -74,6 +136,10 @@ public class SseEventEmitterFixture : IAsyncDisposable
             await Task.Delay(delayMs);
 
         _emittedEvents.Add((DateTimeOffset.UtcNow, eventName, data));
+        
+        // Emit to channel (will drop oldest if full, per DropOldest mode)
+        await _eventChannel.Writer.WriteAsync((eventName, data));
+        
         Debug.WriteLine($"[SSE] {eventName}: {data}");
     }
 
@@ -116,6 +182,26 @@ public class SseEventEmitterFixture : IAsyncDisposable
         => _emittedEvents.AsReadOnly();
 
     /// <summary>
+    /// Read events from the bounded Channel<T> (with async backpressure).
+    /// Used for testing subscriber backlog handling.
+    /// </summary>
+    public async IAsyncEnumerable<(string EventName, string Data)> GetEventStreamAsync(CancellationToken ct = default)
+    {
+        await foreach (var evt in _eventChannel.Reader.ReadAllAsync(ct))
+        {
+            yield return evt;
+        }
+    }
+
+    /// <summary>
+    /// Complete the event channel (signal stream end).
+    /// </summary>
+    public void CompleteStream()
+    {
+        _eventChannel.Writer.TryComplete();
+    }
+
+    /// <summary>
     /// Clear emission history (useful between sub-tests).
     /// </summary>
     public void Reset()
@@ -128,6 +214,7 @@ public class SseEventEmitterFixture : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _emissionCts?.Dispose();
+        CompleteStream();
         await Task.CompletedTask;
     }
 }

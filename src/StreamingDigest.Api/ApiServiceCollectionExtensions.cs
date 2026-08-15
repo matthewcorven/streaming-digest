@@ -70,6 +70,8 @@ internal static class ApiServiceCollectionExtensions
         services.AddScoped<IBackupManifestChecker>(sp => new BackupManifestChecker(
             sp.GetRequiredService<ApplicationConfiguration>(),
             sp.GetRequiredService<ILogger<BackupManifestChecker>>()));
+        services.AddSingleton<CompositeServiceHealthProvider>(sp => new CompositeServiceHealthProvider(
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger<CompositeServiceHealthProvider>()));
         services.AddScoped<UpgradeCompatibilityStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
