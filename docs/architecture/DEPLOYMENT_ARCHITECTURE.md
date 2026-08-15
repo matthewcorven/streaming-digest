@@ -676,6 +676,282 @@ Streaming Digest scales along multiple dimensions:
 
 ---
 
+## Service Probe Mapping (Feeds Observability Contract)
+
+Service health probes emit structured diagnostics that drive operational visibility. This section maps service endpoints to their health contract, enabling orchestrators and observability systems to react appropriately.
+
+### Health Check Endpoints
+
+**API Service (`/health/*` endpoints):**
+
+| Endpoint | Purpose | Response | Feeds |
+|----------|---------|----------|-------|
+| `/health/live` | Liveness probe (is service running?) | 200 OK or 503 | Orchestrator (restart policy) |
+| `/health/ready` | Readiness probe (can service accept traffic?) | 200 OK or 503 | Load balancer (traffic routing) |
+| `/health/startup` | Startup probe (did service initialize successfully?) | 200 OK or 503 | Orchestrator (wait before live check) |
+
+**Worker Service (Hangfire health):**
+
+| Endpoint/Signal | Purpose | Response | Feeds |
+|-----------------|---------|----------|-------|
+| Hangfire dashboard `/hangfire` | Job queue status | 200 OK, displays jobs | Operations UI |
+| Hangfire recurring jobs | Scheduled ingestion tasks | Running/success/failed status | WorkerServiceRegistry |
+| Heartbeat signal (DB: `WorkerHeartbeat` table) | Worker instance alive check | Timestamp updated every 30s | API health probe aggregation |
+
+**External Service Health (Ollama, Whisper, PostgreSQL):**
+
+| Service | Health Check | Command | Expected Response |
+|---------|--------------|---------|-------------------|
+| **Ollama** | HTTP HEAD /api/tags | `curl -I http://ollama:11434/api/tags` | 200 OK |
+| **Whisper** | HTTP HEAD / | `curl -I http://whisper:9000/` | 200 OK |
+| **PostgreSQL** | SQL: SELECT 1 | `psql -c "SELECT 1"` | (1 row) |
+
+### Health Probe Aggregation (API → Orchestrator)
+
+The API's `/health/live` and `/health/ready` endpoints aggregate all dependency checks and report aggregated health state:
+
+```
+API Health Probe Flow
+│
+├─ Check Database (PostgreSQL SELECT 1)
+│  └─ Failure → HealthStatus.Unhealthy (503)
+│
+├─ Check Ollama (HTTP HEAD /api/tags)
+│  └─ Failure → Log warning, set HealthStatus.Degraded
+│
+├─ Check Whisper (HTTP HEAD /)
+│  └─ Failure → Log warning, set HealthStatus.Degraded
+│
+├─ Check Hangfire Queue (any failed jobs exceeding retry limit?)
+│  └─ Failure → Log warning, set HealthStatus.Degraded
+│
+└─ Check Observability (Prometheus/Loki/Tempo reachable?)
+   └─ Failure → Log warning (non-critical)
+
+Aggregated Result:
+├─ All checks pass       → 200 OK + HealthStatus.Healthy
+├─ Some deps unavailable → 200 OK + HealthStatus.Degraded + warnings logged
+└─ Critical dep down     → 503 Unavailable + HealthStatus.Unhealthy
+```
+
+### Service Health State Machine (Tank #271 Observability Contract)
+
+Service health progresses through discrete states:
+
+```
+┌──────────────┐
+│ Ready        │  ← Service initialized, all deps healthy
+└──────┬───────┘
+       │
+       ├─ External dep unavailable
+       ▼
+┌──────────────┐
+│ Degraded     │  ← Core running, some deps down or slow
+└──────┬───────┘
+       │
+       ├─ DB connection lost
+       │  OR Hangfire queue backlog excessive
+       │  OR Model inference latency >5 min
+       ▼
+┌──────────────┐
+│ Reconnecting │  ← Service actively reconnecting to deps
+└──────┬───────┘
+       │
+       ├─ Reconnection successful
+       │  → Ready
+       │
+       └─ Reconnection timeout (30s)
+           ▼
+┌──────────────┐
+│ Error        │  ← Unrecoverable state (restart needed)
+└──────┬───────┘
+       │
+       └─ Orchestrator restarts container/pod
+           → Ready (on successful restart)
+```
+
+**Health State Transitions (Tank #271 observability enum):**
+- `Ready` — All dependencies operational
+- `Degraded` — Core functionality running, non-critical dependencies slow/unavailable
+- `Reconnecting` — Attempting to restore failed dependency
+- `Error` — Unrecoverable failure (restart required)
+- `Paused` — Intentionally paused (admin action, maintenance)
+
+---
+
+## Configuration Continuity (Dev → Production)
+
+Configuration flows through three layers, enabling symmetry between development (Aspire) and production (Compose/Kubernetes) deployments:
+
+### Layer 1: AppHost Configuration (Development)
+
+**Location:** `src/StreamingDigest.AppHost/AppHost.cs`
+
+**Pattern:**
+```csharp
+var builder = DistributedApplication.CreateBuilder(args);
+
+var postgres = builder.AddPostgres("postgres")
+    .WithDataVolume()
+    .AddDatabase("streaming-digest");
+
+var ollama = builder.AddOllama("ollama")
+    .WithImageTag("0.32.13")
+    .WithEndpoint(protocol: "http", scheme: "http", port: 11434);
+
+var whisper = builder.AddContainer("whisper", "whisper")
+    .WithImageTag("latest")
+    .WithEndpoint(port: 9000);
+
+var api = builder.AddProject<StreamingDigest.Api>("api")
+    .WithReference(postgres)
+    .WithReference(ollama)
+    .WithReference(whisper)
+    .WithHttpEndpoint(port: 8080);
+
+var worker = builder.AddProject<StreamingDigest.Worker>("worker")
+    .WithReference(postgres)
+    .WithReference(ollama)
+    .WithReference(whisper);
+
+builder.Build().Run();
+```
+
+**Key Properties:**
+- Service references resolved at build time → connection strings auto-injected
+- Environment variables: `services__{ServiceName}__endpoints__{Endpoint}__uri`
+- Health checks: AppHost includes `/health/live` by default
+
+### Layer 2: Docker Compose Configuration (Generated)
+
+**Location:** `docker-compose.yaml` (generated from AppHost via `aspire publish`)
+
+**Pattern:**
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: streaming-digest
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:0.32.13
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+
+  api:
+    image: ${REGISTRY}/streaming-digest-api:${COMMIT_SHA}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      ConnectionStrings__postgres: "Host=postgres;Database=streaming-digest;Password=${DB_PASSWORD}"
+      Services__ollama__Endpoints__http__uri: "http://ollama:11434"
+      Services__whisper__Endpoints__http__uri: "http://whisper:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    image: ${REGISTRY}/streaming-digest-worker:${COMMIT_SHA}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__postgres: "Host=postgres;Database=streaming-digest;Password=${DB_PASSWORD}"
+      Services__ollama__Endpoints__http__uri: "http://ollama:11434"
+
+volumes:
+  postgres-data:
+  ollama-models:
+```
+
+**Key Patterns:**
+- Connection strings: Host names are service names (internal Docker network)
+- Environment variable injection: `${VAR}` placeholders read from `.env` file
+- Dependency ordering: `depends_on` with `condition: service_healthy` ensures startup sequence
+- Secrets: Passwords, API keys stored in `.env` (excluded from version control)
+
+### Layer 3: Environment Files (.env → Secrets Management)
+
+**Location:** `.env.local` (development), `.env.prod` (production)
+
+**Pattern:**
+```bash
+# .env.prod
+DB_PASSWORD=<production-password-from-secrets-manager>
+DB_HOST=streaming-digest-postgres.postgres.svc.cluster.local  # Kubernetes DNS
+REGISTRY=docker.io/myorg
+COMMIT_SHA=abc123def
+
+OLLAMA_API_KEY=<if-secured>
+WHISPER_API_KEY=<if-secured>
+OBSERVABILITY_ENDPOINT=https://otel-collector.example.com:4317
+
+# Ingestion scheduling
+INGESTION_SCHEDULE=0 2 * * *  # 2 AM daily
+MAX_PARALLEL_INGESTIONS=3
+
+# Feature flags
+ENABLE_EMBEDDING_CACHE=true
+ENABLE_GPU_ACCELERATION=true
+```
+
+**Secrets Management Pattern:**
+
+```
+Development (.env.local)
+│
+├─ Plain text for local Docker Compose
+├─ Passwords: `dev123`, `compose123`
+├─ Never commit to version control
+│
+Production (Secrets Manager)
+│
+├─ AWS Secrets Manager / Azure Key Vault / HashiCorp Vault
+├─ Passwords: auto-generated, rotated periodically
+├─ Injected at deployment time
+│  └─ Docker Compose: `docker run -e DB_PASSWORD=$(aws secretsmanager get-secret-value...)`
+│  └─ Kubernetes: `kubectl create secret generic streaming-digest-secrets --from-literal=db_password=...`
+│
+Audit Trail
+│
+└─ All secret access logged centrally
+   Rotation events → Observability stack → Alerts on anomalies
+```
+
+### Configuration Continuity Checklist
+
+When deploying configuration changes from dev → prod:
+
+- [ ] **AppHost change:** Service added/modified in `AppHost.cs`
+- [ ] **docker-compose regeneration:** Run `aspire publish` or `./scripts/publish_compose.sh`
+- [ ] **Connection string migration:** Verify `ConnectionStrings__*` env vars match new service names
+- [ ] **Service reference updates:** All dependent services updated to reference new service
+- [ ] **Secrets rotation:** Confirm new secrets created in production vault
+- [ ] **Health probe validation:** `/health/live` reflects all dependencies
+- [ ] **DNS/networking:** Service discovery working (Docker network or Kubernetes DNS)
+- [ ] **Volume persistence:** Storage volumes mounted correctly (`postgres-data`, `ollama-models`)
+- [ ] **Startup order:** `depends_on` conditions enforce correct service startup sequence
+- [ ] **Observability wiring:** Prometheus/Loki/Tempo can reach all services
+- [ ] **Smoke test:** Basic ingestion + search workflow passes after deployment
+
+---
+
 ## Next Steps
 
 See:
