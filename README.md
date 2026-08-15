@@ -254,9 +254,9 @@ Streaming Digest uses local OSS AI services managed through a hard-coded model c
 | ID | Provider | Downloadable |
 |---|---|---|
 | `bge-m3` | Ollama | ✓ (`ollama pull bge-m3`) |
-| `text-embedding-3-small` | OpenAI | verify-only (external) |
+| `nomic-embed-text` | Ollama | ✓ (`ollama pull nomic-embed-text`) |
 
-`bge-m3` is the default local embedding model. `text-embedding-3-small` is in the catalog for deployments using the OpenAI API; no local download is required.
+`bge-m3` and `nomic-embed-text` are local embedding models for search indexing and query similarity workflows. Both are acquired through Ollama and can be downloaded or verified from Settings.
 
 **LLM models:**
 
