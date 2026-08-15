@@ -91,7 +91,7 @@ else
         {
             var navigationTarget = _pendingNavigationTarget;
             _pendingNavigationTarget = null;
-            NavigationManager.NavigateTo(navigationTarget, true);
+            NavigationManager.NavigateTo(navigationTarget);
         }
     }
 
@@ -113,7 +113,7 @@ else
     private async Task HandleLogout()
     {
         await AuthenticationService.LogoutAsync();
-        NavigationManager.NavigateTo("/login", true);
+        NavigationManager.NavigateTo("/login");
     }
 
     private string CurrentPageTitle
@@ -151,7 +151,7 @@ else
 
         if (!AuthenticationService.IsAuthenticated && !IsPublicRoute())
         {
-            return "/login";
+            return ReturnUrlHelper.BuildLoginRedirectTarget(NavigationManager.ToBaseRelativePath(NavigationManager.Uri));
         }
 
         return null;

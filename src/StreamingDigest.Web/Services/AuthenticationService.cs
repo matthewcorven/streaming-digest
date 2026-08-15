@@ -27,6 +27,8 @@ public sealed class AuthenticationService
 
     public string CurrentUser => _currentUser;
 
+    public Uri? ApiBaseAddress => _httpClient.BaseAddress;
+
     public event Action? Changed;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -171,10 +173,15 @@ public sealed class AuthenticationService
     {
         PrepareBrowserRequest(request);
 
-        if (!request.Headers.TryGetValues("X-CSRF-Token", out var existingValues) || string.IsNullOrWhiteSpace(existingValues.FirstOrDefault()))
+        if (RequiresCsrfToken(request.Method)
+            && (!request.Headers.TryGetValues("X-CSRF-Token", out var existingValues) || string.IsNullOrWhiteSpace(existingValues.FirstOrDefault())))
         {
             var csrfToken = await EnsureApiSessionAsync(cancellationToken);
             request.Headers.Add("X-CSRF-Token", csrfToken);
+        }
+        else if (!_isAuthenticated)
+        {
+            await EnsureApiSessionAsync(cancellationToken);
         }
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -281,6 +288,11 @@ public sealed class AuthenticationService
     {
         request.SetBrowserRequestCredentials(BrowserRequestCredentials.Include);
     }
+
+    private static bool RequiresCsrfToken(HttpMethod method)
+        => method != HttpMethod.Get
+           && method != HttpMethod.Head
+           && method != HttpMethod.Options;
 
     private sealed class CsrfResponse
     {

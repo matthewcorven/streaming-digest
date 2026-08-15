@@ -58,13 +58,13 @@
 
         if (AuthenticationService.IsSetupRequired)
         {
-            NavigationManager.NavigateTo("/setup", true);
+            NavigationManager.NavigateTo("/setup");
             return;
         }
 
         if (AuthenticationService.IsAuthenticated)
         {
-            NavigationManager.NavigateTo(await DeterminePostLoginRouteAsync(), true);
+            NavigationManager.NavigateTo(await DetermineNavigationTargetAsync());
             return;
         }
 
@@ -89,7 +89,7 @@
         var loginResult = await AuthenticationService.LoginAsync(_model.Username, _model.Password);
         if (loginResult is AuthenticationService.LoginResult.Success or AuthenticationService.LoginResult.RequiresPasswordChange)
         {
-            NavigationManager.NavigateTo(await DeterminePostLoginRouteAsync(loginResult), true);
+            NavigationManager.NavigateTo(await DetermineNavigationTargetAsync(loginResult));
             return;
         }
 
@@ -98,11 +98,17 @@
 
     private void TogglePasswordVisibility() => _showPassword = !_showPassword;
 
-    private async Task<string> DeterminePostLoginRouteAsync(AuthenticationService.LoginResult? loginResult = null)
+    private async Task<string> DetermineNavigationTargetAsync(AuthenticationService.LoginResult? loginResult = null)
     {
         if ((loginResult ?? (AuthenticationService.RequiresPasswordChange ? AuthenticationService.LoginResult.RequiresPasswordChange : AuthenticationService.LoginResult.Success)) == AuthenticationService.LoginResult.RequiresPasswordChange)
         {
             return "/change-password";
+        }
+
+        var returnUrl = TryGetReturnUrl();
+        if (returnUrl is not null)
+        {
+            return returnUrl;
         }
 
         try
@@ -122,6 +128,22 @@
                 lastSelectedMode: SearchUiSessionService.GetLastSelectedModeRoute(),
                 hasCompletedRun: false);
         }
+    }
+
+    private string? TryGetReturnUrl()
+    {
+        var query = NavigationManager.ToAbsoluteUri(NavigationManager.Uri).Query.TrimStart('?');
+        foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = segment.Split('=', 2);
+            if (parts.Length == 2
+                && string.Equals(Uri.UnescapeDataString(parts[0]), "returnUrl", StringComparison.OrdinalIgnoreCase))
+            {
+                return ReturnUrlHelper.ResolveSafeReturnUrl(Uri.UnescapeDataString(parts[1]));
+            }
+        }
+
+        return null;
     }
 
     private sealed class LoginModel
