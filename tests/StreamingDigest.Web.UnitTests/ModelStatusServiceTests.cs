@@ -93,14 +93,23 @@ public sealed class ModelStatusServiceTests
 
     private sealed class StubHttpMessageHandler : HttpMessageHandler
     {
+        private readonly object? _optionsPayload;
+        private readonly object? _statusPayload;
+
+        public StubHttpMessageHandler(object? optionsPayload = null, object? statusPayload = null)
+        {
+            _optionsPayload = optionsPayload;
+            _statusPayload = statusPayload;
+        }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             return request.RequestUri?.AbsolutePath switch
             {
                 "/api/auth/me" => Task.FromResult(JsonResponse(new { username = "admin", mustChangePassword = false })),
                 "/api/auth/csrf" => Task.FromResult(JsonResponse(new { token = "csrf-token" })),
-                "/api/models/options" => Task.FromResult(JsonResponse(new { models = Array.Empty<object>() })),
-                "/api/models/status" => Task.FromResult(JsonResponse(new { models = Array.Empty<object>() })),
+                "/api/models/options" => Task.FromResult(JsonResponse(_optionsPayload ?? new { models = Array.Empty<object>() })),
+                "/api/models/status" => Task.FromResult(JsonResponse(_statusPayload ?? new { models = Array.Empty<object>() })),
                 "/api/models/verify" => Task.FromResult(JsonResponse(new
                 {
                     status = "verified",
