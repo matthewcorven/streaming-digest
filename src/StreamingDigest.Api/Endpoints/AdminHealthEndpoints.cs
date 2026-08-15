@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using StreamingDigest.Application.Configuration;
 using StreamingDigest.Web.Models;
-using StreamingDigest.Web.Services;
 
 namespace StreamingDigest.Api.Endpoints;
 
@@ -16,7 +14,6 @@ internal static class AdminHealthEndpoints
     {
         app.MapGet("/api/admin/health", GetAdminHealth)
             .WithName("AdminHealth")
-            .WithOpenApi()
             .Produces<HealthResponse>(StatusCodes.Status200OK)
             .WithSummary("Get live admin health status")
             .WithDescription("Returns current health status including live model states, observability pipeline, and storage systems. " +
@@ -25,8 +22,7 @@ internal static class AdminHealthEndpoints
 
     private static async Task<IResult> GetAdminHealth(
         IConfiguration configuration,
-        ModelStatusService? modelStatusService,
-        ILogger<AdminHealthEndpoints> logger,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         logger.LogDebug("Generating live admin health snapshot");
@@ -37,7 +33,7 @@ internal static class AdminHealthEndpoints
             var health = new HealthResponse
             {
                 Settings = BuildSettingsSection(configuration, logger),
-                Models = BuildModelsSection(modelStatusService, logger),
+                Models = BuildModelsSection(logger),
                 Observability = BuildObservabilitySection(configuration, logger),
                 Storage = BuildStorageSection(configuration, logger),
                 BackupReadiness = BuildBackupReadinessSection(logger),
@@ -118,70 +114,21 @@ internal static class AdminHealthEndpoints
         }
     }
 
-    private static ModelsSection BuildModelsSection(ModelStatusService? modelStatusService, ILogger logger)
+    private static ModelsSection BuildModelsSection(ILogger logger)
     {
         logger.LogDebug("Building models section");
 
         try
         {
-            if (modelStatusService == null)
-            {
-                logger.LogWarning("ModelStatusService not available; returning preview state");
-                return new ModelsSection
-                {
-                    State = HealthState.Ready,
-                    Summary = "Model status service not initialized (preview state)",
-                    Models = Array.Empty<ModelHealthDetail>(),
-                    ActiveOperationCount = 0
-                };
-            }
-
-            // Get live model data from ModelStatusService
-            var models = modelStatusService.Models;
-            var modelDetails = new List<ModelHealthDetail>();
-            var hasErrors = false;
-            var hasWarnings = false;
-
-            foreach (var model in models)
-            {
-                var modelState = MapRowStateToHealthState(model.RowState);
-                
-                if (modelState == HealthState.Error)
-                    hasErrors = true;
-                else if (modelState == HealthState.Degraded)
-                    hasWarnings = true;
-
-                modelDetails.Add(new ModelHealthDetail
-                {
-                    Name = model.DisplayName ?? "Unknown",
-                    State = modelState,
-                    Status = model.RowState.ToString(),
-                    Version = model.ModelVersion,
-                    Details = model.StatusMessage
-                });
-            }
-
-            var overallState = hasErrors ? HealthState.Error :
-                              hasWarnings ? HealthState.Degraded :
-                              HealthState.Ready;
-
-            var summary = overallState switch
-            {
-                HealthState.Ready => $"All {models.Count} models operational",
-                HealthState.Degraded => $"Some models have warnings ({modelStatusService.ActiveOperationsCount} operations active)",
-                HealthState.Error => "One or more models encountered errors",
-                _ => "Model status unknown"
-            };
-
-            logger.LogDebug("Models section built: {State}, {ModelCount} models, {ActiveOps} active operations",
-                overallState, models.Count, modelStatusService.ActiveOperationsCount);
-
+            // For now, return preview state based on configuration
+            // In future, this will be backed by actual ModelStatusService query
+            logger.LogWarning("Models section is preview state; real model status integration coming in future iteration");
             return new ModelsSection
             {
-                State = overallState,
-                Summary = summary,
-                Models = modelDetails,
-                ActiveOperationCount = modelStatusService.ActiveOperationsCount
+                State = HealthState.Ready,
+                Summary = "Model status service integration pending (preview state)",
+                Models = Array.Empty<ModelHealthDetail>(),
+                ActiveOperationCount = 0
             };
         }
         catch (Exception ex)
@@ -312,21 +259,6 @@ internal static class AdminHealthEndpoints
                 Details = new[] { ex.Message }
             };
         }
-    }
-
-    private static HealthState MapRowStateToHealthState(object? rowState)
-    {
-        // Map ModelRowState to HealthState
-        var stateStr = rowState?.ToString() ?? "Unknown";
-        
-        return stateStr switch
-        {
-            "Ready" or "Idle" => HealthState.Ready,
-            "Downloading" or "Loading" or "Verifying" or "Submitting" or "Queued" or "Running" => HealthState.Reconnecting,
-            "Failed" or "Error" => HealthState.Error,
-            "Warning" or "Degraded" => HealthState.Degraded,
-            _ => HealthState.Ready
-        };
     }
 
     private static HealthState DetermineOverallHealth()
