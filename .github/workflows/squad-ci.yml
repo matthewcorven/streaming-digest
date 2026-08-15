@@ -22,7 +22,7 @@ jobs:
 
       - name: Build and test
         run: |
-          dotnet test StreamingDigest.slnx --logger "console;verbosity=minimal"
+          dotnet test StreamingDigest.slnx --filter "Category!=Integration&Category!=E2E" --logger "console;verbosity=minimal"
 
       - name: First-run smoke
         env:

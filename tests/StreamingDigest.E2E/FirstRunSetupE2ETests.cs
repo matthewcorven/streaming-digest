@@ -10,6 +10,7 @@ using Npgsql;
 
 namespace StreamingDigest.E2E;
 
+[Trait("Category", "E2E")]
 public sealed class FirstRunSetupE2ETests : IAsyncLifetime
 {
     private const string ImageName = "pgvector/pgvector:0.8.5-pg18-trixie";

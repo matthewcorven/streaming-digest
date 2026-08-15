@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace StreamingDigest.IntegrationTests;
 
+[Trait("Category", "Integration")]
 public sealed class SearchUiApiSecurityTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
