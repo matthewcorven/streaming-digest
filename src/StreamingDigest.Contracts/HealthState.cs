@@ -43,3 +43,25 @@ public enum ServiceHealthStatus
     /// <summary>Service health status is unknown (not yet checked or last check failed).</summary>
     Unknown = 4
 }
+
+/// <summary>
+/// Upgrade risk level classification for compatibility state evaluation.
+/// Guides upgrade readiness and backup requirements.
+/// </summary>
+public enum UpgradeRiskLevel
+{
+    /// <summary>Upgrade carries no data or infrastructure risk; safe to proceed immediately.</summary>
+    Safe = 0,
+
+    /// <summary>Upgrade is safe but backup is recommended as a precaution.</summary>
+    BackupRecommended = 1,
+
+    /// <summary>Upgrade requires backup before proceeding; data migration or schema change is involved.</summary>
+    BackupRequired = 2,
+
+    /// <summary>Upgrade requires manual intervention; infrastructure or deployment changes needed.</summary>
+    ManualMigrationRequired = 3,
+
+    /// <summary>Upgrade is blocked; critical compatibility issues or data loss risk present.</summary>
+    Critical = 4
+}
