@@ -115,6 +115,18 @@ public sealed class BackupSettings
     public bool IncludeAppSettings { get; init; } = true;
 
     public bool IncludeSecrets { get; init; } = true;
+
+    /// <summary>
+    /// Maximum age in hours for a backup to be considered compliant with retention policy.
+    /// Default: 72 hours (3 days).
+    /// </summary>
+    public int? MaxAgeHours { get; init; } = 72;
+
+    /// <summary>
+    /// Minimum number of backups required to be considered compliant with retention policy.
+    /// Default: 2.
+    /// </summary>
+    public int? MinimumBackupCount { get; init; } = 2;
 }
 
 public sealed class IngestionSettings
