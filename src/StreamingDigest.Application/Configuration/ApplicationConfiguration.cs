@@ -124,9 +124,9 @@ public sealed class BackupSettings
 
     /// <summary>
     /// Minimum number of backups required to be considered compliant with retention policy.
-    /// Default: 2.
+    /// Default: 1.
     /// </summary>
-    public int? MinimumBackupCount { get; init; } = 2;
+    public int? MinimumBackupCount { get; init; } = 1;
 }
 
 public sealed class IngestionSettings

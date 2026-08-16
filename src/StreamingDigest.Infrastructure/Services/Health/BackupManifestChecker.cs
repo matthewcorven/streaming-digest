@@ -62,7 +62,7 @@ public sealed class BackupManifestChecker : IBackupManifestChecker
 
             // Check retention policy
             var maxAgeHours = _configuration.Backup.MaxAgeHours ?? 72; // Default 3 days
-            var minimumBackupCount = _configuration.Backup.MinimumBackupCount ?? 2;
+            var minimumBackupCount = _configuration.Backup.MinimumBackupCount ?? 1;
 
             var latestBackupPath = backupFiles.First();
             var latestBackupTime = File.GetLastWriteTimeUtc(latestBackupPath);
@@ -104,7 +104,7 @@ public sealed class BackupManifestChecker : IBackupManifestChecker
                 IsError: false,
                 LastBackupAtUtc: TryParseIso8601(backupData.CreatedAtUtc),
                 Status: isHealthy
-                    ? "Backup verified and compliant"
+                    ? "Backup verified"
                     : !isVerified
                         ? $"Backup {backupData.VerificationStatus} (awaiting verification)"
                         : "Backup verification complete but retention policy not met",

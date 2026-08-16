@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using Microsoft.Extensions.Configuration;
 
 namespace StreamingDigest.IntegrationTests;
 
@@ -48,6 +49,16 @@ public sealed class OllamaContainerFixture : IAsyncLifetime
     public string Endpoint
     {
         get => _endpoint ?? throw new InvalidOperationException("Fixture not initialized. Did InitializeAsync fail?");
+    }
+
+    public IConfiguration CreateConfiguration()
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:ollamaEndpoint"] = Endpoint
+            })
+            .Build();
     }
 
     public async Task InitializeAsync()

@@ -1,7 +1,9 @@
 using System.IO.Compression;
 using System.Text.Json;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Services.Health;
@@ -17,6 +19,14 @@ namespace StreamingDigest.UnitTests;
 public sealed class BackupReadinessRegressionTests
 {
     private readonly ILogger<BackupManifestChecker> _logger = NullLogger<BackupManifestChecker>.Instance;
+
+    private static IHostEnvironment CreateHostEnvironment(string contentRootPath)
+    {
+        var mock = new Mock<IHostEnvironment>();
+        mock.Setup(e => e.ContentRootPath).Returns(contentRootPath);
+        mock.Setup(e => e.EnvironmentName).Returns("Test");
+        return mock.Object;
+    }
 
     /// <summary>
     /// AC1.1: Verify live backup readiness is returned (not fake/preview state)
@@ -59,7 +69,7 @@ public sealed class BackupReadinessRegressionTests
                 {
                     Backup = new BackupSettings { DestinationPath = tempDir }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var checker = new BackupManifestChecker(config, CreateHostEnvironment(tempDir), _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
@@ -122,7 +132,7 @@ public sealed class BackupReadinessRegressionTests
                 {
                     Backup = new BackupSettings { DestinationPath = tempDir }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var checker = new BackupManifestChecker(config, CreateHostEnvironment(tempDir), _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
@@ -168,7 +178,7 @@ public sealed class BackupReadinessRegressionTests
                 {
                     Backup = new BackupSettings { DestinationPath = tempDir }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var checker = new BackupManifestChecker(config, CreateHostEnvironment(tempDir), _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
@@ -225,7 +235,7 @@ public sealed class BackupReadinessRegressionTests
                 {
                     Backup = new BackupSettings { DestinationPath = tempDir }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var checker = new BackupManifestChecker(config, CreateHostEnvironment(tempDir), _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
@@ -280,7 +290,7 @@ public sealed class BackupReadinessRegressionTests
                 {
                     Backup = new BackupSettings { DestinationPath = tempDir }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var checker = new BackupManifestChecker(config, CreateHostEnvironment(tempDir), _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
@@ -345,7 +355,7 @@ public sealed class BackupReadinessRegressionTests
                 {
                     Backup = new BackupSettings { DestinationPath = tempDir }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var checker = new BackupManifestChecker(config, CreateHostEnvironment(tempDir), _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
@@ -420,7 +430,7 @@ public sealed class BackupReadinessRegressionTests
                 {
                     Backup = new BackupSettings { DestinationPath = tempDir }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var checker = new BackupManifestChecker(config, CreateHostEnvironment(tempDir), _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 

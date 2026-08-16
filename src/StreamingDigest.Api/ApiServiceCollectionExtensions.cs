@@ -22,7 +22,6 @@ using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.Infrastructure.Services.Health;
 using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
-using StreamingDigest.Application.Services.Health;
 
 namespace StreamingDigest.Api;
 
@@ -68,9 +67,6 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<BootstrapAdminUserService>();
         services.AddSingleton<AppAuthService>();
         services.AddSingleton<AppReadinessStateService>();
-        services.AddScoped<IBackupManifestChecker>(sp => new BackupManifestChecker(
-            sp.GetRequiredService<ApplicationConfiguration>(),
-            sp.GetRequiredService<ILogger<BackupManifestChecker>>()));
         services.AddSingleton<CompositeServiceHealthProvider>(sp => new CompositeServiceHealthProvider(
             sp.GetRequiredService<ILoggerFactory>().CreateLogger<CompositeServiceHealthProvider>()));
         services.AddScoped<UpgradeCompatibilityStateService>();
