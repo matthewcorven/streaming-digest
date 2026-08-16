@@ -450,10 +450,7 @@ public sealed class ModelStatusService : IAsyncDisposable
                 SetConnectionState(SseConnectionState.Connected);
                 consecutiveFailures = 0;
                 reconnectDelayMs = 500;
-<<<<<<< HEAD
-=======
                 _sseEnteredPausedAt = null;
->>>>>>> origin/feat/live-backend-health-clean
 
                 // Reconcile from the status endpoint now that we have a live stream.
                 await ReconcileFromStatusEndpointAsync(cancellationToken);

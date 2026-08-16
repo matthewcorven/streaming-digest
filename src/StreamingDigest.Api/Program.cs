@@ -164,6 +164,7 @@ app.MapStaticAssets();
 app.MapChannelEndpoints();
 app.MapHealthEndpoints(databaseStatus);
 app.MapAdminHealthEndpoints();
+app.MapHealthStreamingEndpoints();
 app.MapAdminOperationEndpoints(applicationConfiguration, builder.Environment.ContentRootPath);
 app.MapIngestionRunEndpoints();
 app.MapDashboardEndpoints();
@@ -181,6 +182,11 @@ app.MapNoteEndpoints();
 
 ApiRequestPipeline.MapReservedNotFoundFallbacks(app);
 app.MapFallbackToFile("index.html");
+
+// Start background polling for health status changes (ensures AC1: live state changes via SSE)
+var healthStreamService = app.Services.GetRequiredService<StreamingDigest.Api.Services.HealthStreamService>();
+healthStreamService.StartPolling();
+
 app.Run();
 
 static async Task ReconcileModelRuntimeStateAtStartupAsync(WebApplication app, string connectionString)

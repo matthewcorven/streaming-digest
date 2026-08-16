@@ -22,7 +22,6 @@ using StreamingDigest.Infrastructure.Persistence.EntityFramework;
 using StreamingDigest.Infrastructure.Services.Health;
 using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
-using StreamingDigest.Application.Services.Health;
 
 namespace StreamingDigest.Api;
 
@@ -68,19 +67,13 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<BootstrapAdminUserService>();
         services.AddSingleton<AppAuthService>();
         services.AddSingleton<AppReadinessStateService>();
-<<<<<<< HEAD
-        services.AddScoped<IBackupManifestChecker>(sp => new BackupManifestChecker(
-            sp.GetRequiredService<ApplicationConfiguration>(),
-            sp.GetRequiredService<ILogger<BackupManifestChecker>>()));
-        services.AddScoped<UpgradeCompatibilityStateService>();
-=======
         services.AddSingleton<CompositeServiceHealthProvider>(sp => new CompositeServiceHealthProvider(
             sp.GetRequiredService<ILoggerFactory>().CreateLogger<CompositeServiceHealthProvider>()));
         services.AddScoped<UpgradeCompatibilityStateService>();
         services.AddScoped<IBackupManifestChecker>(sp => new BackupManifestChecker(
             sp.GetRequiredService<ApplicationConfiguration>(),
             sp.GetRequiredService<ILoggerFactory>().CreateLogger<BackupManifestChecker>()));
->>>>>>> origin/feat/live-backend-health-clean
+        services.AddSingleton<StreamingDigest.Api.Services.HealthStreamService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
         services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), sp.GetRequiredService<IConfiguration>()));

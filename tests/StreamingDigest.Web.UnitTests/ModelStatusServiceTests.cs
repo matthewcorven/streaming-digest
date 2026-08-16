@@ -47,7 +47,6 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
     }
 
     [Fact]
-<<<<<<< HEAD
     public async Task Verify_FailedVerifyPayload_TransitionsRowToVerifyFailed()
     {
         _handler!.SetVerifyResponse(new { status = "failed", verified = false, message = "Service unavailable" });
@@ -296,80 +295,11 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
             _downloadStatusCode = statusCode;
         }
         public void SetVerifyResponse(object response) => _downloadResponse = response;
-=======
-    public async Task Download_TransitionsRowToQueued()
-    {
-        using var handler = new StubHttpMessageHandler();
-        using var httpClient = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("http://localhost:5149")
-        };
-
-        var authenticationService = new AuthenticationService(httpClient);
-        var searchUiSessionService = new SearchUiSessionService(authenticationService);
-        await using var service = new ModelStatusService(searchUiSessionService);
-        var row = new ModelRowViewModel(
-            id: "whisper",
-            label: "Whisper Base",
-            provider: "ollama",
-            family: "audio",
-            runtimeRole: "audio",
-            downloadable: true);
-
-        var success = await service.Download(row);
-
-        Assert.True(success);
-        Assert.Equal(ModelRowState.Queued, row.RowState);
-        Assert.NotEqual(Guid.Empty, row.CurrentOperationId);
-    }
-
-    [Fact]
-    public async Task Download_FailsWhenAlreadyDownloading()
-    {
-        using var handler = new StubHttpMessageHandler();
-        using var httpClient = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("http://localhost:5149")
-        };
-
-        var authenticationService = new AuthenticationService(httpClient);
-        var searchUiSessionService = new SearchUiSessionService(authenticationService);
-        await using var service = new ModelStatusService(searchUiSessionService);
-        var row = new ModelRowViewModel(
-            id: "whisper",
-            label: "Whisper Base",
-            provider: "ollama",
-            family: "audio",
-            runtimeRole: "audio",
-            downloadable: true);
-
-        // First download succeeds
-        var firstSuccess = await service.Download(row);
-        Assert.True(firstSuccess);
-        Assert.Equal(ModelRowState.Queued, row.RowState);
-
-        // Second download fails (row is not in Unknown/DownloadFailed/VerifyFailed state)
-        var secondSuccess = await service.Download(row);
-        Assert.False(secondSuccess);
-    }
-
-    private sealed class StubHttpMessageHandler : HttpMessageHandler
-    {
-        private readonly object? _optionsPayload;
-        private readonly object? _statusPayload;
-
-        public StubHttpMessageHandler(object? optionsPayload = null, object? statusPayload = null)
-        {
-            _optionsPayload = optionsPayload;
-            _statusPayload = statusPayload;
-        }
->>>>>>> origin/feat/live-backend-health-clean
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var response = request.RequestUri?.AbsolutePath switch
             {
-<<<<<<< HEAD
                 "/api/auth/me" => JsonResponse(new { username = "admin", mustChangePassword = false }),
                 "/api/auth/csrf" => JsonResponse(new { token = "csrf-token" }),
                 "/api/models/options" => _optionsResponse != null ? JsonResponse(_optionsResponse) : NotFound(),
@@ -377,26 +307,6 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
                 "/api/models/download" => _downloadResponse != null ? new HttpResponseMessage(_downloadStatusCode) { Content = JsonContent.Create(_downloadResponse) } : new HttpResponseMessage(_downloadStatusCode),
                 "/api/models/verify" => _downloadResponse != null ? JsonResponse(_downloadResponse) : NotFound(),
                 _ => NotFound()
-=======
-                "/api/auth/me" => Task.FromResult(JsonResponse(new { username = "admin", mustChangePassword = false })),
-                "/api/auth/csrf" => Task.FromResult(JsonResponse(new { token = "csrf-token" })),
-                "/api/models/options" => Task.FromResult(JsonResponse(_optionsPayload ?? new { models = Array.Empty<object>() })),
-                "/api/models/status" => Task.FromResult(JsonResponse(_statusPayload ?? new { models = Array.Empty<object>() })),
-                "/api/models/verify" => Task.FromResult(JsonResponse(new
-                {
-                    status = "verified",
-                    modelKind = "audio",
-                    modelId = "whisper",
-                    verified = true,
-                    message = "Whisper service is reachable."
-                })),
-                "/api/models/download" => Task.FromResult(JsonResponse(new
-                {
-                    operationId = Guid.NewGuid(),
-                    status = "Queued"
-                })),
-                _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound))
->>>>>>> origin/feat/live-backend-health-clean
             };
 
             return Task.FromResult(response);
