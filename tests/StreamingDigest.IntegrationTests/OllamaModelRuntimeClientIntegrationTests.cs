@@ -5,24 +5,37 @@ using StreamingDigest.Infrastructure;
 namespace StreamingDigest.IntegrationTests;
 
 /// <summary>
-/// Integration coverage for <see cref="OllamaModelRuntimeClient"/> against a Testcontainers-managed Ollama.
-/// Verifies model listing, pulling, and detailed model info (including nested families).
-/// Skipped by default; run locally where Docker is available.
+/// Integration coverage for <see cref="OllamaModelRuntimeClient"/> against an ephemeral Ollama
+/// container provisioned and managed by <see cref="OllamaContainerFixture"/>.
 ///
-/// Run locally: temporarily remove the <c>Skip</c> attribute, ensure Docker is running,
-/// then: <c>dotnet test tests/StreamingDigest.IntegrationTests --filter FullyQualifiedName~OllamaModelRuntimeClientIntegrationTests</c>
+/// Each test method receives a fresh container with an isolated Docker volume
+/// (<c>streamingdigest-it-ollama-{guid}</c>) mounted at <c>/root/.ollama</c>;
+/// the volume is automatically cleaned up in teardown. The app volume
+/// (<c>streamingdigest-ollama-data</c>) is never touched.
+///
+/// Run: <c>dotnet test tests/StreamingDigest.IntegrationTests --filter FullyQualifiedName~OllamaModelRuntimeClient</c>
+/// (Requires Docker and network access to pull models.)
 /// </summary>
-public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
+public sealed class OllamaModelRuntimeClientIntegrationTests : IClassFixture<OllamaContainerFixture>
 {
-    private readonly OllamaContainerFixture _fixture = new();
+    private readonly OllamaContainerFixture _fixture;
 
-    public Task InitializeAsync() => _fixture.InitializeAsync();
-    public Task DisposeAsync() => _fixture.DisposeAsync();
+    public OllamaModelRuntimeClientIntegrationTests(OllamaContainerFixture fixture)
+    {
+        _fixture = fixture;
+    }
 
-    [Fact(Skip = "Requires Docker and a network connection to pull a tiny Ollama model; runs locally only.")]
+    [Fact]
     public async Task ListInstalledModelsAsync_ReturnsSeededModelFromContainer()
     {
-        var configuration = _fixture.CreateConfiguration();
+        await WaitForOllamaAsync();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:ollamaEndpoint"] = _fixture.Endpoint
+            })
+            .Build();
 
         using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
@@ -33,10 +46,17 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
         Assert.Contains(models, m => m.Provider == "ollama" && m.ModelId.StartsWith("qwen2.5", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact(Skip = "Requires Docker and a network connection to pull a tiny Ollama model; runs locally only.")]
+    [Fact]
     public async Task PullModelAsync_YieldsSuccessForAlreadyLocalModel()
     {
-        var configuration = _fixture.CreateConfiguration();
+        await WaitForOllamaAsync();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:ollamaEndpoint"] = _fixture.Endpoint
+            })
+            .Build();
 
         using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
@@ -51,10 +71,17 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
         Assert.Contains(progress, p => p.Status.Equals("success", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact(Skip = "Requires Docker and a network connection to pull a tiny Ollama model; runs locally only.")]
+    [Fact]
     public async Task ShowModelAsync_ReturnsFamiliesNestedUnderDetailsForRealServer()
     {
-        var configuration = _fixture.CreateConfiguration();
+        await WaitForOllamaAsync();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["embedding:ollamaEndpoint"] = _fixture.Endpoint
+            })
+            .Build();
 
         using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
@@ -63,10 +90,34 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
 
         Assert.Equal("ollama", info.Provider);
         Assert.Equal("qwen2.5:0.5b", info.ModelId);
-        // This assertion catches that real Ollama nests families inside details;
-        // the parser must read them from there, not the response root.
+        // This is the assertion that catches the BLOCKER 1 bug: real Ollama nests families inside
+        // details; the parser must read them from there, not the response root.
         Assert.NotEmpty(info.Families);
         Assert.NotNull(info.Details);
+    }
+
+    private async Task WaitForOllamaAsync()
+    {
+        using var probe = new HttpClient();
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            try
+            {
+                using var response = await probe.GetAsync($"{_fixture.Endpoint}/api/tags");
+                if (response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Not up yet.
+            }
+
+            await Task.Delay(1000);
+        }
+
+        throw new InvalidOperationException($"Ollama container did not become ready at {_fixture.Endpoint}.");
     }
 
     private sealed class PassthroughHttpClientFactory(HttpClient client) : IHttpClientFactory

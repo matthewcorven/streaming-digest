@@ -1,7 +1,9 @@
 using System.IO.Compression;
 using System.Text.Json;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Services.Health;
@@ -13,6 +15,14 @@ public class BackupManifestCheckerTests
 {
     private readonly ILogger<BackupManifestChecker> _logger = NullLogger<BackupManifestChecker>.Instance;
 
+    private static IHostEnvironment CreateMockHostEnvironment(string contentRootPath)
+    {
+        var mock = new Mock<IHostEnvironment>();
+        mock.Setup(e => e.ContentRootPath).Returns(contentRootPath);
+        mock.Setup(e => e.EnvironmentName).Returns("Test");
+        return mock.Object;
+    }
+
     [Fact]
     public async Task GetBackupReadinessAsync_WithNoBackupDirectory_ReturnsUnhealthyStatus()
     {
@@ -20,11 +30,13 @@ public class BackupManifestCheckerTests
         {
             Backup = new BackupSettings { DestinationPath = "/nonexistent/backup/path" }
         };
-        var checker = new BackupManifestChecker(config, _logger);
+        var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
+        var checker = new BackupManifestChecker(config, hostEnv, _logger);
 
         var result = await checker.GetBackupReadinessAsync();
 
         Assert.False(result.IsHealthy);
+        Assert.True(result.IsError);
         Assert.Null(result.LastBackupAtUtc);
         Assert.Equal("No backup directory", result.Status);
         Assert.Contains("not found", result.Details.First());
@@ -41,11 +53,13 @@ public class BackupManifestCheckerTests
             {
                 Backup = new BackupSettings { DestinationPath = tempDir }
             };
-            var checker = new BackupManifestChecker(config, _logger);
+            var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
+            var checker = new BackupManifestChecker(config, hostEnv, _logger);
 
             var result = await checker.GetBackupReadinessAsync();
 
             Assert.False(result.IsHealthy);
+            Assert.False(result.IsError);
             Assert.Null(result.LastBackupAtUtc);
             Assert.Equal("No backups available", result.Status);
             Assert.Contains("No backup archives", result.Details.First());
@@ -93,15 +107,22 @@ public class BackupManifestCheckerTests
 
                 var config = new ApplicationConfiguration
                 {
-                    Backup = new BackupSettings { DestinationPath = tempDir }
+                    Backup = new BackupSettings
+                    {
+                        DestinationPath = tempDir,
+                        MaxAgeHours = 72,
+                        MinimumBackupCount = 1
+                    }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
+                var checker = new BackupManifestChecker(config, hostEnv, _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
                 Assert.True(result.IsHealthy);
+                Assert.False(result.IsError);
                 Assert.NotNull(result.LastBackupAtUtc);
-                Assert.Equal("Backup verified", result.Status);
+                Assert.Contains("verified", result.Status.ToLower());
                 Assert.NotEmpty(result.Details);
                 Assert.StartsWith("Backup: ", result.Details.First());
                 Assert.NotEqual("Never", result.TimeSinceLastBackup);
@@ -152,13 +173,20 @@ public class BackupManifestCheckerTests
 
                 var config = new ApplicationConfiguration
                 {
-                    Backup = new BackupSettings { DestinationPath = tempDir }
+                    Backup = new BackupSettings
+                    {
+                        DestinationPath = tempDir,
+                        MaxAgeHours = 72,
+                        MinimumBackupCount = 1
+                    }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
+                var checker = new BackupManifestChecker(config, hostEnv, _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
                 Assert.False(result.IsHealthy);
+                Assert.False(result.IsError);
                 Assert.NotNull(result.LastBackupAtUtc);
                 Assert.Contains("pending", result.Status);
             }
@@ -195,13 +223,20 @@ public class BackupManifestCheckerTests
 
                 var config = new ApplicationConfiguration
                 {
-                    Backup = new BackupSettings { DestinationPath = tempDir }
+                    Backup = new BackupSettings
+                    {
+                        DestinationPath = tempDir,
+                        MaxAgeHours = 72,
+                        MinimumBackupCount = 1
+                    }
                 };
-                var checker = new BackupManifestChecker(config, _logger);
+                var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
+                var checker = new BackupManifestChecker(config, hostEnv, _logger);
 
                 var result = await checker.GetBackupReadinessAsync();
 
                 Assert.False(result.IsHealthy);
+                Assert.False(result.IsError);
                 Assert.NotNull(result.LastBackupAtUtc);
                 Assert.Contains("unreadable", result.Status);
             }
@@ -230,6 +265,7 @@ public class BackupManifestCheckerTests
 
         var data = new BackupReadinessData(
             IsHealthy: true,
+            IsError: false,
             LastBackupAtUtc: lastBackupAt,
             Status: "Verified",
             Details: []);

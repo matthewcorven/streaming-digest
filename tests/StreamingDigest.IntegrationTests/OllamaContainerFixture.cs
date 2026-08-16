@@ -1,79 +1,58 @@
 using System.Diagnostics;
+using System.Net;
 using Microsoft.Extensions.Configuration;
-using Testcontainers.Ollama;
-using Xunit;
 
 namespace StreamingDigest.IntegrationTests;
 
 /// <summary>
-/// Reusable fixture for ephemeral Ollama container lifecycle management via Testcontainers.
-/// Encapsulates container creation, model seeding, cleanup, and readiness checks.
+/// Fixture for managing an ephemeral Ollama container during integration tests using Docker.
+/// Implements <see cref="IAsyncLifetime"/> for xUnit integration, automatically starting and stopping
+/// the container for each test class that uses this fixture.
 ///
-/// Example usage:
-/// <code>
-/// public class MyOllamaTests : IAsyncLifetime
-/// {
-///     private readonly OllamaContainerFixture _fixture = new();
+/// The fixture:
+/// - Provisions a fresh Docker container running ollama/ollama:latest via `docker run`
+/// - Automatically selects a free port for the Ollama HTTP API (11434)
+/// - Creates an isolated Docker volume for model cache (/root/.ollama) per test run
+/// - Seeds the container with a lightweight model (qwen2.5:0.5b) for repeatable testing
+/// - Waits for container readiness via HTTP health check (/api/tags)
+/// - Cleans up all resources (container, volume) on disposal
 ///
-///     public Task InitializeAsync() => _fixture.InitializeAsync();
-///     public Task DisposeAsync() => _fixture.DisposeAsync();
+/// Usage:
+///   public sealed class MyOllamaIntegrationTest : IClassFixture&lt;OllamaContainerFixture&gt;
+///   {
+///       private readonly OllamaContainerFixture _fixture;
+///       public MyOllamaIntegrationTest(OllamaContainerFixture fixture) =&gt; _fixture = fixture;
 ///
-///     [Fact]
-///     public async Task MyTest()
-///     {
-///         var config = _fixture.CreateConfiguration();
-///         // Use config with OllamaModelRuntimeClient, etc.
-///     }
-/// }
-/// </code>
+///       [Fact]
+///       public async Task TestSomething()
+///       {
+///           using var http = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
+///           var response = await http.GetAsync("/api/tags");
+///           Assert.True(response.IsSuccessStatusCode);
+///       }
+///   }
 /// </summary>
 public sealed class OllamaContainerFixture : IAsyncLifetime
 {
-    private const string OllamaImageTag = "0.32.13";
     private const string SeedModel = "qwen2.5:0.5b";
     private static readonly TimeSpan SeedPullTimeout = TimeSpan.FromMinutes(5);
 
-    private OllamaContainer? _container;
-    private bool _isReady;
+    private string? _containerId;
+    private string? _volumeName;
+    private int _hostPort;
+    private string _endpoint = null!;
 
-    public string Endpoint => _container?.GetConnectionString() ?? throw new InvalidOperationException("Container not initialized.");
-
-    public async Task InitializeAsync()
+    /// <summary>
+    /// The HTTP endpoint at which the Ollama API is accessible (e.g., http://localhost:12345).
+    /// Only set after <see cref="InitializeAsync"/> completes successfully.
+    /// </summary>
+    public string Endpoint
     {
-        var imageTag = $"ollama/ollama:{OllamaImageTag}";
-        _container = new OllamaBuilder()
-            .WithImage(imageTag)
-            .Build();
-
-        await _container.StartAsync();
-
-        try
-        {
-            await WaitForOllamaReadyAsync();
-            await SeedModelAsync();
-            _isReady = true;
-        }
-        catch
-        {
-            await _container.StopAsync();
-            throw;
-        }
-    }
-
-    public async Task DisposeAsync()
-    {
-        if (_container is not null)
-        {
-            await _container.StopAsync();
-            await _container.DisposeAsync();
-        }
+        get => _endpoint ?? throw new InvalidOperationException("Fixture not initialized. Did InitializeAsync fail?");
     }
 
     public IConfiguration CreateConfiguration()
     {
-        if (!_isReady)
-            throw new InvalidOperationException("Fixture not initialized. Call InitializeAsync() first.");
-
         return new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -82,23 +61,82 @@ public sealed class OllamaContainerFixture : IAsyncLifetime
             .Build();
     }
 
-    public IConfiguration CreateConfiguration(string modelId, string endpoint)
+    public async Task InitializeAsync()
     {
-        if (!_isReady)
-            throw new InvalidOperationException("Fixture not initialized. Call InitializeAsync() first.");
+        Debug.WriteLine($"[OllamaContainerFixture] Initializing: provisioning ephemeral Ollama container");
 
-        return new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+        try
+        {
+            _volumeName = $"streamingdigest-it-ollama-{Guid.NewGuid():N}";
+            _hostPort = FindFreePort();
+
+            Debug.WriteLine($"[OllamaContainerFixture] Creating container with volume '{_volumeName}' on port {_hostPort}");
+
+            var createArgs = $"container create --name ollama-it-{Guid.NewGuid():N} " +
+                             $"-p {_hostPort}:11434 " +
+                             $"-v {_volumeName}:/root/.ollama " +
+                             "ollama/ollama:latest";
+
+            var (createCode, createOutput) = await RunDockerAsync(createArgs);
+            if (createCode != 0)
             {
-                ["embedding:modelId"] = modelId,
-                ["embedding:ollamaEndpoint"] = endpoint
-            })
-            .Build();
+                Debug.WriteLine($"[OllamaContainerFixture] Container create failed: {createOutput}");
+                throw new InvalidOperationException($"Failed to create container: {createOutput}");
+            }
+
+            _containerId = createOutput.Trim();
+            Debug.WriteLine($"[OllamaContainerFixture] Container created: {_containerId}");
+
+            var (startCode, startOutput) = await RunDockerAsync($"container start {_containerId}");
+            if (startCode != 0)
+            {
+                Debug.WriteLine($"[OllamaContainerFixture] Container start failed: {startOutput}");
+                await CleanupAsync();
+                throw new InvalidOperationException($"Failed to start container: {startOutput}");
+            }
+
+            _endpoint = $"http://localhost:{_hostPort}";
+            Debug.WriteLine($"[OllamaContainerFixture] Container started; Ollama endpoint: {_endpoint}");
+
+            // Wait for container readiness
+            Debug.WriteLine($"[OllamaContainerFixture] Waiting for Ollama API to be ready");
+            await WaitForOllamaAsync();
+            Debug.WriteLine($"[OllamaContainerFixture] Ollama API is ready");
+
+            // Seed the model
+            Debug.WriteLine($"[OllamaContainerFixture] Seeding model '{SeedModel}' (timeout: {SeedPullTimeout.TotalMinutes:F0} min)");
+            using var seedCts = new CancellationTokenSource(SeedPullTimeout);
+            var (seedCode, seedErr) = await RunDockerAsync($"exec {_containerId} ollama pull {SeedModel}", seedCts.Token);
+            if (seedCode != 0)
+            {
+                Debug.WriteLine($"[OllamaContainerFixture] Model seed failed: {seedErr}");
+                await CleanupAsync();
+                throw new InvalidOperationException(
+                    $"Seed `ollama pull {SeedModel}` failed (exit {seedCode}) within {SeedPullTimeout.TotalMinutes:F0} min. stderr: {seedErr}");
+            }
+
+            Debug.WriteLine($"[OllamaContainerFixture] Model '{SeedModel}' seeded successfully");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[OllamaContainerFixture] Initialization failed: {ex.Message}");
+            await DisposeAsync();
+            throw;
+        }
     }
 
-    private async Task WaitForOllamaReadyAsync()
+    public async Task DisposeAsync()
     {
-        using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        Debug.WriteLine($"[OllamaContainerFixture] Stopping container and cleaning up");
+        await CleanupAsync();
+    }
+
+    /// <summary>
+    /// Waits for the Ollama HTTP API to become responsive by polling the /api/tags endpoint.
+    /// </summary>
+    private async Task WaitForOllamaAsync()
+    {
+        using var probe = new HttpClient();
         for (var attempt = 0; attempt < 60; attempt++)
         {
             try
@@ -106,25 +144,29 @@ public sealed class OllamaContainerFixture : IAsyncLifetime
                 using var response = await probe.GetAsync($"{Endpoint}/api/tags");
                 if (response.IsSuccessStatusCode)
                 {
+                    Debug.WriteLine($"[OllamaContainerFixture] Ollama readiness check succeeded on attempt {attempt + 1}");
                     return;
                 }
+
+                Debug.WriteLine($"[OllamaContainerFixture] Readiness check attempt {attempt + 1} returned {response.StatusCode}");
             }
-            catch
+            catch (HttpRequestException ex)
             {
-                // Not up yet.
+                Debug.WriteLine($"[OllamaContainerFixture] Readiness check attempt {attempt + 1} failed: {ex.Message}");
             }
 
             await Task.Delay(1000);
         }
 
-        throw new InvalidOperationException($"Ollama container did not become ready at {Endpoint} within 60 seconds.");
+        throw new InvalidOperationException($"Ollama container did not become ready at {Endpoint}.");
     }
 
-    private async Task SeedModelAsync()
+    /// <summary>
+    /// Runs a Docker CLI command and returns the exit code and combined output.
+    /// </summary>
+    private static async Task<(int ExitCode, string Output)> RunDockerAsync(string arguments, CancellationToken cancellationToken = default)
     {
-        using var seedCts = new CancellationTokenSource(SeedPullTimeout);
-        var containerId = _container!.Id;
-        var psi = new ProcessStartInfo("docker", $"exec {containerId} ollama pull {SeedModel}")
+        var psi = new ProcessStartInfo("docker", arguments)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -133,13 +175,42 @@ public sealed class OllamaContainerFixture : IAsyncLifetime
 
         using var process = new Process { StartInfo = psi };
         process.Start();
-        await process.WaitForExitAsync(seedCts.Token);
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
 
-        if (process.ExitCode != 0)
+        return (process.ExitCode, string.Concat(await outputTask, await errorTask));
+    }
+
+    /// <summary>
+    /// Finds a free TCP port on localhost.
+    /// </summary>
+    private static int FindFreePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
+    /// <summary>
+    /// Cleans up the Docker container and volume.
+    /// </summary>
+    private async Task CleanupAsync()
+    {
+        if (_containerId is not null)
         {
-            var stderr = await process.StandardError.ReadToEndAsync(seedCts.Token);
-            throw new InvalidOperationException(
-                $"Seed `ollama pull {SeedModel}` failed (exit {process.ExitCode}) within {SeedPullTimeout.TotalMinutes:F0} min. stderr: {stderr}");
+            Debug.WriteLine($"[OllamaContainerFixture] Removing container {_containerId}");
+            await RunDockerAsync($"container rm -f {_containerId}");
+            _containerId = null;
+        }
+
+        if (_volumeName is not null)
+        {
+            Debug.WriteLine($"[OllamaContainerFixture] Removing volume {_volumeName}");
+            await RunDockerAsync($"volume rm {_volumeName}");
+            _volumeName = null;
         }
     }
 }

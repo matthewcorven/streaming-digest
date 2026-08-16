@@ -18,6 +18,7 @@ public interface IBackupManifestChecker
 /// </summary>
 public sealed record BackupReadinessData(
     bool IsHealthy,
+    bool IsError,
     DateTime? LastBackupAtUtc,
     string Status,
     List<string> Details)

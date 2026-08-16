@@ -177,6 +177,51 @@ public sealed class AdminOperationsServiceTests
     }
 
     [Fact]
+    public async Task ReprocessEmbeddingsAsync_VerifiesCompletionHookFiresWithCorrectSignal()
+    {
+        // ADR-0011 completeness verification: the hook must fire synchronously during ReprocessEmbeddingsAsync
+        // and signal ingestion catch-up via EnqueueOnDemandRun with "system.catchup" trigger.
+        // This test ensures the signal propagates correctly from embedding regeneration completion.
+        var regenerationService = new RecordingSearchDocumentRegenerationService();
+        var dispatcher = new RecordingIngestionJobScheduler();
+        var service = new AdminOperationsService(
+            searchDocumentRegenerationService: regenerationService,
+            ingestionJobScheduler: dispatcher);
+
+        // Execute embedding reprocessing
+        var result = await service.ReprocessEmbeddingsAsync();
+
+        // Verify completion status and health
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("healthy", result.HealthStatus);
+        Assert.True(regenerationService.Invoked);
+
+        // Verify hook fired and signal propagated: dispatcher must have recorded the catch-up enqueue
+        Assert.NotNull(dispatcher.LastRunType);
+        Assert.NotNull(dispatcher.LastTriggeredBy);
+        Assert.Equal("system.catchup", dispatcher.LastTriggeredBy);
+    }
+
+    [Fact]
+    public async Task ReprocessEmbeddingsAsync_WithoutDispatcher_CompletesGracefullyWithoutHook()
+    {
+        // Graceful degradation: when no IIngestionJobScheduler is injected, the operation
+        // still completes successfully (returns "accepted") without attempting to enqueue.
+        // This ensures backward compatibility when the scheduler is not available (ADR-0011 still applies,
+        // but hook is skipped in this context).
+        var regenerationService = new RecordingSearchDocumentRegenerationService();
+        var service = new AdminOperationsService(searchDocumentRegenerationService: regenerationService);
+
+        var result = await service.ReprocessEmbeddingsAsync();
+
+        // Verify operation completed even without dispatcher
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("reprocess.embeddings", result.OperationType);
+        Assert.Equal("healthy", result.HealthStatus);
+        Assert.True(regenerationService.Invoked);
+    }
+
+    [Fact]
     public async Task RetryFailedLinkAsync_WithInvalidLinkId_ReturnsFailedResult()
     {
         var service = new AdminOperationsService();

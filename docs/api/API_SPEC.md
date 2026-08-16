@@ -1432,7 +1432,7 @@ Unexpected error generating health snapshot. Retry after delay; investigate logs
 | Models | `IModelRuntimeStateRepository.GetAllAsync()` + model_runtime_states table | Yes | Same source as `/api/models/status` (embedded or audio runtime models) |
 | Observability | `CompositeServiceHealthProvider.ProbeAllAsync()` + TelemetryProbe | Yes | Traces, metrics, logs collection and OTLP export readiness |
 | Storage | `CompositeServiceHealthProvider.ProbeAllAsync()` + PostgresProbe | Yes | PostgreSQL connectivity, latency, pgvector extension presence |
-| BackupReadiness | `UpgradeMaintenanceSnapshotService` (hardcoded demo) | **No** | Static placeholder; live backup manifest verification pending #271 |
+| BackupReadiness | `IBackupManifestChecker.GetBackupReadinessAsync()` | **Yes** | Live verification of latest backup manifest; schema validation and retention policy compliance per BACKUP_MANIFEST_SCHEMA.md |
 
 **PreviewMode Flag Semantics:**
 

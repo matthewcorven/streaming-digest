@@ -50,7 +50,7 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
     public async Task Verify_FailedVerifyPayload_TransitionsRowToVerifyFailed()
     {
         _handler!.SetVerifyResponse(new { status = "failed", verified = false, message = "Service unavailable" });
-        
+
         var authenticationService = new AuthenticationService(_httpClient!);
         var searchUiSessionService = new SearchUiSessionService(authenticationService);
         await using var service = new ModelStatusService(searchUiSessionService);
@@ -69,10 +69,57 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Download_TransitionsRowToQueued()
+    {
+        _handler!.SetDownloadResponse(new { status = "queued", operationId = Guid.NewGuid(), statusUrl = "/api/admin/operations/123" });
+
+        var authenticationService = new AuthenticationService(_httpClient!);
+        var searchUiSessionService = new SearchUiSessionService(authenticationService);
+        await using var service = new ModelStatusService(searchUiSessionService);
+        var row = new ModelRowViewModel(
+            id: "whisper",
+            label: "Whisper Base",
+            provider: "ollama",
+            family: "audio",
+            runtimeRole: "audio",
+            downloadable: true);
+
+        var success = await service.Download(row);
+
+        Assert.True(success);
+        Assert.Equal(ModelRowState.Queued, row.RowState);
+        Assert.NotEqual(Guid.Empty, row.CurrentOperationId);
+    }
+
+    [Fact]
+    public async Task Download_FailsWhenAlreadyDownloading()
+    {
+        _handler!.SetDownloadResponse(new { status = "queued", operationId = Guid.NewGuid(), statusUrl = "/api/admin/operations/123" });
+
+        var authenticationService = new AuthenticationService(_httpClient!);
+        var searchUiSessionService = new SearchUiSessionService(authenticationService);
+        await using var service = new ModelStatusService(searchUiSessionService);
+        var row = new ModelRowViewModel(
+            id: "whisper",
+            label: "Whisper Base",
+            provider: "ollama",
+            family: "audio",
+            runtimeRole: "audio",
+            downloadable: true);
+
+        var firstSuccess = await service.Download(row);
+        Assert.True(firstSuccess);
+        Assert.Equal(ModelRowState.Queued, row.RowState);
+
+        var secondSuccess = await service.Download(row);
+        Assert.False(secondSuccess);
+    }
+
+    [Fact]
     public async Task Download_SuccessfulResponse_TransitionsRowThroughSubmittingAndQueued()
     {
         _handler!.SetDownloadResponse(new { status = "queued", operationId = Guid.NewGuid(), statusUrl = "/api/admin/operations/123" });
-        
+
         var authenticationService = new AuthenticationService(_httpClient!);
         var searchUiSessionService = new SearchUiSessionService(authenticationService);
         await using var service = new ModelStatusService(searchUiSessionService);
@@ -84,7 +131,6 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
             runtimeRole: "text",
             downloadable: true);
 
-        var initialState = row.RowState;
         var success = await service.Download(row);
 
         Assert.True(success);
@@ -95,7 +141,7 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
     public async Task Download_FailedResponse_TransitionsRowToDownloadFailed()
     {
         _handler!.SetDownloadResponse(null, statusCode: HttpStatusCode.BadRequest);
-        
+
         var authenticationService = new AuthenticationService(_httpClient!);
         var searchUiSessionService = new SearchUiSessionService(authenticationService);
         await using var service = new ModelStatusService(searchUiSessionService);
@@ -170,9 +216,7 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
         await using var service = new ModelStatusService(searchUiSessionService);
 
         await service.InitializeAsync();
-        var initialState = service.Models[0].RowState;
 
-        // Simulate a status change
         _handler!.SetStatusResponse(new
         {
             models = new[]
@@ -211,11 +255,7 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
 
         await service.InitializeAsync();
 
-        // Manually set to Submitting to simulate user action in flight
         service.Models[0].TryBeginDownload();
-        var submittingState = service.Models[0].RowState;
-
-        // Reconcile should NOT overwrite the Submitting state
         await service.RefreshAsync();
 
         Assert.Equal(ModelRowState.Submitting, service.Models[0].RowState);
@@ -277,9 +317,6 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
         Assert.Equal(2, service.ActiveOperationsCount);
     }
 
-    /// <summary>
-    /// Test stub for HTTP requests. Simulates API endpoints used by ModelStatusService.
-    /// </summary>
     private sealed class TestHttpMessageHandler : HttpMessageHandler
     {
         private object? _optionsResponse;
@@ -294,6 +331,7 @@ public sealed class ModelStatusServiceTests : IAsyncLifetime
             _downloadResponse = response;
             _downloadStatusCode = statusCode;
         }
+
         public void SetVerifyResponse(object response) => _downloadResponse = response;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
