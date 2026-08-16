@@ -3,6 +3,7 @@ services:
   postgres:
     image: "docker.io/pgvector/pgvector:0.8.5-pg18-trixie"
     container_name: "streaming-digest-postgres"
+    pull_policy: "if_not_present"
     environment:
       POSTGRES_HOST_AUTH_METHOD: "scram-sha-256"
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
@@ -18,8 +19,9 @@ services:
     networks:
       - "aspire"
   ollama:
-    image: "ollama/ollama:latest"
+    image: "docker.io/ollama/ollama:latest"
     container_name: "streaming-digest-ollama"
+    pull_policy: "if_not_present"
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
     ports:
@@ -32,8 +34,9 @@ services:
     networks:
       - "aspire"
   ollama-bootstrap:
-    image: "ollama/ollama:latest"
+    image: "docker.io/ollama/ollama:latest"
     container_name: "streaming-digest-ollama-bootstrap"
+    pull_policy: "if_not_present"
     command:
       - "-c"
       - "ollama serve & ollama_pid=$!; until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull bge-m3; ollama pull llama3.1:8b; kill $$ollama_pid; wait $$ollama_pid"
@@ -50,7 +53,7 @@ services:
     networks:
       - "aspire"
   whisper:
-    image: "streaming-digest-whisper:latest"
+    image: "${WHISPER_IMAGE:-ghcr.io/matthewcorven/streaming-digest-whisper:latest}"
     container_name: "streaming-digest-whisper"
     ports:
       - "127.0.0.1:8080:8080"
@@ -59,8 +62,9 @@ services:
     networks:
       - "aspire"
   otel-collector:
-    image: "otel/opentelemetry-collector-contrib:0.114.0"
+    image: "docker.io/otel/opentelemetry-collector-contrib:0.114.0"
     container_name: "streaming-digest-otel-collector"
+    pull_policy: "if_not_present"
     command:
       - "--config=/etc/otelcol-contrib/config.yaml"
     ports:
@@ -76,8 +80,9 @@ services:
     networks:
       - "aspire"
   prometheus:
-    image: "prom/prometheus:v2.54.0"
+    image: "docker.io/prom/prometheus:v2.54.0"
     container_name: "streaming-digest-prometheus"
+    pull_policy: "if_not_present"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
     ports:
@@ -96,8 +101,9 @@ services:
     networks:
       - "aspire"
   grafana:
-    image: "grafana/grafana:11.4.0"
+    image: "docker.io/grafana/grafana:11.4.0"
     container_name: "streaming-digest-grafana"
+    pull_policy: "if_not_present"
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
@@ -128,8 +134,9 @@ services:
     networks:
       - "aspire"
   pgadmin:
-    image: "dpage/pgadmin4:9.6.0"
+    image: "docker.io/dpage/pgadmin4:9.6.0"
     container_name: "streaming-digest-pgadmin"
+    pull_policy: "if_not_present"
     environment:
       PGADMIN_DEFAULT_EMAIL: "${PGADMIN_DEFAULT_EMAIL}"
       PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_DEFAULT_PASSWORD}"
@@ -149,8 +156,9 @@ services:
     networks:
       - "aspire"
   loki:
-    image: "grafana/loki:3.2.0"
+    image: "docker.io/grafana/loki:3.2.0"
     container_name: "streaming-digest-loki"
+    pull_policy: "if_not_present"
     command:
       - "-config.file=/etc/loki/local-config.yaml"
     ports:
@@ -169,8 +177,9 @@ services:
     networks:
       - "aspire"
   tempo:
-    image: "grafana/tempo:2.6.0"
+    image: "docker.io/grafana/tempo:2.6.0"
     container_name: "streaming-digest-tempo"
+    pull_policy: "if_not_present"
     command:
       - "-config.file=/etc/tempo.yaml"
     ports:
@@ -189,7 +198,7 @@ services:
     networks:
       - "aspire"
   scraper:
-    image: "streaming-digest-scraper"
+    image: "${SCRAPER_IMAGE:-ghcr.io/matthewcorven/streaming-digest-scraper:latest}"
     container_name: "streaming-digest-scraper"
     build:
       context: "./src/StreamingDigest.Scraper"
@@ -210,7 +219,7 @@ services:
     networks:
       - "aspire"
   api:
-    image: "streaming-digest-api"
+    image: "${API_IMAGE:-ghcr.io/matthewcorven/streaming-digest-api:latest}"
     container_name: "streaming-digest-api"
     build:
       context: "."
@@ -265,7 +274,7 @@ services:
     networks:
       - "aspire"
   worker:
-    image: "streaming-digest-worker"
+    image: "${WORKER_IMAGE:-ghcr.io/matthewcorven/streaming-digest-worker:latest}"
     container_name: "streaming-digest-worker"
     build:
       context: "."
@@ -321,13 +330,13 @@ services:
     networks:
       - "aspire"
   web:
-    image: "${WEB_IMAGE}"
+    image: "${WEB_IMAGE:-ghcr.io/matthewcorven/streaming-digest-web:latest}"
     environment:
       OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY: "in_memory"
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
-      HTTP_PORTS: "${WEB_PORT}"
+      HTTP_PORTS: "${WEB_PORT:-8081}"
     ports:
-      - "${WEB_PORT}"
+      - "${WEB_PORT:-8081}"
     networks:
       - "aspire"
 networks:
