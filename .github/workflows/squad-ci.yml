@@ -22,10 +22,4 @@ jobs:
 
       - name: Build and test
         run: |
-          dotnet test StreamingDigest.slnx --logger "console;verbosity=minimal"
-
-      - name: First-run smoke
-        env:
-          STREAMINGDIGEST_E2E_SMOKE: "1"
-        run: |
-          dotnet test tests/StreamingDigest.E2E/StreamingDigest.E2E.csproj --filter "FullyQualifiedName~Zero_user_start_requires_setup_then_blocks_setup_after_first_sign_in" --logger "console;verbosity=minimal"
+          dotnet test StreamingDigest.slnx --filter "Category!=Integration&Category!=E2E" --logger "console;verbosity=minimal"

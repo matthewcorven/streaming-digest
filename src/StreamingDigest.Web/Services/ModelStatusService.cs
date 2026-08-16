@@ -27,6 +27,7 @@ public sealed class ModelStatusService : IAsyncDisposable
 
     private readonly SearchUiSessionService _session;
     private readonly IJSRuntime? _jsRuntime;
+    private readonly TimeProvider _timeProvider;
     private readonly List<ModelRowViewModel> _models = [];
     private CancellationTokenSource? _sseCts;
     private Task? _sseTask;
@@ -52,10 +53,11 @@ public sealed class ModelStatusService : IAsyncDisposable
     /// <summary>Raised whenever any row state or the connection state changes.</summary>
     public event Action? Changed;
 
-    public ModelStatusService(SearchUiSessionService session, IJSRuntime? jsRuntime = null)
+    public ModelStatusService(SearchUiSessionService session, IJSRuntime? jsRuntime = null, TimeProvider? timeProvider = null)
     {
         _session = session;
         _jsRuntime = jsRuntime;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────────────────
@@ -445,16 +447,6 @@ public sealed class ModelStatusService : IAsyncDisposable
                 SetConnectionState(SseConnectionState.Connected);
                 consecutiveFailures = 0;
                 reconnectDelayMs = 500;
-
-                // Mark all paused rows as reconciling once we reconnect.
-                foreach (var row in _models)
-                {
-                    if (row.RowState == ModelRowState.LiveUpdatesPaused)
-                    {
-                        // Will be overwritten by the reconcile below.
-                        _ = row;
-                    }
-                }
 
                 // Reconcile from the status endpoint now that we have a live stream.
                 await ReconcileFromStatusEndpointAsync(cancellationToken);

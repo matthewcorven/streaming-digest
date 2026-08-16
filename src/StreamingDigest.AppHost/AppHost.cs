@@ -286,8 +286,6 @@ var lokiHttpEndpoint = loki.GetEndpoint("http");
 var tempoHttpEndpoint = tempo.GetEndpoint("http");
 
 var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
-    .WithImage($"{imageNamePrefix}-api")
-    .WithImageTag(shortCommitId)
     .WithExternalHttpEndpoints()
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
@@ -310,8 +308,6 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("observability:services:otelCollector:url", otelCollectorGrpcEndpoint);
 
 builder.AddProject<Projects.StreamingDigest_Worker>("worker")
-    .WithImage($"{imageNamePrefix}-worker")
-    .WithImageTag(shortCommitId)
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
     .WaitFor(scraper)

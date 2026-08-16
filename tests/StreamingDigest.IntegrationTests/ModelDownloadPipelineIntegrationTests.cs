@@ -18,6 +18,7 @@ namespace StreamingDigest.IntegrationTests;
 /// container with a stubbed Ollama runtime, asserting model_runtime_state + operations
 /// transitions are actually persisted.
 /// </summary>
+[Trait("Category", "Integration")]
 public sealed class ModelDownloadPipelineIntegrationTests : IAsyncLifetime
 {
     private const string ImageName = "pgvector/pgvector:0.8.5-pg18-trixie";

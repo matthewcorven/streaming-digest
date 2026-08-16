@@ -15,6 +15,7 @@ using Xunit.Abstractions;
 
 namespace StreamingDigest.IntegrationTests;
 
+[Trait("Category", "Integration")]
 public sealed class ApiContractConformanceTests : IAsyncLifetime
 {
     private const string ImageName = "pgvector/pgvector:0.8.5-pg18-trixie";

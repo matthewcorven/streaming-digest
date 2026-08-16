@@ -18,8 +18,10 @@ using StreamingDigest.Infrastructure;
 using StreamingDigest.Infrastructure.AudioToText;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Persistence.EntityFramework;
+using StreamingDigest.Infrastructure.Services.Health;
 using StreamingDigest.Infrastructure.Transcripts;
 using StreamingDigest.MatrixNotifier;
+using StreamingDigest.Application.Services.Health;
 
 namespace StreamingDigest.Api;
 
@@ -65,24 +67,16 @@ internal static class ApiServiceCollectionExtensions
         services.AddSingleton<BootstrapAdminUserService>();
         services.AddSingleton<AppAuthService>();
         services.AddSingleton<AppReadinessStateService>();
+        services.AddScoped<IBackupManifestChecker>(sp => new BackupManifestChecker(
+            sp.GetRequiredService<ApplicationConfiguration>(),
+            sp.GetRequiredService<ILogger<BackupManifestChecker>>()));
+        services.AddScoped<UpgradeCompatibilityStateService>();
         services.AddSingleton<IModelRuntimeStateSchemaGuard, ModelRuntimeStateSchemaGuard>();
         services.AddScoped<IModelRuntimeStateRepository>(sp => new PostgresModelRuntimeStateRepository(connectionString));
         services.AddSingleton<IModelReadinessGuard>(sp => new ModelReadinessGuard(new PostgresModelRuntimeStateRepository(connectionString), sp.GetRequiredService<IConfiguration>()));
         services.AddSingleton<IModelReadinessNotifier, ModelReadinessNotifier>();
         // Single in-process broadcaster shared by every publisher and SSE subscriber.
         services.AddSingleton<IModelLifecycleEventBroadcaster, ModelLifecycleEventBroadcaster>();
-        // Cross-process listener: PostgreSQL LISTEN/NOTIFY bridge for model state changes.
-        // The listener subscribes to "model_state_changed" channel and forwards notifications
-        // to the broadcaster so SSE clients see real-time events from the worker process.
-        services.AddSingleton<PostgresModelLifecycleEventListener>(sp =>
-            new PostgresModelLifecycleEventListener(
-                connectionString,
-                sp.GetRequiredService<IModelLifecycleEventBroadcaster>(),
-                sp.GetRequiredService<ILogger<PostgresModelLifecycleEventListener>>()));
-        // Register the listener as a hosted service so it starts on app startup.
-        services.AddHostedService<PostgresModelLifecycleEventListenerHostedService>(sp =>
-            new PostgresModelLifecycleEventListenerHostedService(
-                sp.GetRequiredService<PostgresModelLifecycleEventListener>()));
         services.AddSingleton<Application.ModelRuntimeReconcileService>();
         // WS-5: durable operation persistence for the model download handoff.
         services.AddSingleton<IOperationStore>(sp => new PostgresOperationStore(connectionString));
@@ -106,9 +100,7 @@ internal static class ApiServiceCollectionExtensions
             sp.GetRequiredService<IVideoClusterEmbeddingStore>(),
             rankingService: null));
         services.AddSingleton<ISearchDocumentGenerator, SearchDocumentGenerator>();
-        // Temporarily use OllamaEmbeddingService due to MEAI 10.5.0 / OllamaSharp 4.0.1 compatibility issues.
-        // TODO: Migrate back to MeaiEmbeddingServiceAdapter once compatibility is resolved.
-        services.AddSingleton<IEmbeddingService>(sp => new OllamaEmbeddingService(sp.GetRequiredService<HttpClient>(), configuration));
+        services.AddMeaiEmbeddingServiceAdapter(configuration);
         // The runtime client builds its absolute request URI from config (embedding:ollamaEndpoint,
         // OLLAMA_HOST, ...) rather than from HttpClient.BaseAddress, matching OllamaEmbeddingService.
         // Named client (not a captured singleton HttpClient) so handler rotation refreshes DNS for

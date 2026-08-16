@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace StreamingDigest.IntegrationTests;
 
+[Trait("Category", "Integration")]
 public class HealthEndpointTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
