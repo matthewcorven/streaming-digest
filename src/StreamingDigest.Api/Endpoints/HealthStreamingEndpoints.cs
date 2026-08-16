@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using StreamingDigest.Api.Services;
 
@@ -24,6 +25,7 @@ internal static class HealthStreamingEndpoints
     private static async Task GetHealthStream(
         HealthStreamService healthStreamService,
         HttpContext httpContext,
+        IConfiguration configuration,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -31,10 +33,25 @@ internal static class HealthStreamingEndpoints
         logger.LogDebug("SSE client connected: {ClientIp}", httpContext.Connection.RemoteIpAddress);
 
         var response = httpContext.Response;
+        
+        // Restrict CORS to configured allowed origins
+        var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+            ?? new[] { "http://localhost:3000", "http://localhost:5149" };
+        var origin = httpContext.Request.Headers["Origin"].FirstOrDefault() ?? "";
+
+        if (!string.IsNullOrEmpty(origin) && allowedOrigins.Contains(origin))
+        {
+            response.Headers.Append("Access-Control-Allow-Origin", origin);
+            logger.LogDebug("CORS origin allowed: {Origin}", origin);
+        }
+        else if (!string.IsNullOrEmpty(origin))
+        {
+            logger.LogWarning("CORS origin rejected: {Origin}", origin);
+        }
+
         response.ContentType = "text/event-stream";
         response.Headers["Cache-Control"] = "no-cache";
         response.Headers["Connection"] = "keep-alive";
-        response.Headers.Append("Access-Control-Allow-Origin", "*");
         response.Headers.Append("Access-Control-Allow-Methods", "GET");
 
         try
