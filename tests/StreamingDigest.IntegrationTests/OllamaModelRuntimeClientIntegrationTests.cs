@@ -7,7 +7,7 @@ namespace StreamingDigest.IntegrationTests;
 /// <summary>
 /// Integration coverage for <see cref="OllamaModelRuntimeClient"/> against an ephemeral Ollama
 /// container provisioned and managed by <see cref="OllamaContainerFixture"/>.
-/// 
+///
 /// Each test method receives a fresh container with an isolated Docker volume
 /// (<c>streamingdigest-it-ollama-{guid}</c>) mounted at <c>/root/.ollama</c>;
 /// the volume is automatically cleaned up in teardown. The app volume
@@ -61,8 +61,6 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IClassFixture<Oll
         using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
-        // The model is already local after seeding, so the pull resolves quickly and emits a
-        // terminal "success" status.
         var progress = new List<ModelPullProgress>();
         await foreach (var item in client.PullModelAsync("qwen2.5:0.5b"))
         {

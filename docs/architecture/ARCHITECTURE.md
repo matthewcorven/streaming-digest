@@ -627,7 +627,19 @@ Aspire is used for:
 - Local dashboard.
 - Generating/publishing deployment artifacts, including Compose where practical.
 
-Production uses Docker Compose with separate containers and shared `streaming-digest-*` naming.
+Production uses Docker Compose with separate containers following a standardized naming convention:
+
+**Docker Image Naming Convention:**
+```
+streaming-digest-{service-name}:{short-commit-id}
+```
+
+Examples:
+- `streaming-digest-api:a1b2c3d`
+- `streaming-digest-worker:a1b2c3d`
+- `streaming-digest-scraper:a1b2c3d`
+
+Service names match their logical role (api, worker, scraper, etc.). The image tag uses the short Git commit ID from the AppHost build, enabling reproducible deployments and audit trail traceability. This convention is enforced in `AppHost.cs` via `WithImageTag()` for all Dockerfile-based services.
 
 Aspire AppHost should not be required as a production process unless explicitly chosen later.
 

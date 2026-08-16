@@ -24,6 +24,7 @@ public sealed class ModelStatusService : IAsyncDisposable
     private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan ConnectedPollingInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DegradedPollingInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan SseRestartAfterPauseDuration = TimeSpan.FromMinutes(5);
 
     private readonly SearchUiSessionService _session;
     private readonly IJSRuntime? _jsRuntime;
@@ -34,6 +35,7 @@ public sealed class ModelStatusService : IAsyncDisposable
     private Task? _pollingTask;
     private DotNetObjectReference<ModelStatusService>? _browserSseCallback;
     private string? _browserSseHandle;
+    private DateTime? _sseEnteredPausedAt;
 
     // ── Public surface ────────────────────────────────────────────────────────────────────
 
@@ -345,6 +347,7 @@ public sealed class ModelStatusService : IAsyncDisposable
             _sseCts = null;
             _sseTask = null;
             _pollingTask = null;
+            _sseEnteredPausedAt = null;
         }
 
         if (_browserSseHandle is not null && _jsRuntime is not null)
@@ -447,6 +450,7 @@ public sealed class ModelStatusService : IAsyncDisposable
                 SetConnectionState(SseConnectionState.Connected);
                 consecutiveFailures = 0;
                 reconnectDelayMs = 500;
+                _sseEnteredPausedAt = null;
 
                 // Reconcile from the status endpoint now that we have a live stream.
                 await ReconcileFromStatusEndpointAsync(cancellationToken);
@@ -489,12 +493,36 @@ public sealed class ModelStatusService : IAsyncDisposable
             SetConnectionState(SseConnectionState.Reconnecting);
             NotifyChanged();
 
-            // Stop reconnecting after 3 consecutive failures — degraded to manual refresh.
+            // After 3 consecutive failures, enter a paused state and wait for timeout before retrying.
             if (consecutiveFailures >= 3)
             {
-                SetConnectionState(SseConnectionState.Paused);
-                NotifyChanged();
-                return;
+                _sseEnteredPausedAt ??= DateTime.UtcNow;
+
+                if (DateTime.UtcNow - _sseEnteredPausedAt.Value < SseRestartAfterPauseDuration)
+                {
+                    // Still within pause duration — stay paused and wait.
+                    SetConnectionState(SseConnectionState.Paused);
+                    NotifyChanged();
+
+                    try
+                    {
+                        // Wait 30 seconds before checking if pause duration has expired.
+                        await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+                else
+                {
+                    // Pause timeout expired; reset and attempt reconnection.
+                    consecutiveFailures = 0;
+                    reconnectDelayMs = 500;
+                    _sseEnteredPausedAt = null;
+                }
             }
 
             try

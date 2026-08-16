@@ -14,6 +14,7 @@
   <ProjectReference Include="..\StreamingDigest.Application\StreamingDigest.Application.csproj" />
   <ProjectReference Include="..\StreamingDigest.Domain\StreamingDigest.Domain.csproj" />
   <ProjectReference Include="..\StreamingDigest.MatrixNotifier\StreamingDigest.MatrixNotifier.csproj" />
+  <ProjectReference Include="..\StreamingDigest.Contracts\StreamingDigest.Contracts.csproj" />
 </ItemGroup>
 
 <ItemGroup>
