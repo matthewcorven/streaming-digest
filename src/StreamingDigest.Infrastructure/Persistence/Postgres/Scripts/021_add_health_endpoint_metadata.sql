@@ -30,11 +30,12 @@ CREATE OR REPLACE VIEW stale_data_audit AS
 SELECT 
     COALESCE(COUNT(sd.id) FILTER (WHERE sd.is_stale = true), 0)::INT as stale_search_documents,
     COALESCE(COUNT(DISTINCT e.search_document_id) FILTER (WHERE e.embedding_status = 'pending'), 0)::INT as pending_embeddings,
-    COALESCE(COUNT(s.id) FILTER (WHERE s.requires_user_approval = true), 0)::INT as segments_pending_approval,
+    COALESCE(COUNT(sg.id) FILTER (WHERE sg.requires_user_approval = true), 0)::INT as segments_pending_approval,
     COALESCE(COUNT(s.id) FILTER (WHERE s.requires_embedding_approval = true), 0)::INT as segments_pending_embedding,
     CURRENT_TIMESTAMP as audited_at
 FROM search_documents sd
 FULL OUTER JOIN embeddings e ON sd.id = e.search_document_id
+FULL OUTER JOIN segment_generations sg ON true
 FULL OUTER JOIN segments s ON true;
 
 -- Indexes for efficient queries
@@ -44,4 +45,5 @@ CREATE INDEX IF NOT EXISTS idx_service_health_service_name ON service_health(ser
 CREATE INDEX IF NOT EXISTS idx_service_health_status ON service_health(status);
 CREATE INDEX IF NOT EXISTS idx_search_documents_is_stale ON search_documents(is_stale) WHERE is_stale = true;
 CREATE INDEX IF NOT EXISTS idx_embeddings_status ON embeddings(embedding_status) WHERE embedding_status = 'pending';
-CREATE INDEX IF NOT EXISTS idx_segments_approvals ON segments(requires_user_approval, requires_embedding_approval) WHERE requires_user_approval = true OR requires_embedding_approval = true;
+CREATE INDEX IF NOT EXISTS idx_segment_generations_approval ON segment_generations(requires_user_approval) WHERE requires_user_approval = true;
+CREATE INDEX IF NOT EXISTS idx_segments_embedding_approval ON segments(requires_embedding_approval) WHERE requires_embedding_approval = true;
