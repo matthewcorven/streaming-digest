@@ -861,5 +861,84 @@ public sealed class LiveSignalsScenariosTests : IAsyncLifetime
            }
        }
     }
+
+    // =====================================================================
+    // PHASE 4: AC4 Brief Drops Don't Lose Updates
+    // =====================================================================
+
+    /// <summary>
+    /// AC4: Brief Drops — Network interruption followed by recovery should not lose queued updates.
+    /// Validates that buffered events during 2-3 second drop are delivered on reconnection.
+    /// </summary>
+    [Fact]
+    public async Task AC4_BriefNetworkDrop_2Seconds_DoesNotLoseBufferedUpdates()
+    {
+       var harness = _fixtures.E2eHarness;
+       var emitter = _fixtures.Emitter;
+
+       // Arrange: Subscribe to SSE stream
+       emitter.Reset();
+       await harness.MutateStateAsync(HealthState.Ready, _testCts.Token);
+       await Task.Delay(500); // Let subscription complete
+
+       // Emit events before drop
+       await emitter.EmitAsync(new { status = "ready", timestamp = DateTime.UtcNow });
+
+       // Simulate network drop for 2 seconds
+       await harness.SimulateNetworkDropAsync(TimeSpan.FromSeconds(2), _testCts.Token);
+
+       // Emit events during drop (should be buffered, not lost)
+       await emitter.EmitAsync(new { status = "degraded", timestamp = DateTime.UtcNow });
+       await emitter.EmitAsync(new { status = "reconnecting", timestamp = DateTime.UtcNow });
+
+       // Recover connection
+       await harness.RecoverConnectionAsync(_testCts.Token);
+       await Task.Delay(1000); // Allow reconnection and buffer flush
+
+       // Assert: All buffered events received
+       var events = emitter.GetEmittedEvents();
+       Assert.Contains(events, e => 
+           e.EventName.Contains("status", StringComparison.OrdinalIgnoreCase) &&
+           e.EventData?.Contains("degraded", StringComparison.OrdinalIgnoreCase) == true);
+       Assert.Contains(events, e => 
+           e.EventName.Contains("status", StringComparison.OrdinalIgnoreCase) &&
+           e.EventData?.Contains("reconnecting", StringComparison.OrdinalIgnoreCase) == true);
+
+       _logger.LogDebug("AC4 test: All buffered events during 2s drop were preserved");
+    }
+
+    /// <summary>
+    /// AC4: Polling Fallback — Verifies state consistency during brief drops.
+    /// Validates that polling at 2s interval (degraded mode) maintains fresh state.
+    /// </summary>
+    [Fact]
+    public async Task AC4_PollingFallback_MaintainsStateConsistency_DuringBriefDrop()
+    {
+       var harness = _fixtures.E2eHarness;
+       var emitter = _fixtures.Emitter;
+
+       // Arrange: Subscribe and trigger degraded state
+       await harness.MutateStateAsync(HealthState.Degraded, _testCts.Token);
+       emitter.Reset();
+
+       var pollInterval = await harness.MeasurePollingIntervalAsync(_testCts.Token);
+       _logger.LogDebug("Measured polling interval: {PollingInterval}ms", pollInterval.TotalMilliseconds);
+        
+       // Verify polling at degraded 2s interval (±tolerance)
+       Assert.InRange(pollInterval.TotalMilliseconds, 1500, 2500);
+
+       // Simulate connection drop
+       await harness.SimulateNetworkDropAsync(TimeSpan.FromSeconds(2), _testCts.Token);
+
+       // Wait for polling to fire during drop (2.1s to ensure at least one poll)
+       await Task.Delay(2100);
+
+       // Verify state snapshot is current (polling kept it fresh)
+       var currentState = harness.GetCurrentState();
+       Assert.Equal(HealthState.Degraded, currentState);
+
+       _logger.LogDebug("AC4 test: State remained consistent {State} during polling fallback", currentState);
+    }
 }
+
 
