@@ -107,7 +107,12 @@ public class BackupManifestCheckerTests
 
                 var config = new ApplicationConfiguration
                 {
-                    Backup = new BackupSettings { DestinationPath = tempDir }
+                    Backup = new BackupSettings
+                    {
+                        DestinationPath = tempDir,
+                        MaxAgeHours = 72,
+                        MinimumBackupCount = 1
+                    }
                 };
                 var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
                 var checker = new BackupManifestChecker(config, hostEnv, _logger);
@@ -168,7 +173,12 @@ public class BackupManifestCheckerTests
 
                 var config = new ApplicationConfiguration
                 {
-                    Backup = new BackupSettings { DestinationPath = tempDir }
+                    Backup = new BackupSettings
+                    {
+                        DestinationPath = tempDir,
+                        MaxAgeHours = 72,
+                        MinimumBackupCount = 1
+                    }
                 };
                 var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
                 var checker = new BackupManifestChecker(config, hostEnv, _logger);
@@ -213,7 +223,12 @@ public class BackupManifestCheckerTests
 
                 var config = new ApplicationConfiguration
                 {
-                    Backup = new BackupSettings { DestinationPath = tempDir }
+                    Backup = new BackupSettings
+                    {
+                        DestinationPath = tempDir,
+                        MaxAgeHours = 72,
+                        MinimumBackupCount = 1
+                    }
                 };
                 var hostEnv = CreateMockHostEnvironment(Path.GetTempPath());
                 var checker = new BackupManifestChecker(config, hostEnv, _logger);
