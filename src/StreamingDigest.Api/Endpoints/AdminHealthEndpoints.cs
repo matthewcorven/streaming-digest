@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Services.Health;
 using StreamingDigest.Domain.Health;
+using StreamingDigest.Infrastructure.Extensions;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Services.Health;
 using StreamingDigest.Web.Models;
@@ -39,10 +40,7 @@ internal static class AdminHealthEndpoints
         var logger = loggerFactory.CreateLogger("StreamingDigest.Api.Endpoints.AdminHealthEndpoints");
         logger.LogDebug("Generating live admin health snapshot");
 
-        var connectionString = configuration.GetConnectionString("streamingdigest")
-            ?? configuration.GetConnectionString("postgres")
-            ?? configuration.GetConnectionString("Default")
-            ?? string.Empty;
+        var connectionString = configuration.GetStreamingDigestConnectionString();
 
         try
         {

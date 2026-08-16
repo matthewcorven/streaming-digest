@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Services.Health;
 using StreamingDigest.Domain.Health;
+using StreamingDigest.Infrastructure.Extensions;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Services.Health;
 using StreamingDigest.Web.Models;
@@ -187,10 +188,7 @@ public sealed class HealthStreamService : IAsyncDisposable
     {
         try
         {
-            var connectionString = _configuration.GetConnectionString("streamingdigest")
-                ?? _configuration.GetConnectionString("postgres")
-                ?? _configuration.GetConnectionString("Default")
-                ?? string.Empty;
+            var connectionString = _configuration.GetStreamingDigestConnectionString();
 
             var probes = await _compositeProbe.ProbeAllAsync(cancellationToken);
             var overallHealth = _compositeProbe.ComputeOverallHealth(probes);
@@ -474,10 +472,7 @@ public sealed class HealthStreamService : IAsyncDisposable
     {
         try
         {
-            var connectionString = _configuration.GetConnectionString("streamingdigest")
-                ?? _configuration.GetConnectionString("postgres")
-                ?? _configuration.GetConnectionString("Default")
-                ?? string.Empty;
+            var connectionString = _configuration.GetStreamingDigestConnectionString();
 
             var probes = await _compositeProbe.ProbeAllAsync(cancellationToken);
             var overallHealth = _compositeProbe.ComputeOverallHealth(probes);
