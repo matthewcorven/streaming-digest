@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Net;
 using Microsoft.Extensions.Configuration;
 using StreamingDigest.Application;
 using StreamingDigest.Infrastructure;
@@ -7,96 +5,39 @@ using StreamingDigest.Infrastructure;
 namespace StreamingDigest.IntegrationTests;
 
 /// <summary>
-/// Integration coverage for <see cref="OllamaModelRuntimeClient"/> against a throwaway Ollama
-/// container. Skipped by default — run locally only where Docker is available. Per the plan's
-/// Section 10.4 isolation rule, each run mounts a unique per-run Docker volume
-/// (<c>streamingdigest-it-ollama-{guid}</c>) at <c>/root/.ollama</c> and deletes it in teardown.
-/// The app volume (<c>streamingdigest-ollama-data</c>) is never touched.
+/// Integration coverage for <see cref="OllamaModelRuntimeClient"/> against an ephemeral Ollama
+/// container provisioned and managed by <see cref="OllamaContainerFixture"/>.
+/// 
+/// Each test method receives a fresh container with an isolated Docker volume
+/// (<c>streamingdigest-it-ollama-{guid}</c>) mounted at <c>/root/.ollama</c>;
+/// the volume is automatically cleaned up in teardown. The app volume
+/// (<c>streamingdigest-ollama-data</c>) is never touched.
 ///
-/// Run locally: temporarily remove the <c>Skip</c> on the test methods, ensure Docker is running
-/// and the machine can reach the Ollama model registry, then
-/// <c>dotnet test tests/StreamingDigest.IntegrationTests --filter FullyQualifiedName~OllamaModelRuntimeClient</c>.
+/// Run: <c>dotnet test tests/StreamingDigest.IntegrationTests --filter FullyQualifiedName~OllamaModelRuntimeClient</c>
+/// (Requires Docker and network access to pull models.)
 /// </summary>
-public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
+public sealed class OllamaModelRuntimeClientIntegrationTests : IClassFixture<OllamaContainerFixture>
 {
-    private const string SeedModel = "qwen2.5:0.5b";
-    private static readonly TimeSpan SeedPullTimeout = TimeSpan.FromMinutes(5);
+    private readonly OllamaContainerFixture _fixture;
 
-    private string? _containerId;
-    private string? _volumeName;
-    private int _hostPort;
-    private bool _dockerAvailable;
-    private string _endpoint = null!;
-
-    public async Task InitializeAsync()
+    public OllamaModelRuntimeClientIntegrationTests(OllamaContainerFixture fixture)
     {
-        _dockerAvailable = await IsDockerAvailableAsync();
-        if (!_dockerAvailable)
-        {
-            return;
-        }
-
-        _volumeName = $"streamingdigest-it-ollama-{Guid.NewGuid():N}";
-        _hostPort = FindFreePort();
-
-        var createArgs = $"container create --name ollama-it-{Guid.NewGuid():N} " +
-                         $"-p {_hostPort}:11434 " +
-                         $"-v {_volumeName}:/root/.ollama " +
-                         "ollama/ollama:latest";
-
-        var (createCode, createOutput) = await RunDockerAsync(createArgs);
-        if (createCode != 0)
-        {
-            await CleanupAsync();
-            _dockerAvailable = false;
-            return;
-        }
-
-        _containerId = createOutput.Trim();
-
-        var (startCode, _) = await RunDockerAsync($"container start {_containerId}");
-        if (startCode != 0)
-        {
-            await CleanupAsync();
-            _dockerAvailable = false;
-            return;
-        }
-
-        // Seed the smallest viable model with a bounded timeout; surface stderr on failure so a
-        // slow network or registry outage doesn't look like an empty /api/tags.
-        using var seedCts = new CancellationTokenSource(SeedPullTimeout);
-        var (seedCode, seedErr) = await RunDockerAsync($"exec {_containerId} ollama pull {SeedModel}", seedCts.Token);
-        if (seedCode != 0)
-        {
-            await CleanupAsync();
-            _dockerAvailable = false;
-            throw new InvalidOperationException(
-                $"Seed `ollama pull {SeedModel}` failed (exit {seedCode}) within {SeedPullTimeout.TotalMinutes:F0} min. stderr: {seedErr}");
-        }
-
-        _endpoint = $"http://localhost:{_hostPort}";
+        _fixture = fixture;
     }
 
-    public Task DisposeAsync() => CleanupAsync();
-
-    [Fact(Skip = "Requires Docker and a network connection to pull a tiny Ollama model; runs locally only.")]
+    [Fact]
     public async Task ListInstalledModelsAsync_ReturnsSeededModelFromContainer()
     {
-        if (!_dockerAvailable)
-        {
-            return;
-        }
-
         await WaitForOllamaAsync();
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["embedding:ollamaEndpoint"] = _endpoint
+                ["embedding:ollamaEndpoint"] = _fixture.Endpoint
             })
             .Build();
 
-        using var httpClient = new HttpClient { BaseAddress = new Uri(_endpoint) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
         var models = await client.ListInstalledModelsAsync();
@@ -105,30 +46,25 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
         Assert.Contains(models, m => m.Provider == "ollama" && m.ModelId.StartsWith("qwen2.5", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact(Skip = "Requires Docker and a network connection to pull a tiny Ollama model; runs locally only.")]
+    [Fact]
     public async Task PullModelAsync_YieldsSuccessForAlreadyLocalModel()
     {
-        if (!_dockerAvailable)
-        {
-            return;
-        }
-
         await WaitForOllamaAsync();
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["embedding:ollamaEndpoint"] = _endpoint
+                ["embedding:ollamaEndpoint"] = _fixture.Endpoint
             })
             .Build();
 
-        using var httpClient = new HttpClient { BaseAddress = new Uri(_endpoint) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
         // The model is already local after seeding, so the pull resolves quickly and emits a
         // terminal "success" status.
         var progress = new List<ModelPullProgress>();
-        await foreach (var item in client.PullModelAsync(SeedModel))
+        await foreach (var item in client.PullModelAsync("qwen2.5:0.5b"))
         {
             progress.Add(item);
         }
@@ -137,30 +73,25 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
         Assert.Contains(progress, p => p.Status.Equals("success", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact(Skip = "Requires Docker and a network connection to pull a tiny Ollama model; runs locally only.")]
+    [Fact]
     public async Task ShowModelAsync_ReturnsFamiliesNestedUnderDetailsForRealServer()
     {
-        if (!_dockerAvailable)
-        {
-            return;
-        }
-
         await WaitForOllamaAsync();
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["embedding:ollamaEndpoint"] = _endpoint
+                ["embedding:ollamaEndpoint"] = _fixture.Endpoint
             })
             .Build();
 
-        using var httpClient = new HttpClient { BaseAddress = new Uri(_endpoint) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
-        var info = await client.ShowModelAsync(SeedModel);
+        var info = await client.ShowModelAsync("qwen2.5:0.5b");
 
         Assert.Equal("ollama", info.Provider);
-        Assert.Equal(SeedModel, info.ModelId);
+        Assert.Equal("qwen2.5:0.5b", info.ModelId);
         // This is the assertion that catches the BLOCKER 1 bug: real Ollama nests families inside
         // details; the parser must read them from there, not the response root.
         Assert.NotEmpty(info.Families);
@@ -174,7 +105,7 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
         {
             try
             {
-                using var response = await probe.GetAsync($"{_endpoint}/api/tags");
+                using var response = await probe.GetAsync($"{_fixture.Endpoint}/api/tags");
                 if (response.IsSuccessStatusCode)
                 {
                     return;
@@ -188,62 +119,7 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
             await Task.Delay(1000);
         }
 
-        throw new InvalidOperationException($"Ollama container did not become ready at {_endpoint}.");
-    }
-
-    private static async Task<bool> IsDockerAvailableAsync()
-    {
-        try
-        {
-            var (code, _) = await RunDockerAsync("--version");
-            return code == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static async Task<(int ExitCode, string Output)> RunDockerAsync(string arguments, CancellationToken cancellationToken = default)
-    {
-        var psi = new ProcessStartInfo("docker", arguments)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        using var process = new Process { StartInfo = psi };
-        process.Start();
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-
-        return (process.ExitCode, string.Concat(await outputTask, await errorTask));
-    }
-
-    private static int FindFreePort()
-    {
-        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    private async Task CleanupAsync()
-    {
-        if (_containerId is not null)
-        {
-            await RunDockerAsync($"container rm -f {_containerId}");
-            _containerId = null;
-        }
-
-        if (_volumeName is not null)
-        {
-            await RunDockerAsync($"volume rm {_volumeName}");
-            _volumeName = null;
-        }
+        throw new InvalidOperationException($"Ollama container did not become ready at {_fixture.Endpoint}.");
     }
 
     private sealed class PassthroughHttpClientFactory(HttpClient client) : IHttpClientFactory
