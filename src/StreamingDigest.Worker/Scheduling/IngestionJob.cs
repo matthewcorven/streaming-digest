@@ -7,15 +7,18 @@ using StreamingDigest.Domain;
 namespace StreamingDigest.Worker.Scheduling;
 
 /// <summary>
-/// Hangfire job class that drives the ingestion pipeline for one channel (or all
-/// non-paused channels when <paramref name="channelId"/> is <c>null</c>).
+/// Unified Hangfire job class for all ingestion pipeline invocations (both recurring
+/// and on-demand). This consolidates all ingestion job dispatch into a single job type
+/// with parameterized trigger metadata.
 ///
-/// Registered as a recurring job by <see cref="IngestionScheduleSetup"/>; also
-/// enqueued on-demand by <see cref="HangfireIngestionJobScheduler"/>.
+/// Entry points:
+/// - <see cref="ExecuteScheduledAsync"/> — registered as recurring job (6AM)
+/// - <see cref="ExecuteOnDemandAsync"/> — enqueued by <see cref="HangfireIngestionJobScheduler"/> for manual/catch-up runs
+/// - <see cref="ExecuteAsync"/> (internal) — unified implementation called by both entry points
 ///
 /// ADR-0011: scheduled runs check <see cref="IEmbeddingTransitionChecker"/> and
 /// bail out when a transition is active — the Hangfire recurring slot fires as
-/// normal, but no ingestion work occurs.  The single catch-up run is enqueued by
+/// normal, but no ingestion work occurs. The single catch-up run is enqueued by
 /// the embedding-regeneration completion path (calling
 /// <see cref="IIngestionJobScheduler.EnqueueOnDemandRun"/>), not from here.
 /// </summary>
@@ -36,6 +39,8 @@ public sealed class IngestionJob(
     /// Recurring entry point. Skips silently when an embedding transition is
     /// active (ADR-0011 pause). The recurring slot still fires; nothing is
     /// persisted or retried on skip.
+    ///
+    /// Wrapped by: <see cref="ExecuteAsync"/> (unified implementation)
     /// </summary>
     [AutomaticRetry(Attempts = 0)]
     [DisableConcurrentExecution(timeoutInSeconds: 3600)]
@@ -49,15 +54,22 @@ public sealed class IngestionJob(
             return;
         }
 
-        await RunAllChannelsAsync("scheduled", "system", cancellationToken);
+        await ExecuteAsync(
+            channelId: null,
+            runType: "scheduled",
+            triggeredBy: "system",
+            isScheduledRecurring: true,
+            cancellationToken);
     }
 
     /// <summary>
-    /// On-demand / catch-up entry point.  Enqueued by
+    /// On-demand / catch-up entry point. Enqueued by
     /// <see cref="HangfireIngestionJobScheduler.EnqueueOnDemandRun"/> or by the
     /// embedding-regeneration completion path for the single ADR-0011 catch-up.
     /// Manual runs are intentionally <em>not</em> blocked by a transition — the
     /// operator is present and can observe the coverage banner.
+    ///
+    /// Wrapped by: <see cref="ExecuteAsync"/> (unified implementation)
     /// </summary>
     [AutomaticRetry(Attempts = 0)]
     [DisableConcurrentExecution(timeoutInSeconds: 3600)]
@@ -66,6 +78,24 @@ public sealed class IngestionJob(
         string runType,
         string triggeredBy,
         CancellationToken cancellationToken = default)
+    {
+        await ExecuteAsync(channelId, runType, triggeredBy, isScheduledRecurring: false, cancellationToken);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Unified implementation
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Unified ingestion execution logic. Called by both <see cref="ExecuteScheduledAsync"/>
+    /// and <see cref="ExecuteOnDemandAsync"/> to consolidate job dispatch logic.
+    /// </summary>
+    private async Task ExecuteAsync(
+        Guid? channelId,
+        string runType,
+        string triggeredBy,
+        bool isScheduledRecurring,
+        CancellationToken cancellationToken)
     {
         if (channelId.HasValue)
         {

@@ -5,14 +5,13 @@ using StreamingDigest.Infrastructure;
 namespace StreamingDigest.IntegrationTests;
 
 /// <summary>
-/// Integration coverage for <see cref="OllamaModelRuntimeClient"/> against a Testcontainers-managed Ollama.
-/// Verifies model listing, pulling, and detailed model info (including nested families).
-/// Skipped by default; run locally where Docker is available.
+/// Integration coverage for <see cref="OllamaModelRuntimeClient"/> using Testcontainers-managed Ollama.
+/// This test class is skipped by default — enable it to run locally where Docker is available.
 ///
-/// Run locally: temporarily remove the <c>Skip</c> attribute, ensure Docker is running,
-/// then: <c>dotnet test tests/StreamingDigest.IntegrationTests --filter FullyQualifiedName~OllamaModelRuntimeClientIntegrationTests</c>
+/// Run locally: Temporarily remove the <c>Skip</c> attribute, ensure Docker is running,
+/// then: <c>dotnet test tests/StreamingDigest.IntegrationTests --filter FullyQualifiedName~OllamaModelRuntimeClientTestcontainersTests</c>
 /// </summary>
-public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
+public sealed class OllamaModelRuntimeClientTestcontainersTests : IAsyncLifetime
 {
     private readonly OllamaContainerFixture _fixture = new();
 
@@ -41,6 +40,8 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
         using var httpClient = new HttpClient { BaseAddress = new Uri(_fixture.Endpoint) };
         var client = new OllamaModelRuntimeClient(new PassthroughHttpClientFactory(httpClient), configuration);
 
+        // The model is already local after seeding, so the pull resolves quickly and emits a
+        // terminal "success" status.
         var progress = new List<ModelPullProgress>();
         await foreach (var item in client.PullModelAsync("qwen2.5:0.5b"))
         {
@@ -63,8 +64,8 @@ public sealed class OllamaModelRuntimeClientIntegrationTests : IAsyncLifetime
 
         Assert.Equal("ollama", info.Provider);
         Assert.Equal("qwen2.5:0.5b", info.ModelId);
-        // This assertion catches that real Ollama nests families inside details;
-        // the parser must read them from there, not the response root.
+        // This is the assertion that catches the BLOCKER 1 bug: real Ollama nests families inside
+        // details; the parser must read them from there, not the response root.
         Assert.NotEmpty(info.Families);
         Assert.NotNull(info.Details);
     }
