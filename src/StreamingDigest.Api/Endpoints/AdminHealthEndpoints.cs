@@ -31,6 +31,7 @@ internal static class AdminHealthEndpoints
         CompositeServiceHealthProvider compositeProbe,
         UpgradeCompatibilityStateService upgradeService,
         IModelRuntimeStateRepository modelStateRepository,
+        IBackupManifestChecker backupManifestChecker,
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -57,7 +58,7 @@ internal static class AdminHealthEndpoints
                 Models = await BuildModelsSection(modelStateRepository, logger, cancellationToken),
                 Observability = BuildObservabilitySection(probes, logger),
                 Storage = BuildStorageSection(probes, logger),
-                BackupReadiness = await BuildBackupReadinessSection(logger, cancellationToken),
+                BackupReadiness = await BuildBackupReadinessSection(backupManifestChecker, logger, cancellationToken),
                 OverallHealth = ToApiHealthState(overallHealth),
                 LastUpdatedAt = DateTime.UtcNow
             };
@@ -297,25 +298,33 @@ internal static class AdminHealthEndpoints
     }
 
     private static async Task<BackupReadinessSection> BuildBackupReadinessSection(
+        IBackupManifestChecker backupManifestChecker,
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        logger.LogDebug("Building backup readiness section");
+        logger.LogDebug("Building backup readiness section from live manifest verification");
 
         try
         {
-            await Task.CompletedTask;
-            logger.LogDebug("Backup readiness section built (preview state)");
+            var backupData = await backupManifestChecker.GetBackupReadinessAsync(cancellationToken);
+            logger.LogDebug("Backup readiness check complete: healthy={IsHealthy}, status={Status}, lastBackup={LastBackup}",
+                backupData.IsHealthy,
+                backupData.Status,
+                backupData.LastBackupAtUtc);
+
+            var state = backupData.IsHealthy ? ApiHealthState.Ready : ApiHealthState.Degraded;
 
             return new BackupReadinessSection
             {
-                State = ApiHealthState.Ready,
-                Summary = "Backup system operational (live verification pending)",
-                LastBackupAt = null,
-                TimeSinceLastBackup = "Unknown",
-                RetentionStatus = "Not yet verified",
-                Details = ["Backup verification is preview state; live verification is pending."],
-                PreviewMode = true
+                State = state,
+                Summary = backupData.IsHealthy
+                    ? "Backup system operational and verified"
+                    : $"Backup system requires attention: {backupData.Status}",
+                LastBackupAt = backupData.LastBackupAtUtc,
+                TimeSinceLastBackup = backupData.TimeSinceLastBackup,
+                RetentionStatus = backupData.IsHealthy ? "Compliant" : "Attention required",
+                Details = backupData.Details,
+                PreviewMode = false
             };
         }
         catch (Exception ex)
@@ -326,7 +335,7 @@ internal static class AdminHealthEndpoints
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving backup status",
                 Details = [ex.Message],
-                PreviewMode = true
+                PreviewMode = false
             };
         }
     }
