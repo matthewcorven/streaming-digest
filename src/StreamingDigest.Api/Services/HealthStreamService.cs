@@ -348,11 +348,23 @@ public sealed class HealthStreamService : IAsyncDisposable
 
             _logger.LogDebug("Publishing event to {SubscriberCount} subscribers", currentSubscribers.Count);
 
-            var tasks = currentSubscribers
-                .Select(sub => WriteEventAsync(sub.Writer, "update", json, sub.CancellationToken))
-                .ToList();
+            var failedSubscribers = new List<Guid>();
 
-            await Task.WhenAll(tasks);
+            // Fire-and-forget per subscriber; don't block on slowest subscriber
+            foreach (var sub in currentSubscribers)
+            {
+                _ = PublishToSubscriberAsync(sub, json, failedSubscribers);
+            }
+
+            // Clean up failed subscribers asynchronously
+            if (failedSubscribers.Count > 0)
+            {
+                lock (_subscribersLock)
+                {
+                    _subscribers.RemoveAll(s => failedSubscribers.Contains(s.Id));
+                }
+                _logger.LogDebug("Removed {Count} failed subscribers", failedSubscribers.Count);
+            }
         }
         catch (Exception ex)
         {
@@ -360,7 +372,7 @@ public sealed class HealthStreamService : IAsyncDisposable
         }
     }
 
-    private static async Task WriteEventAsync(StreamWriter writer, string eventType, string data, CancellationToken cancellationToken)
+    private static async Task<bool> WriteEventAsync(StreamWriter writer, string eventType, string data, CancellationToken cancellationToken)
     {
         try
         {
@@ -368,10 +380,45 @@ public sealed class HealthStreamService : IAsyncDisposable
             await writer.WriteLineAsync($"data: {data}");
             await writer.WriteLineAsync();
             await writer.FlushAsync();
+            return true;
         }
         catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or IOException)
         {
-            // Expected when client disconnects
+            // Signal failure to caller so subscriber can be removed
+            return false;
+        }
+    }
+
+    private async Task PublishToSubscriberAsync(PendingSubscriber sub, string json, List<Guid> failedSubscribers)
+    {
+        if (!await WriteEventWithTimeoutAsync(sub.Writer, "update", json, sub.CancellationToken))
+        {
+            lock (_subscribersLock)
+            {
+                failedSubscribers.Add(sub.Id);
+            }
+            _logger.LogDebug("Subscriber {SubscriberId} write failed; marking for removal", sub.Id);
+        }
+    }
+
+    private async Task<bool> WriteEventWithTimeoutAsync(StreamWriter writer, string eventType, string data, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+            
+            return await WriteEventAsync(writer, eventType, data, timeoutCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Subscriber write timeout; connection may be stalled");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error writing to subscriber");
+            return false;
         }
     }
 
@@ -490,9 +537,51 @@ public sealed class HealthStreamService : IAsyncDisposable
         if (state1 is null || state2 is null)
             return state1 == state2;
 
-        var json1 = JsonSerializer.Serialize(state1);
-        var json2 = JsonSerializer.Serialize(state2);
-        return json1 == json2;
+        // Quick structural equality check on known type structure
+        if (state1 is not System.Collections.IDictionary dict1 || 
+            state2 is not System.Collections.IDictionary dict2)
+        {
+            return false;
+        }
+
+        // Check key equality before serialization
+        if (dict1.Keys.Count != dict2.Keys.Count)
+            return false;
+
+        foreach (var key in dict1.Keys)
+        {
+            if (!dict2.Contains(key))
+                return false;
+
+            var v1 = dict1[key];
+            var v2 = dict2[key];
+
+            if (v1 is string s1 && v2 is string s2)
+            {
+                if (s1 != s2) return false;
+            }
+            else if (v1 is int i1 && v2 is int i2)
+            {
+                if (i1 != i2) return false;
+            }
+            else if (v1 is bool b1 && v2 is bool b2)
+            {
+                if (b1 != b2) return false;
+            }
+            else if (v1 is double d1 && v2 is double d2)
+            {
+                if (!d1.Equals(d2)) return false;
+            }
+            else
+            {
+                // For complex types, serialize only on mismatch
+                var j1 = JsonSerializer.Serialize(v1);
+                var j2 = JsonSerializer.Serialize(v2);
+                if (j1 != j2) return false;
+            }
+        }
+
+        return true;
     }
 
     public async ValueTask DisposeAsync()
