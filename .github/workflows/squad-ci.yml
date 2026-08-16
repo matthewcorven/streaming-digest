@@ -20,6 +20,10 @@ jobs:
       - name: Ensure Docker is available
         run: docker version
 
-      - name: Build and test
+      - name: Build and test (unit tests only)
         run: |
           dotnet test StreamingDigest.slnx --filter "Category!=Integration&Category!=E2E" --logger "console;verbosity=minimal"
+
+      - name: Run Testcontainers integration tests
+        run: |
+          dotnet test tests/StreamingDigest.Integration.TestContainers/ --logger "console;verbosity=minimal"

@@ -20,6 +20,7 @@
 <ItemGroup>
   <ProjectReference Include="..\..\src\StreamingDigest.Api\StreamingDigest.Api.csproj" />
   <ProjectReference Include="..\..\src\StreamingDigest.Worker\StreamingDigest.Worker.csproj" Aliases="StreamingDigestWorker" />
+  <ProjectReference Include="..\StreamingDigest.Integration.TestContainers\StreamingDigest.Integration.TestContainers.csproj" />
 </ItemGroup>
 
 <ItemGroup>
