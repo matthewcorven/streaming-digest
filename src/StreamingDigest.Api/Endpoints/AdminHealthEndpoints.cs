@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Services.Health;
 using StreamingDigest.Domain.Health;
+using StreamingDigest.Infrastructure.Extensions;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Services.Health;
 using StreamingDigest.Web.Models;
@@ -39,10 +40,7 @@ internal static class AdminHealthEndpoints
         var logger = loggerFactory.CreateLogger("StreamingDigest.Api.Endpoints.AdminHealthEndpoints");
         logger.LogDebug("Generating live admin health snapshot");
 
-        var connectionString = configuration.GetConnectionString("streamingdigest")
-            ?? configuration.GetConnectionString("postgres")
-            ?? configuration.GetConnectionString("Default")
-            ?? string.Empty;
+        var connectionString = configuration.GetStreamingDigestConnectionString();
 
         try
         {
@@ -307,20 +305,12 @@ internal static class AdminHealthEndpoints
         try
         {
             var backupData = await backupManifestChecker.GetBackupReadinessAsync(cancellationToken);
-            logger.LogDebug("Backup readiness check complete: healthy={IsHealthy}, isError={IsError}, status={Status}, lastBackup={LastBackup}",
+            logger.LogDebug("Backup readiness check complete: healthy={IsHealthy}, status={Status}, lastBackup={LastBackup}",
                 backupData.IsHealthy,
-                backupData.IsError,
                 backupData.Status,
                 backupData.LastBackupAtUtc);
 
-            // Distinguish Error (missing directory, permission denied) from Degraded (exists but unhealthy)
-            var state = backupData.IsHealthy
-                ? ApiHealthState.Ready
-                : backupData.IsError
-                    ? ApiHealthState.Error
-                    : ApiHealthState.Degraded;
-
-            logger.LogDebug("Backup readiness is preview state: schema validation and retention checking pending");
+            var state = backupData.IsHealthy ? ApiHealthState.Ready : ApiHealthState.Degraded;
 
             return new BackupReadinessSection
             {
@@ -332,19 +322,18 @@ internal static class AdminHealthEndpoints
                 TimeSinceLastBackup = backupData.TimeSinceLastBackup,
                 RetentionStatus = backupData.IsHealthy ? "Compliant" : "Attention required",
                 Details = backupData.Details,
-                PreviewMode = true
+                PreviewMode = false
             };
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Error building backup section: {ErrorMessage}", ex.Message);
-            logger.LogDebug("Backup readiness is preview state: schema validation and retention checking pending");
             return new BackupReadinessSection
             {
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving backup status",
                 Details = [ex.Message],
-                PreviewMode = true
+                PreviewMode = false
             };
         }
     }

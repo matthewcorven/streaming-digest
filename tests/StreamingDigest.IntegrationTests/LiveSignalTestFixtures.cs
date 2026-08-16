@@ -135,6 +135,11 @@ public class SseEventEmitterFixture : IAsyncDisposable
         if (delayMs > 0)
             await Task.Delay(delayMs);
 
+        // Respect 256-event buffer cap (matching channel capacity)
+        if (_emittedEvents.Count >= 256)
+        {
+            _emittedEvents.RemoveAt(0); // Drop oldest event
+        }
         _emittedEvents.Add((DateTimeOffset.UtcNow, eventName, data));
         
         // Emit to channel (will drop oldest if full, per DropOldest mode)
@@ -454,10 +459,10 @@ public class AdminPanelE2eHarness : IAsyncDisposable
     /// <summary>
     /// Initialize harness for the specified test mode.
     /// </summary>
-    public AdminPanelE2eHarness(HarnessMode mode = HarnessMode.Unit)
+    public AdminPanelE2eHarness(HarnessMode mode = HarnessMode.Unit, SseEventEmitterFixture? emitter = null)
     {
         _mode = mode;
-        _emitter = new();
+        _emitter = emitter ?? new();
         _dropSimulator = new();
         _backoffVerifier = new();
         _panelStateTransitions = new();
@@ -621,7 +626,7 @@ public class LiveSignalsFixtureBundle : IAsyncDisposable
         Emitter = new();
         DropSimulator = new();
         BackoffVerifier = new();
-        E2eHarness = new(mode);
+        E2eHarness = new(mode, Emitter);
     }
 
     public async ValueTask DisposeAsync()
