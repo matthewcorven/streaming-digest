@@ -307,12 +307,20 @@ internal static class AdminHealthEndpoints
         try
         {
             var backupData = await backupManifestChecker.GetBackupReadinessAsync(cancellationToken);
-            logger.LogDebug("Backup readiness check complete: healthy={IsHealthy}, status={Status}, lastBackup={LastBackup}",
+            logger.LogDebug("Backup readiness check complete: healthy={IsHealthy}, isError={IsError}, status={Status}, lastBackup={LastBackup}",
                 backupData.IsHealthy,
+                backupData.IsError,
                 backupData.Status,
                 backupData.LastBackupAtUtc);
 
-            var state = backupData.IsHealthy ? ApiHealthState.Ready : ApiHealthState.Degraded;
+            // Distinguish Error (missing directory, permission denied) from Degraded (exists but unhealthy)
+            var state = backupData.IsHealthy
+                ? ApiHealthState.Ready
+                : backupData.IsError
+                    ? ApiHealthState.Error
+                    : ApiHealthState.Degraded;
+
+            logger.LogDebug("Backup readiness is preview state: schema validation and retention checking pending");
 
             return new BackupReadinessSection
             {
@@ -324,18 +332,19 @@ internal static class AdminHealthEndpoints
                 TimeSinceLastBackup = backupData.TimeSinceLastBackup,
                 RetentionStatus = backupData.IsHealthy ? "Compliant" : "Attention required",
                 Details = backupData.Details,
-                PreviewMode = false
+                PreviewMode = true
             };
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Error building backup section: {ErrorMessage}", ex.Message);
+            logger.LogDebug("Backup readiness is preview state: schema validation and retention checking pending");
             return new BackupReadinessSection
             {
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving backup status",
                 Details = [ex.Message],
-                PreviewMode = false
+                PreviewMode = true
             };
         }
     }
