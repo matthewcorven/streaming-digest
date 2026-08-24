@@ -75,17 +75,17 @@ public sealed class PostgresModelRuntimeStateRepository : IModelRuntimeStateRepo
                 'model_state_changed',
                 json_build_object(
                     'name', 'model:status',
-                    'provider', @provider,
-                    'modelId', @model_id,
-                    'runtimeRole', @runtime_role,
-                    'status', @status,
-                    'updatedAt', @updated_at,
+                    'provider', @provider::text,
+                    'modelId', @model_id::text,
+                    'runtimeRole', @runtime_role::text,
+                    'status', @status::text,
+                    'updatedAt', @updated_at::timestamptz,
                     'dataJson', json_build_object(
-                        'provider', @provider,
-                        'modelId', @model_id,
-                        'status', @status,
-                        'currentOperationId', @current_operation_id,
-                        'progressPercent', @progress_percent
+                        'provider', @provider::text,
+                        'modelId', @model_id::text,
+                        'status', @status::text,
+                        'currentOperationId', @current_operation_id::text,
+                        'progressPercent', @progress_percent::int
                     )
                 )::text
             );
