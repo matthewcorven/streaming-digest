@@ -40,7 +40,7 @@ var shortCommitId = GetShortCommitId();
 // do NOT WaitFor(whisper). Uses locally built MLX Whisper image (see issue #210 for Dockerfile.whisper creation).
 // TODO: Add Dockerfile.whisper to repository and document build steps for Apple Silicon.
 const string whisperImage = "streaming-digest-whisper";
-var whisperImageTag = shortCommitId;
+const string whisperImageTag = "latest";
 const int whisperPort = 8080;
 
 var postgresUsername = builder.AddParameterFromConfiguration(
