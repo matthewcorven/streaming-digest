@@ -1,16 +1,18 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
+<Project Sdk="Aspire.AppHost.Sdk/13.5.2">
 
 <PropertyGroup>
   <OutputType>Exe</OutputType>
   <TargetFramework>net10.0</TargetFramework>
   <ImplicitUsings>enable</ImplicitUsings>
   <Nullable>enable</Nullable>
+  <AspireUseCliBundle>true</AspireUseCliBundle>
   <UserSecretsId>47980369-865a-4e01-afad-b72361f89f3f</UserSecretsId>
   <NoWarn>$(NoWarn);NU1605</NoWarn>
 </PropertyGroup>
 
 <ItemGroup>
   <ProjectReference Include="..\StreamingDigest.Api\StreamingDigest.Api.csproj" />
+  <ProjectReference Include="..\StreamingDigest.Infrastructure\StreamingDigest.Infrastructure.csproj" IsAspireProjectResource="false" />
   <ProjectReference Include="..\StreamingDigest.Worker\StreamingDigest.Worker.csproj" />
   <ProjectReference Include="..\StreamingDigest.Web\StreamingDigest.Web.csproj" />
 </ItemGroup>
@@ -18,6 +20,7 @@
 <ItemGroup>
   <PackageReference Include="Aspire.Hosting.Docker" />
   <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+  <PackageReference Include="Npgsql" />
 </ItemGroup>
 
 </Project>
