@@ -1,9 +1,14 @@
 using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Docker;
 using Aspire.Hosting.Docker.Resources;
 using Aspire.Hosting.Docker.Resources.ComposeNodes;
 using Aspire.Hosting.Docker.Resources.ServiceNodes;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using StreamingDigest.AppHost;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -305,6 +310,81 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("observability:services:loki:url", lokiHttpEndpoint)
     .WithEnvironment("observability:services:tempo:url", tempoHttpEndpoint)
     .WithEnvironment("observability:services:otelCollector:url", otelCollectorGrpcEndpoint);
+
+#if DEBUG
+    api.WithCommand(
+        name: "set-dev-user-credentials",
+        displayName: "Set Dev User Credentials",
+        executeCommand: async context =>
+        {
+            context.Logger.LogDebug(
+                "Development user credential command invoked for resource {ResourceName}.",
+                context.ResourceName);
+
+            var serverConnectionString = await postgresServer.Resource.GetConnectionStringAsync();
+            if (string.IsNullOrWhiteSpace(serverConnectionString))
+            {
+                context.Logger.LogDebug("Development user credential command could not resolve the application database connection string.");
+                return CommandResults.Failure("Could not resolve the local application database connection string.");
+            }
+
+            var connectionString = new Npgsql.NpgsqlConnectionStringBuilder(serverConnectionString)
+            {
+                Database = "streamingdigest"
+            }.ToString();
+
+            var handler = new DevelopmentUserCredentialCommandHandler(context.Logger);
+            var result = await handler.ResetCredentialsAsync(
+                connectionString,
+                context.Arguments.GetString("currentUsername"),
+                context.Arguments.GetString("newUsername"),
+                context.Arguments.GetString("newPassword"),
+                context.CancellationToken);
+
+            if (!result.Success)
+            {
+                context.Logger.LogDebug(
+                    "Development user credential command failed: {ErrorMessage}.",
+                    result.ErrorMessage);
+                return CommandResults.Failure(result.ErrorMessage ?? "Development credential update failed.");
+            }
+
+            context.Logger.LogDebug(
+                "Development user credential command completed for user {Username}.",
+                result.Username);
+            return CommandResults.Success($"Development user credentials updated for '{result.Username}'.");
+        },
+        commandOptions: new CommandOptions
+        {
+            UpdateState = static context => context.ResourceSnapshot.HealthStatus is HealthStatus.Healthy
+                ? ResourceCommandState.Enabled
+                : ResourceCommandState.Disabled,
+            Arguments =
+            [
+                new InteractionInput
+                {
+                    Name = "currentUsername",
+                    Label = "Current Username",
+                    InputType = InputType.Text,
+                    MaxLength = 200
+                },
+                new InteractionInput
+                {
+                    Name = "newUsername",
+                    Label = "New Username",
+                    InputType = InputType.Text,
+                    MaxLength = 200
+                },
+                new InteractionInput
+                {
+                    Name = "newPassword",
+                    Label = "New Password",
+                    InputType = InputType.SecretText,
+                    MaxLength = 200
+                }
+            ]
+        });
+#endif
 
 builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     // Note: WithImageTag not supported on ProjectResource (Aspire limitation)
