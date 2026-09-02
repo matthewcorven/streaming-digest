@@ -60,11 +60,19 @@ internal static class AdminOperationsEndpoints
                 : Results.NotFound();
         });
 
-        app.MapGet("/api/internal/notifications/matrix/health", (IMatrixNotificationService service) => Results.Ok(new
+        app.MapGet("/api/internal/notifications/matrix/health", (IMatrixNotificationService service) =>
         {
-            status = "ok",
-            enabled = service.IsEnabled
-        }));
+            var health = service.GetHealth();
+            return Results.Ok(new
+            {
+                status = health.Status,
+                enabled = health.Enabled,
+                reason = health.Reason,
+                homeserverUrl = health.HomeserverUrl,
+                roomId = health.RoomId,
+                botUserId = health.BotUserId
+            });
+        });
 
         app.MapPost("/api/internal/notifications/matrix/test", async (IMatrixNotificationService service, CancellationToken cancellationToken) =>
         {

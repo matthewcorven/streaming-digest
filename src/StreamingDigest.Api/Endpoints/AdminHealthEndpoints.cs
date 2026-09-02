@@ -2,12 +2,15 @@ using System.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Npgsql;
+using StreamingDigest.Api.Admin;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Services.Health;
 using StreamingDigest.Domain.Health;
 using StreamingDigest.Infrastructure.Extensions;
 using StreamingDigest.Infrastructure.Persistence;
 using StreamingDigest.Infrastructure.Services.Health;
+using StreamingDigest.MatrixNotifier;
 using StreamingDigest.Web.Models;
 using DomainHealthState = StreamingDigest.Domain.Health.HealthState;
 using ApiHealthState = StreamingDigest.Web.Models.HealthState;
@@ -33,6 +36,7 @@ internal static class AdminHealthEndpoints
         UpgradeCompatibilityStateService upgradeService,
         IModelRuntimeStateRepository modelStateRepository,
         IBackupManifestChecker backupManifestChecker,
+        IMatrixNotificationService matrixNotificationService,
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -47,13 +51,19 @@ internal static class AdminHealthEndpoints
             var probes = await compositeProbe.ProbeAllAsync(cancellationToken);
             logger.LogDebug("Service health probes completed: {ProbeCount} services", probes.Length);
 
-            var overallHealth = compositeProbe.ComputeOverallHealth(probes);
-            logger.LogDebug("Overall health computed: {OverallHealth}", overallHealth);
+            var compositeOverallHealth = compositeProbe.ComputeOverallHealth(probes);
+            logger.LogDebug("Composite health computed before Matrix merge: {OverallHealth}", compositeOverallHealth);
+
+            var matrixSectionBuilder = new MatrixNotificationHealthSectionBuilder(loggerFactory.CreateLogger("StreamingDigest.Api.Admin.MatrixNotificationHealthSectionBuilder"));
+            var matrix = await BuildMatrixSection(connectionString, matrixNotificationService, matrixSectionBuilder, logger, cancellationToken);
+            var overallHealth = MergeOverallHealth(compositeOverallHealth, ToDomainHealthState(matrix.State), logger);
+            logger.LogDebug("Overall health computed after Matrix merge: {OverallHealth}", overallHealth);
 
             var health = new HealthResponse
             {
                 Settings = await BuildSettingsSection(upgradeService, connectionString, logger, cancellationToken),
                 Models = await BuildModelsSection(modelStateRepository, logger, cancellationToken),
+                Matrix = matrix,
                 Observability = BuildObservabilitySection(probes, logger),
                 Storage = BuildStorageSection(probes, logger),
                 BackupReadiness = await BuildBackupReadinessSection(backupManifestChecker, logger, cancellationToken),
@@ -208,6 +218,100 @@ internal static class AdminHealthEndpoints
         }
     }
 
+    private static async Task<MatrixSection> BuildMatrixSection(
+        string connectionString,
+        IMatrixNotificationService matrixNotificationService,
+        MatrixNotificationHealthSectionBuilder matrixSectionBuilder,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        logger.LogDebug("Building matrix section from runtime config and recent notification history");
+
+        try
+        {
+            var configurationHealth = matrixNotificationService.GetHealth();
+            logger.LogDebug(
+                "Matrix runtime config health loaded: enabled={Enabled}, status={Status}.",
+                configurationHealth.Enabled,
+                configurationHealth.Status);
+
+            var recentNotifications = await LoadRecentMatrixNotificationsAsync(connectionString, logger, cancellationToken);
+
+            logger.LogDebug(
+                "Loaded {NotificationCount} Matrix notifications for the recent health window.",
+                recentNotifications.Count);
+
+            return matrixSectionBuilder.Build(configurationHealth, recentNotifications);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Error building matrix section: {ErrorMessage}", ex.Message);
+            return new MatrixSection
+            {
+                State = ApiHealthState.Error,
+                Summary = "Error retrieving Matrix notification status",
+                Status = "error",
+                Enabled = matrixNotificationService.IsEnabled,
+                Details = [ex.Message],
+                PreviewMode = false
+            };
+        }
+    }
+
+    private static async Task<List<StreamingDigest.Domain.Notification>> LoadRecentMatrixNotificationsAsync(
+        string connectionString,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            logger.LogDebug("Skipping Matrix notification history query because the database connection string is unavailable.");
+            return [];
+        }
+
+        logger.LogDebug("Loading Matrix notification history from PostgreSQL.");
+
+        var recentWindowStart = DateTimeOffset.UtcNow.AddMinutes(-5);
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+                status,
+                error_summary,
+                sent_at,
+                created_at,
+                updated_at
+            FROM public.notifications
+            WHERE provider = 'matrix' AND updated_at >= @recent_window_start
+            ORDER BY updated_at DESC;
+            """,
+            connection);
+        command.Parameters.AddWithValue("recent_window_start", recentWindowStart);
+
+        var notifications = new List<StreamingDigest.Domain.Notification>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            notifications.Add(new StreamingDigest.Domain.Notification
+            {
+                Provider = "matrix",
+                Status = reader.GetString(0),
+                ErrorSummary = reader.IsDBNull(1) ? null : reader.GetString(1),
+                SentAt = reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2),
+                CreatedAt = reader.GetFieldValue<DateTimeOffset>(3),
+                UpdatedAt = reader.GetFieldValue<DateTimeOffset>(4)
+            });
+        }
+
+        logger.LogDebug(
+            "Matrix notification history query loaded {NotificationCount} rows since {WindowStart}.",
+            notifications.Count,
+            recentWindowStart);
+        return notifications;
+    }
+
     private static ObservabilitySection BuildObservabilitySection(ServiceHealthDetails[] probes, ILogger logger)
     {
         logger.LogDebug("Building observability section from service health probes");
@@ -349,6 +453,54 @@ internal static class AdminHealthEndpoints
 
     private static ApiHealthState ToApiHealthState(DomainHealthState state)
         => (ApiHealthState)state;
+
+    private static DomainHealthState ToDomainHealthState(ApiHealthState state)
+        => (DomainHealthState)state;
+
+    private static DomainHealthState MergeOverallHealth(DomainHealthState compositeOverallHealth, DomainHealthState matrixHealth, ILogger logger)
+    {
+        if (compositeOverallHealth == DomainHealthState.Error || matrixHealth == DomainHealthState.Error)
+        {
+            logger.LogDebug(
+                "Overall health resolved as Error because composite={CompositeOverallHealth} and matrix={MatrixHealth}.",
+                compositeOverallHealth,
+                matrixHealth);
+            return DomainHealthState.Error;
+        }
+
+        if (compositeOverallHealth == DomainHealthState.Reconnecting || matrixHealth == DomainHealthState.Reconnecting)
+        {
+            logger.LogDebug(
+                "Overall health resolved as Reconnecting because composite={CompositeOverallHealth} and matrix={MatrixHealth}.",
+                compositeOverallHealth,
+                matrixHealth);
+            return DomainHealthState.Reconnecting;
+        }
+
+        if (compositeOverallHealth == DomainHealthState.Paused || matrixHealth == DomainHealthState.Paused)
+        {
+            logger.LogDebug(
+                "Overall health resolved as Paused because composite={CompositeOverallHealth} and matrix={MatrixHealth}.",
+                compositeOverallHealth,
+                matrixHealth);
+            return DomainHealthState.Paused;
+        }
+
+        if (compositeOverallHealth == DomainHealthState.Degraded || matrixHealth == DomainHealthState.Degraded)
+        {
+            logger.LogDebug(
+                "Overall health resolved as Degraded because composite={CompositeOverallHealth} and matrix={MatrixHealth}.",
+                compositeOverallHealth,
+                matrixHealth);
+            return DomainHealthState.Degraded;
+        }
+
+        logger.LogDebug(
+            "Overall health resolved as Ready because composite={CompositeOverallHealth} and matrix={MatrixHealth}.",
+            compositeOverallHealth,
+            matrixHealth);
+        return DomainHealthState.Ready;
+    }
 
     private static ApiHealthState ParseHealthState(string status)
         => status?.ToLowerInvariant() switch

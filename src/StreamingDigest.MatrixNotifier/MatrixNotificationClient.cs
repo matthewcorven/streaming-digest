@@ -12,7 +12,7 @@ public sealed class MatrixNotificationClient
 {
     private readonly HttpClient _httpClient;
     private readonly MatrixNotificationOptions _options;
-    private readonly Uri _cachedHomeserverUri;
+    private readonly Uri? _cachedHomeserverUri;
     private readonly JsonSerializerOptions _jsonOptions;
 
     public MatrixNotificationClient(HttpClient httpClient, MatrixNotificationOptions options)
@@ -20,40 +20,26 @@ public sealed class MatrixNotificationClient
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _options = options ?? throw new ArgumentNullException(nameof(options));
 
-        ValidateOptions();
-
-        _cachedHomeserverUri = ParseAndCacheHomeserverUri(options.HomeserverBaseUrl);
+        _cachedHomeserverUri = TryParseHomeserverUri(options.HomeserverBaseUrl);
         _jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             TypeInfoResolver = MatrixApiJsonContext.Default
         };
     }
 
-    private void ValidateOptions()
+    private static Uri? TryParseHomeserverUri(string? homeserverBaseUrl)
     {
-        if (string.IsNullOrWhiteSpace(_options.HomeserverBaseUrl))
+        if (string.IsNullOrWhiteSpace(homeserverBaseUrl))
         {
-            throw new InvalidOperationException("A Matrix homeserver URL is required.");
+            return null;
         }
 
-        if (string.IsNullOrWhiteSpace(_options.AccessToken))
-        {
-            throw new InvalidOperationException("A Matrix access token is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(_options.RoomId))
-        {
-            throw new InvalidOperationException("A Matrix room ID is required.");
-        }
-    }
-
-    private static Uri ParseAndCacheHomeserverUri(string homeserverBaseUrl)
-    {
         var trimmedUrl = homeserverBaseUrl.Trim().TrimEnd('/');
         if (!Uri.TryCreate(trimmedUrl, UriKind.Absolute, out var uri))
         {
-            throw new InvalidOperationException($"The configured Matrix homeserver URL '{trimmedUrl}' is invalid.");
+            return null;
         }
+
         return uri;
     }
 
@@ -77,15 +63,23 @@ public sealed class MatrixNotificationClient
             async activity =>
             {
                 var effectiveRoomId = string.IsNullOrWhiteSpace(roomOverride) ? _options.RoomId : roomOverride;
+                var health = GetHealth();
                 activity?.SetTag("messaging.system", "matrix");
                 activity?.SetTag("messaging.operation", "send");
                 activity?.SetTag("messaging.destination", effectiveRoomId);
                 activity?.SetTag("messaging.enabled", _options.IsEnabled.ToString());
+                activity?.SetTag("messaging.status", health.Status);
 
                 if (!_options.IsEnabled)
                 {
                     Debug.WriteLine("Matrix notifications are disabled.");
                     return new MatrixSendResult(false, "Matrix notifications are disabled.");
+                }
+
+                if (!string.Equals(health.Status, "ready", StringComparison.Ordinal))
+                {
+                    Debug.WriteLine($"Matrix notifications are not ready: {health.Reason}");
+                    return new MatrixSendResult(false, health.Reason);
                 }
 
                 var requestUri = BuildSendMessageUri(effectiveRoomId);
@@ -100,18 +94,19 @@ public sealed class MatrixNotificationClient
 
                 using var response = await _httpClient.SendAsync(request, cancellationToken);
 
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                     Debug.WriteLine($"Matrix send failed: {response.StatusCode} {response.ReasonPhrase}");
-                    throw new InvalidOperationException($"Matrix send failed with {(int)response.StatusCode} {response.ReasonPhrase}: {errorBody}");
+                    throw new InvalidOperationException($"Matrix send failed with {(int)response.StatusCode} {response.ReasonPhrase}: {responseBody}");
                 }
 
                 var matrixResponse = await response.Content.ReadFromJsonAsync<MatrixSendResponse>(_jsonOptions, cancellationToken);
                 var providerMessageId = matrixResponse?.EventId;
 
                 Debug.WriteLine($"Matrix message sent successfully. Event ID: {providerMessageId}");
-                return new MatrixSendResult(true, "Matrix message sent.", null, providerMessageId);
+                return new MatrixSendResult(true, "Matrix message sent.", responseBody, providerMessageId);
             },
             new Dictionary<string, object?>
             {
@@ -125,8 +120,62 @@ public sealed class MatrixNotificationClient
     public Task<MatrixSendResult> SendTestMessageAsync(CancellationToken cancellationToken = default)
         => SendTextMessageAsync("Streaming Digest Matrix notification test message.", cancellationToken: cancellationToken);
 
+    public MatrixHealthInfo GetHealth()
+    {
+        var enabled = _options.IsEnabled;
+        var hasToken = !string.IsNullOrWhiteSpace(_options.AccessToken);
+        var hasRoom = !string.IsNullOrWhiteSpace(_options.RoomId);
+        var hasUrl = !string.IsNullOrWhiteSpace(_options.HomeserverBaseUrl);
+        var hasValidUrl = _cachedHomeserverUri is not null;
+
+        string status;
+        string reason;
+        if (!enabled)
+        {
+            status = "disabled";
+            reason = "Matrix notifications are disabled.";
+        }
+        else if (!hasUrl)
+        {
+            status = "needs-config";
+            reason = "Add a Matrix homeserver URL, access token, and room ID.";
+        }
+        else if (!hasValidUrl)
+        {
+            status = "invalid-url";
+            reason = "Provide a valid Matrix homeserver URL.";
+        }
+        else if (hasToken && hasRoom)
+        {
+            status = "ready";
+            reason = "Matrix notifications are configured.";
+        }
+        else if (!hasToken)
+        {
+            status = "needs-token";
+            reason = "Add a Matrix access token to start sending.";
+        }
+        else if (!hasRoom)
+        {
+            status = "needs-room";
+            reason = "Add a Matrix room ID to start sending.";
+        }
+        else
+        {
+            status = "needs-config";
+            reason = "Add a Matrix homeserver URL, access token, and room ID.";
+        }
+
+        return new MatrixHealthInfo(enabled, status, reason, _options.HomeserverBaseUrl, _options.RoomId, _options.BotUserId);
+    }
+
     private string BuildSendMessageUri(string roomId)
     {
+        if (_cachedHomeserverUri is null)
+        {
+            throw new InvalidOperationException("Matrix homeserver URL is not configured correctly.");
+        }
+
         var transactionId = Guid.NewGuid().ToString("N");
         var escapedRoomId = Uri.EscapeDataString(roomId).Replace("%21", "!");
         var path = _cachedHomeserverUri.AbsolutePath.TrimEnd('/');
@@ -148,6 +197,14 @@ public sealed class MatrixNotificationOptions
 }
 
 public sealed record MatrixSendResult(bool Success, string Message, string? ResponseBody = null, string? ProviderMessageId = null);
+
+public sealed record MatrixHealthInfo(
+    bool Enabled,
+    string Status,
+    string Reason,
+    string? HomeserverUrl,
+    string? RoomId,
+    string? BotUserId);
 
 // Source-generated records for optimized JSON serialization
 internal sealed record MatrixTextMessage(string msgtype, string body);

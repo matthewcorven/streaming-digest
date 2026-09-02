@@ -33,6 +33,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 // when the secrets exist. Load the AppHost user-secrets explicitly so local orchestration gets
 // stable parameter resolution in both CLI and VS Code flows.
 builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
+var matrixNotificationEnvironment = MatrixNotificationEnvironment.Build(builder.Configuration);
 
 const string composeProjectName = "streaming-digest";
 const string defaultEmbeddingModel = "bge-m3";
@@ -311,6 +312,11 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("observability:services:tempo:url", tempoHttpEndpoint)
     .WithEnvironment("observability:services:otelCollector:url", otelCollectorGrpcEndpoint);
 
+foreach (var matrixEnvironmentVariable in matrixNotificationEnvironment)
+{
+    api.WithEnvironment(matrixEnvironmentVariable.Key, matrixEnvironmentVariable.Value);
+}
+
 #if DEBUG
     api.WithCommand(
         name: "set-dev-user-credentials",
@@ -386,7 +392,7 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
         });
 #endif
 
-builder.AddProject<Projects.StreamingDigest_Worker>("worker")
+var worker = builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     // Note: WithImageTag not supported on ProjectResource (Aspire limitation)
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
@@ -401,6 +407,11 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WithEnvironment("Scraper__BaseUrl", scraperHttpEndpoint)
     .WithEnvironment("llm__baseUrl", ollamaHttpEndpoint)
     .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", whisperHttpEndpoint);
+
+foreach (var matrixEnvironmentVariable in matrixNotificationEnvironment)
+{
+    worker.WithEnvironment(matrixEnvironmentVariable.Key, matrixEnvironmentVariable.Value);
+}
 
 // Blazor WebAssembly frontend
 builder.AddProject<Projects.StreamingDigest_Web>("web")
