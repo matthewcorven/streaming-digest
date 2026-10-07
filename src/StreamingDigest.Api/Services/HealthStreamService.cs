@@ -1,5 +1,9 @@
 using System.Text.Json;
+using System.Text;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using StreamingDigest.Api.Admin;
+using StreamingDigest.Application.Configuration;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Services.Health;
 using StreamingDigest.Domain.Health;
@@ -21,10 +25,11 @@ namespace StreamingDigest.Api.Services;
 public sealed class HealthStreamService : IAsyncDisposable
 {
     private readonly ILogger<HealthStreamService> _logger;
-    private readonly IModelRuntimeStateRepository _modelStateRepository;
-    private readonly IBackupManifestChecker _backupManifestChecker;
     private readonly CompositeServiceHealthProvider _compositeProbe;
-    private readonly UpgradeCompatibilityStateService _upgradeService;
+    private readonly MatrixNotificationHealthService _matrixNotificationHealthService;
+    private readonly ApplicationConfiguration _applicationConfiguration;
+    private readonly IHostEnvironment _hostEnvironment;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly IConfiguration _configuration;
     
     private readonly List<PendingSubscriber> _subscribers = [];
@@ -38,19 +43,33 @@ public sealed class HealthStreamService : IAsyncDisposable
         CancellationToken CancellationToken,
         Guid Id);
 
+    private sealed record MatrixSummary(
+        string State,
+        string Status,
+        bool Enabled,
+        string Summary,
+        int RecentSuccessCount,
+        int RecentFailureCount,
+        DateTime? LastAttemptAt,
+        DateTime? LastSuccessAt,
+        IReadOnlyList<string> Details,
+        bool PreviewMode);
+
     public HealthStreamService(
         ILogger<HealthStreamService> logger,
-        IModelRuntimeStateRepository modelStateRepository,
-        IBackupManifestChecker backupManifestChecker,
         CompositeServiceHealthProvider compositeProbe,
-        UpgradeCompatibilityStateService upgradeService,
+        MatrixNotificationHealthService matrixNotificationHealthService,
+        ApplicationConfiguration applicationConfiguration,
+        IHostEnvironment hostEnvironment,
+        ILoggerFactory loggerFactory,
         IConfiguration configuration)
     {
         _logger = logger;
-        _modelStateRepository = modelStateRepository;
-        _backupManifestChecker = backupManifestChecker;
         _compositeProbe = compositeProbe;
-        _upgradeService = upgradeService;
+        _matrixNotificationHealthService = matrixNotificationHealthService;
+        _applicationConfiguration = applicationConfiguration;
+        _hostEnvironment = hostEnvironment;
+        _loggerFactory = loggerFactory;
         _configuration = configuration;
         _disposeCts = new CancellationTokenSource();
     }
@@ -71,10 +90,6 @@ public sealed class HealthStreamService : IAsyncDisposable
                 _subscribers.Add(new PendingSubscriber(responseWriter, cancellationToken, subscriberId));
             }
 
-            // Send initial status snapshot to rehydrate client on connect/reconnect
-            await SendStatusSnapshotAsync(responseWriter, cancellationToken);
-            _logger.LogDebug("Initial status snapshot sent to subscriber {SubscriberId}", subscriberId);
-
             // Keep connection alive until client disconnects or cancellation
             await Task.Delay(Timeout.Infinite, cancellationToken);
         }
@@ -92,6 +107,28 @@ public sealed class HealthStreamService : IAsyncDisposable
             {
                 _subscribers.RemoveAll(s => s.Id == subscriberId);
             }
+        }
+    }
+
+    public async Task SendInitialSnapshotAsync(Stream responseBody, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(responseBody);
+
+        try
+        {
+            var payload = await BuildStatusSnapshotJsonAsync(cancellationToken);
+            var snapshot = $"event: snapshot\ndata: {payload}\n\n";
+            await responseBody.WriteAsync(Encoding.UTF8.GetBytes(snapshot), cancellationToken);
+            await responseBody.FlushAsync(cancellationToken);
+            _logger.LogDebug("Initial status snapshot written to the SSE response body.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending initial status snapshot: {ErrorMessage}", ex.Message);
+            var errorPayload = JsonSerializer.Serialize(new { message = "Failed to load status snapshot", error = ex.Message });
+            var errorEvent = $"event: error\ndata: {errorPayload}\n\n";
+            await responseBody.WriteAsync(Encoding.UTF8.GetBytes(errorEvent), cancellationToken);
+            await responseBody.FlushAsync(cancellationToken);
         }
     }
 
@@ -184,38 +221,45 @@ public sealed class HealthStreamService : IAsyncDisposable
     /// <summary>
     /// Sends the full health status snapshot to a client (used for initial subscription and reconnects).
     /// </summary>
-    private async Task SendStatusSnapshotAsync(StreamWriter responseWriter, CancellationToken cancellationToken)
+    private async Task<string> BuildStatusSnapshotJsonAsync(CancellationToken cancellationToken)
     {
-        try
+        var connectionString = _configuration.GetStreamingDigestConnectionString();
+
+        var probes = await _compositeProbe.ProbeAllAsync(cancellationToken);
+        var compositeOverallHealth = _compositeProbe.ComputeOverallHealth(probes);
+        var matrix = await BuildMatrixSummaryAsync(cancellationToken);
+        var overallHealth = AdminHealthStateCombiner.MergeOverallHealth(
+            compositeOverallHealth,
+            ParseDomainHealthState(matrix.State));
+
+        var health = new
         {
-            var connectionString = _configuration.GetStreamingDigestConnectionString();
+            type = "status_snapshot",
+            timestamp = DateTime.UtcNow,
+            overallHealth = overallHealth.ToString(),
 
-            var probes = await _compositeProbe.ProbeAllAsync(cancellationToken);
-            var overallHealth = _compositeProbe.ComputeOverallHealth(probes);
-
-            var health = new
+            settings = await BuildSettingsSummaryAsync(connectionString, cancellationToken),
+            models = await BuildModelsSummaryAsync(cancellationToken),
+            matrix = new
             {
-                type = "status_snapshot",
-                timestamp = DateTime.UtcNow,
-                overallHealth = overallHealth.ToString(),
-                
-                settings = await BuildSettingsSummaryAsync(connectionString, cancellationToken),
-                models = await BuildModelsSummaryAsync(cancellationToken),
-                observability = BuildObservabilitySummary(probes),
-                storage = BuildStorageSummary(probes),
-                backupReadiness = await BuildBackupReadinessSummaryAsync(cancellationToken)
-            };
+                state = matrix.State,
+                status = matrix.Status,
+                enabled = matrix.Enabled,
+                summary = matrix.Summary,
+                recentSuccessCount = matrix.RecentSuccessCount,
+                recentFailureCount = matrix.RecentFailureCount,
+                lastAttemptAt = matrix.LastAttemptAt,
+                lastSuccessAt = matrix.LastSuccessAt,
+                details = matrix.Details,
+                previewMode = matrix.PreviewMode
+            },
+            observability = BuildObservabilitySummary(probes),
+            storage = BuildStorageSummary(probes),
+            backupReadiness = await BuildBackupReadinessSummaryAsync(cancellationToken)
+        };
 
-            await WriteEventAsync(responseWriter, "snapshot", JsonSerializer.Serialize(health), cancellationToken);
-            _logger.LogDebug("Status snapshot sent: overallHealth={OverallHealth}", overallHealth);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error sending status snapshot: {ErrorMessage}", ex.Message);
-            await WriteEventAsync(responseWriter, "error", 
-                JsonSerializer.Serialize(new { message = "Failed to load status snapshot", error = ex.Message }), 
-                cancellationToken);
-        }
+        _logger.LogDebug("Status snapshot built: overallHealth={OverallHealth}", overallHealth);
+        return JsonSerializer.Serialize(health);
     }
 
     private async Task<object> BuildSettingsSummaryAsync(string connectionString, CancellationToken cancellationToken)
@@ -227,7 +271,8 @@ public sealed class HealthStreamService : IAsyncDisposable
                 return new { state = "Degraded", summary = "Connection string missing" };
             }
 
-            var versionState = await _upgradeService.ReadVersionStateAsync(connectionString, cancellationToken);
+            var upgradeService = new UpgradeCompatibilityStateService(_logger);
+            var versionState = await upgradeService.ReadVersionStateAsync(connectionString, cancellationToken);
             var state = (versionState.AppVersion is not null && versionState.DbSchemaVersion is not null) ? "Ready" : "Degraded";
 
             return new
@@ -247,7 +292,14 @@ public sealed class HealthStreamService : IAsyncDisposable
     {
         try
         {
-            var states = await _modelStateRepository.GetAllAsync(cancellationToken);
+            var connectionString = _configuration.GetStreamingDigestConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return new { state = "Degraded", summary = "Connection string missing", count = 0 };
+            }
+
+            var modelStateRepository = new PostgresModelRuntimeStateRepository(connectionString);
+            var states = await modelStateRepository.GetAllAsync(cancellationToken);
             var readyCount = states.Count(s => s.Status == "ready");
             var failedCount = states.Count(s => s.Status == "failed");
             
@@ -287,6 +339,40 @@ public sealed class HealthStreamService : IAsyncDisposable
         }
     }
 
+    private async Task<MatrixSummary> BuildMatrixSummaryAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var section = await _matrixNotificationHealthService.GetSectionAsync(cancellationToken);
+            return new MatrixSummary(
+                section.State.ToString(),
+                section.Status,
+                section.Enabled,
+                section.Summary,
+                section.RecentSuccessCount,
+                section.RecentFailureCount,
+                section.LastAttemptAt,
+                section.LastSuccessAt,
+                section.Details,
+                section.PreviewMode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error building matrix summary");
+            return new MatrixSummary(
+                DomainHealthState.Error.ToString(),
+                "error",
+                false,
+                "Matrix check failed",
+                0,
+                0,
+                null,
+                null,
+                [ex.Message],
+                false);
+        }
+    }
+
     private object BuildStorageSummary(ServiceHealthDetails[] probes)
     {
         try
@@ -312,7 +398,11 @@ public sealed class HealthStreamService : IAsyncDisposable
     {
         try
         {
-            var result = await _backupManifestChecker.GetBackupReadinessAsync(cancellationToken);
+            var backupManifestChecker = new BackupManifestChecker(
+                _applicationConfiguration,
+                _hostEnvironment,
+                _loggerFactory.CreateLogger<BackupManifestChecker>());
+            var result = await backupManifestChecker.GetBackupReadinessAsync(cancellationToken);
             return new
             {
                 state = result.IsHealthy ? DomainHealthState.Ready : DomainHealthState.Degraded,
@@ -475,13 +565,30 @@ public sealed class HealthStreamService : IAsyncDisposable
             var connectionString = _configuration.GetStreamingDigestConnectionString();
 
             var probes = await _compositeProbe.ProbeAllAsync(cancellationToken);
-            var overallHealth = _compositeProbe.ComputeOverallHealth(probes);
+            var compositeOverallHealth = _compositeProbe.ComputeOverallHealth(probes);
+            var matrix = await BuildMatrixSummaryAsync(cancellationToken);
+            var overallHealth = AdminHealthStateCombiner.MergeOverallHealth(
+                compositeOverallHealth,
+                ParseDomainHealthState(matrix.State));
 
             var currentState = new
             {
                 overallHealth = overallHealth.ToString(),
                 settings = await BuildSettingsSummaryAsync(connectionString, cancellationToken),
                 models = await BuildModelsSummaryAsync(cancellationToken),
+                matrix = new
+                {
+                    state = matrix.State,
+                    status = matrix.Status,
+                    enabled = matrix.Enabled,
+                    summary = matrix.Summary,
+                    recentSuccessCount = matrix.RecentSuccessCount,
+                    recentFailureCount = matrix.RecentFailureCount,
+                    lastAttemptAt = matrix.LastAttemptAt,
+                    lastSuccessAt = matrix.LastSuccessAt,
+                    details = matrix.Details,
+                    previewMode = matrix.PreviewMode
+                },
                 observability = BuildObservabilitySummary(probes),
                 storage = BuildStorageSummary(probes),
                 backupReadiness = await BuildBackupReadinessSummaryAsync(cancellationToken)
@@ -501,6 +608,7 @@ public sealed class HealthStreamService : IAsyncDisposable
 
                 // Emit granular update events so clients can react to specific changes
                 await PublishChangeDetectedAsync("models", currentState.models, cancellationToken);
+                await PublishChangeDetectedAsync("matrix", currentState.matrix, cancellationToken);
                 await PublishChangeDetectedAsync("observability", currentState.observability, cancellationToken);
                 await PublishChangeDetectedAsync("backupReadiness", currentState.backupReadiness, cancellationToken);
                 await PublishChangeDetectedAsync("storage", currentState.storage, cancellationToken);
@@ -578,6 +686,11 @@ public sealed class HealthStreamService : IAsyncDisposable
 
         return true;
     }
+
+    private static DomainHealthState ParseDomainHealthState(string state)
+        => Enum.TryParse<DomainHealthState>(state, ignoreCase: true, out var parsed)
+            ? parsed
+            : DomainHealthState.Error;
 
     public async ValueTask DisposeAsync()
     {

@@ -3,6 +3,7 @@
     <Project Path="src/StreamingDigest.Api/StreamingDigest.Api.csproj" />
     <Project Path="src/StreamingDigest.AppHost/StreamingDigest.AppHost.csproj" />
     <Project Path="src/StreamingDigest.Application/StreamingDigest.Application.csproj" />
+    <Project Path="src/StreamingDigest.Contracts/StreamingDigest.Contracts.csproj" />
     <Project Path="src/StreamingDigest.Domain/StreamingDigest.Domain.csproj" />
     <Project Path="src/StreamingDigest.Infrastructure/StreamingDigest.Infrastructure.csproj" />
     <Project Path="src/StreamingDigest.MatrixNotifier/StreamingDigest.MatrixNotifier.csproj" />
@@ -16,6 +17,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/StreamingDigest.E2E/StreamingDigest.E2E.csproj" />
+    <Project Path="tests/StreamingDigest.Integration.TestContainers/StreamingDigest.Integration.TestContainers.csproj" />
     <Project Path="tests/StreamingDigest.IntegrationTests/StreamingDigest.IntegrationTests.csproj" />
     <Project Path="tests/StreamingDigest.UnitTests/StreamingDigest.UnitTests.csproj" />
     <Project Path="tests/StreamingDigest.Web.UnitTests/StreamingDigest.Web.UnitTests.csproj" />

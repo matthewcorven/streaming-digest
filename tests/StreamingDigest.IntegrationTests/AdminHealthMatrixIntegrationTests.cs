@@ -80,13 +80,50 @@ public sealed class AdminHealthMatrixIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 
-    private HttpClient CreateClient()
+    [Fact]
+    public async Task HealthStream_snapshot_includes_matrix_status_and_recent_delivery_counts()
     {
-        return _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        await SeedNotificationAsync("sent", null, sentAt: DateTimeOffset.UtcNow.AddMinutes(-1));
+        await SeedNotificationAsync("pending", "timeout talking to matrix", sentAt: null);
+
+        using var client = CreateClient(longLivedRequests: true);
+        await LoginAndChangePasswordAsync(client, "matrix-stream-passw0rd-123!");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/health/stream");
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+
+        using var stream = await response.Content.ReadAsStreamAsync();
+        var events = await ReadEventsAsync(stream, expectedEventCount: 1).WaitAsync(TimeSpan.FromSeconds(15));
+
+        var snapshot = Assert.Single(events);
+        Assert.Equal("snapshot", snapshot.Name);
+
+        using var payload = JsonDocument.Parse(snapshot.Data);
+        var matrix = payload.RootElement.GetProperty("matrix");
+        Assert.Equal("Degraded", matrix.GetProperty("state").GetString());
+        Assert.Equal("delivery-degraded", matrix.GetProperty("status").GetString());
+        Assert.True(matrix.GetProperty("enabled").GetBoolean());
+        Assert.Equal(1, matrix.GetProperty("recentSuccessCount").GetInt32());
+        Assert.Equal(1, matrix.GetProperty("recentFailureCount").GetInt32());
+    }
+
+    private HttpClient CreateClient(bool longLivedRequests = false)
+    {
+        var client = _factory!.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false,
             HandleCookies = true
         });
+
+        if (longLivedRequests)
+        {
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        }
+
+        return client;
     }
 
     private async Task LoginAndChangePasswordAsync(HttpClient client, string newPassword)
@@ -297,4 +334,34 @@ public sealed class AdminHealthMatrixIntegrationTests : IAsyncLifetime
     {
         public string Token { get; set; } = string.Empty;
     }
+
+    private static async Task<List<SseEvent>> ReadEventsAsync(Stream stream, int expectedEventCount)
+    {
+        var events = new List<SseEvent>();
+        using var reader = new StreamReader(stream);
+
+        string? currentEventName = null;
+        while (events.Count < expectedEventCount)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line is null)
+            {
+                break;
+            }
+
+            if (line.StartsWith("event: ", StringComparison.Ordinal))
+            {
+                currentEventName = line["event: ".Length..];
+            }
+            else if (line.StartsWith("data: ", StringComparison.Ordinal) && currentEventName is not null)
+            {
+                events.Add(new SseEvent(currentEventName, line["data: ".Length..]));
+                currentEventName = null;
+            }
+        }
+
+        return events;
+    }
+
+    private sealed record SseEvent(string Name, string Data);
 }
