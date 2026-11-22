@@ -9,6 +9,8 @@ public interface IMatrixNotificationService
     Task<MatrixSendResult> SendDigestSummaryAsync(Digest digest, string? roomOverride = null, CancellationToken cancellationToken = default);
 
     Task<MatrixSendResult> SendTestNotificationAsync(CancellationToken cancellationToken = default);
+
+    MatrixHealthInfo GetHealth();
 }
 
 public sealed class MatrixNotificationService(MatrixNotificationClient client, MatrixNotificationOptions options) : IMatrixNotificationService
@@ -36,6 +38,8 @@ public sealed class MatrixNotificationService(MatrixNotificationClient client, M
 
     public Task<MatrixSendResult> SendTestNotificationAsync(CancellationToken cancellationToken = default)
         => client.SendTestMessageAsync(cancellationToken);
+
+    public MatrixHealthInfo GetHealth() => client.GetHealth();
 
     private string BuildDigestMessage(Digest digest, DigestPayload payload)
     {

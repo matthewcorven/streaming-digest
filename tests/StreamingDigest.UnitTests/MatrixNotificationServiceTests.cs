@@ -7,7 +7,7 @@ namespace StreamingDigest.UnitTests;
 
 public sealed class MatrixNotificationServiceTests
 {
-    [Fact(Skip = "Pre-existing test failure: Matrix integration requires token configuration in test environment")]
+    [Fact]
     public async Task SendDigestSummaryAsync_formats_digest_summary_and_sends_to_matrix()
     {
         var handler = new RecordingHandler(async request =>
@@ -75,6 +75,30 @@ public sealed class MatrixNotificationServiceTests
 
         Assert.False(result.Success);
         Assert.Equal("Matrix notifications are disabled for this run type.", result.Message);
+    }
+
+    [Fact]
+    public async Task SendDigestSummaryAsync_disabled_mode_constructs_and_returns_skip_result()
+    {
+        var options = new MatrixNotificationOptions
+        {
+            IsEnabled = false,
+            HomeserverBaseUrl = "https://matrix.example.com"
+        };
+
+        var service = new MatrixNotificationService(new MatrixNotificationClient(new HttpClient(), options), options);
+        var digest = new Digest(Guid.NewGuid(), "manual")
+        {
+            PayloadJson = DigestPayloadSerializer.Serialize(new DigestPayload
+            {
+                NewVideos = [new DigestItem { Label = "Video 1" }]
+            })
+        };
+
+        var result = await service.SendDigestSummaryAsync(digest);
+
+        Assert.False(result.Success);
+        Assert.Equal("Matrix notifications are disabled.", result.Message);
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler

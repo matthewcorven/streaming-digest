@@ -19,6 +19,11 @@ public sealed class HealthResponse
     public ModelsSection Models { get; init; } = new();
 
     /// <summary>
+    /// Matrix notification status (Live: current config readiness plus recent delivery outcomes).
+    /// </summary>
+    public MatrixSection Matrix { get; init; } = new();
+
+    /// <summary>
     /// Observability pipeline status (Live: telemetry probe results).
     /// </summary>
     public ObservabilitySection Observability { get; init; } = new();
@@ -34,7 +39,7 @@ public sealed class HealthResponse
     public BackupReadinessSection BackupReadiness { get; init; } = new();
 
     /// <summary>
-    /// Overall system health determination. Ready if all live signals (Settings/Models/Observability/Storage) are healthy.
+    /// Overall system health determination. Ready if all live signals (Settings/Models/Matrix/Observability/Storage) are healthy.
     /// </summary>
     public HealthState OverallHealth { get; init; } = HealthState.Ready;
 
@@ -106,6 +111,44 @@ public sealed class ModelHealthDetail
 
     /// <summary>Optional details about ongoing operations or warnings.</summary>
     public string? Details { get; init; }
+}
+
+/// <summary>
+/// Matrix notification health (Live from config readiness plus recent notification outcomes).
+/// </summary>
+public sealed class MatrixSection
+{
+    /// <summary>Overall Matrix notifier state.</summary>
+    public HealthState State { get; init; } = HealthState.Ready;
+
+    /// <summary>Human-readable Matrix notifier summary.</summary>
+    public string Summary { get; init; } = "Matrix notifications are operational.";
+
+    /// <summary>Current Matrix notifier status code (for example ready, needs-token, delivery-degraded).</summary>
+    public string Status { get; init; } = "ready";
+
+    /// <summary>Whether Matrix notifications are enabled in the current runtime configuration.</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>Successful Matrix delivery attempts observed in the last probe window.</summary>
+    public int RecentSuccessCount { get; init; }
+
+    /// <summary>Failed or retrying Matrix delivery attempts observed in the last probe window.</summary>
+    public int RecentFailureCount { get; init; }
+
+    /// <summary>Latest observed Matrix delivery attempt timestamp, if any.</summary>
+    public DateTime? LastAttemptAt { get; init; }
+
+    /// <summary>Latest successful Matrix delivery timestamp, if any.</summary>
+    public DateTime? LastSuccessAt { get; init; }
+
+    /// <summary>Optional details about configuration or recent delivery failures.</summary>
+    public IReadOnlyList<string> Details { get; init; } = [];
+
+    /// <summary>
+    /// False: live data from runtime configuration and recent notification history. True: preview/static data (ADR-0018).
+    /// </summary>
+    public bool PreviewMode { get; init; } = false;
 }
 
 /// <summary>

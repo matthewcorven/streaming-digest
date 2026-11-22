@@ -19,7 +19,7 @@ Ralph always appears in `team.md`: `| Ralph | Work Monitor | — | 🔄 Monitor 
 | User says | Action |
 |-----------|--------|
 | "Ralph, go" / "Ralph, start monitoring" / "keep working" | Activate work-check loop |
-| "Ralph, status" / "What's on the board?" / "How's the backlog?" | Run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`, report results, don't loop |
+| "Ralph, status" / "What's on the board?" / "How's the backlog?" | Run `python3 <issue-queue-skill>/scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`, report results, don't loop |
 | "Ralph, check every N minutes" | Set idle-watch polling interval |
 | "Ralph, idle" / "Take a break" / "Stop monitoring" | Fully deactivate (stop loop + idle-watch) |
 | "Ralph, scope: just issues" / "Ralph, skip CI" | Adjust what Ralph monitors this session |
@@ -30,13 +30,13 @@ These are intent signals, not exact strings — match meaning, not words.
 
 When Ralph is active, run this check cycle after every batch of agent work completes (or immediately on activation):
 
-**Step 1 — Scan for work** (this helper is the canonical first command when Ralph is choosing the next ready issue):
+**Step 1 — Scan for work** (the helper is `issue_queue.py` from the `issue-work-queue` skill of the `corven-dev` plugin — `<issue-queue-skill>` below denotes that skill's directory — and it is the canonical first command when Ralph is choosing the next ready issue):
 
 ```bash
-python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text
+python3 <issue-queue-skill>/scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text
 ```
 
-**MUST / NEVER rule:** Ralph MUST use `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text` when choosing the next ready issue in the active Ralph loop. For Ralph status or queue status requests, Ralph MUST use `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output or ad hoc label filtering. Use targeted `gh issue view`, `gh pr view`, or `gh pr list` only after the helper identifies the specific issue or PR that needs follow-up.
+**MUST / NEVER rule:** Ralph MUST use `python3 <issue-queue-skill>/scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text` when choosing the next ready issue in the active Ralph loop. For Ralph status or queue status requests, Ralph MUST use `python3 <issue-queue-skill>/scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output or ad hoc label filtering. Use targeted `gh issue view`, `gh pr view`, or `gh pr list` only after the helper identifies the specific issue or PR that needs follow-up.
 
 **Step 2 — Categorize findings:**
 

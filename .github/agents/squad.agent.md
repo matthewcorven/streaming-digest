@@ -151,10 +151,10 @@ or "install the update", follow the upgrade flow in the reference file.
 
 ### Issue Awareness
 
-**On every session start (after resolving team root):** Check open member-scoped queues with the issue helper. For Ralph status / queue status, the helper is mandatory and raw `gh issue list` output is not authoritative.
+**On every session start (after resolving team root):** Check open member-scoped queues with the issue helper â€” the `issue-work-queue` skill bundled with the `corven-dev` plugin; `<issue-queue-skill>` below denotes that skill's directory. For Ralph status / queue status, the helper is mandatory and raw `gh issue list` output is not authoritative.
 
 ```
-python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --label squad:{member-name}
+python3 <issue-queue-skill>/scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --label squad:{member-name}
 ```
 
 For each squad member with assigned issues, note them in the session context. When presenting a catch-up or when the user asks for status, include pending issues:
@@ -836,7 +836,7 @@ Ralph is the always-on work monitor. When active, Ralph runs a continuous scan â
 
 Do not pause for permission between work items when Ralph is active.
 
-When Ralph is choosing the next ready issue or running the active Ralph loop, Ralph MUST first run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text`. For Ralph status / queue status requests, Ralph MUST first run `python3 scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output; raw GitHub queries are follow-up only after the helper identifies the specific issue or PR to inspect.
+When Ralph is choosing the next ready issue or running the active Ralph loop, Ralph MUST first run `python3 <issue-queue-skill>/scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text`. For Ralph status / queue status requests, Ralph MUST first run `python3 <issue-queue-skill>/scripts/issue_queue.py --repo <owner/repo> --limit 100 --format text --mode status`. Ralph MUST NEVER infer readiness or board state from raw `gh issue list` output; raw GitHub queries are follow-up only after the helper identifies the specific issue or PR to inspect.
 
 **On-demand reference:** Read `.squad/templates/ralph-reference.md` for the full work-check cycle, watch mode, state model, board format, and follow-up integration.
 

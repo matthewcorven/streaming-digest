@@ -296,6 +296,15 @@ public sealed class DigestAssemblyServiceTests
 
         public Task<MatrixSendResult> SendTestNotificationAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new MatrixSendResult(true, "Matrix message sent.", "{\"event_id\":\"$test\"}", "$test"));
+
+        public MatrixHealthInfo GetHealth() => new(
+            Enabled: true,
+            Status: "ready",
+            Reason: "Matrix notifications are configured.",
+            HomeserverUrl: "https://matrix.example.com",
+            RoomId: "!room:example.com",
+            BotUserId: "@digest:example.com"
+        );
     }
 
     private sealed class HighSignalCalibrationFixture

@@ -44,6 +44,31 @@ The Aspire dashboard opens automatically at http://localhost:18888.
 
 👉 **Read [Developer Onboarding Guide](./docs/operations/ONBOARDING_DEVELOPERS.md)** for development setup, contributing workflow, and architectural context.
 
+### Development-time admin user password reset
+
+For local development, the Aspire dashboard includes a **Set Dev User Credentials** command on the `api` resource. Use it to update the development admin username and/or password without opening a database client.
+
+**Dashboard usage:**
+1. Open the Aspire dashboard at http://localhost:18888
+2. Select the `api` resource
+3. Run **Set Dev User Credentials**
+4. Enter the current username, new username, and/or new password
+5. Confirm the success message
+
+**CLI usage:**
+
+```bash
+dotnet run --project src/StreamingDigest.AppHost --command set-dev-user-credentials \
+  --current-username "current-user" \
+  --new-username "updated-user" \
+  --new-password "new-password-123"
+```
+
+Notes:
+- Provide at least a new username or a new password
+- Passwords must be at least 12 characters
+- Active sessions are revoked after the update, so the next login uses the new credentials
+
 ## How it works
 
 ### Zero-intervention is a built-in feature

@@ -2,6 +2,7 @@ using System.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using StreamingDigest.Api.Admin;
 using StreamingDigest.Application.Repositories;
 using StreamingDigest.Application.Services.Health;
 using StreamingDigest.Domain.Health;
@@ -33,6 +34,7 @@ internal static class AdminHealthEndpoints
         UpgradeCompatibilityStateService upgradeService,
         IModelRuntimeStateRepository modelStateRepository,
         IBackupManifestChecker backupManifestChecker,
+        MatrixNotificationHealthService matrixNotificationHealthService,
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -47,13 +49,18 @@ internal static class AdminHealthEndpoints
             var probes = await compositeProbe.ProbeAllAsync(cancellationToken);
             logger.LogDebug("Service health probes completed: {ProbeCount} services", probes.Length);
 
-            var overallHealth = compositeProbe.ComputeOverallHealth(probes);
-            logger.LogDebug("Overall health computed: {OverallHealth}", overallHealth);
+            var compositeOverallHealth = compositeProbe.ComputeOverallHealth(probes);
+            logger.LogDebug("Composite health computed before Matrix merge: {OverallHealth}", compositeOverallHealth);
+
+            var matrix = await matrixNotificationHealthService.GetSectionAsync(cancellationToken);
+            var overallHealth = AdminHealthStateCombiner.MergeOverallHealth(compositeOverallHealth, ToDomainHealthState(matrix.State));
+            logger.LogDebug("Overall health computed after Matrix merge: {OverallHealth}", overallHealth);
 
             var health = new HealthResponse
             {
                 Settings = await BuildSettingsSection(upgradeService, connectionString, logger, cancellationToken),
                 Models = await BuildModelsSection(modelStateRepository, logger, cancellationToken),
+                Matrix = matrix,
                 Observability = BuildObservabilitySection(probes, logger),
                 Storage = BuildStorageSection(probes, logger),
                 BackupReadiness = await BuildBackupReadinessSection(backupManifestChecker, logger, cancellationToken),
@@ -305,12 +312,20 @@ internal static class AdminHealthEndpoints
         try
         {
             var backupData = await backupManifestChecker.GetBackupReadinessAsync(cancellationToken);
-            logger.LogDebug("Backup readiness check complete: healthy={IsHealthy}, status={Status}, lastBackup={LastBackup}",
+            logger.LogDebug("Backup readiness check complete: healthy={IsHealthy}, isError={IsError}, status={Status}, lastBackup={LastBackup}",
                 backupData.IsHealthy,
+                backupData.IsError,
                 backupData.Status,
                 backupData.LastBackupAtUtc);
 
-            var state = backupData.IsHealthy ? ApiHealthState.Ready : ApiHealthState.Degraded;
+            // Distinguish Error (missing directory, permission denied) from Degraded (exists but unhealthy)
+            var state = backupData.IsHealthy
+                ? ApiHealthState.Ready
+                : backupData.IsError
+                    ? ApiHealthState.Error
+                    : ApiHealthState.Degraded;
+
+            logger.LogDebug("Backup readiness is preview state: schema validation and retention checking pending");
 
             return new BackupReadinessSection
             {
@@ -322,24 +337,28 @@ internal static class AdminHealthEndpoints
                 TimeSinceLastBackup = backupData.TimeSinceLastBackup,
                 RetentionStatus = backupData.IsHealthy ? "Compliant" : "Attention required",
                 Details = backupData.Details,
-                PreviewMode = false
+                PreviewMode = true
             };
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Error building backup section: {ErrorMessage}", ex.Message);
+            logger.LogDebug("Backup readiness is preview state: schema validation and retention checking pending");
             return new BackupReadinessSection
             {
                 State = ApiHealthState.Error,
                 Summary = "Error retrieving backup status",
                 Details = [ex.Message],
-                PreviewMode = false
+                PreviewMode = true
             };
         }
     }
 
     private static ApiHealthState ToApiHealthState(DomainHealthState state)
         => (ApiHealthState)state;
+
+    private static DomainHealthState ToDomainHealthState(ApiHealthState state)
+        => (DomainHealthState)state;
 
     private static ApiHealthState ParseHealthState(string status)
         => status?.ToLowerInvariant() switch

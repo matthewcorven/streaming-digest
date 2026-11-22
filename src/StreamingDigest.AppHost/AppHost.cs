@@ -1,9 +1,14 @@
 using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Docker;
 using Aspire.Hosting.Docker.Resources;
 using Aspire.Hosting.Docker.Resources.ComposeNodes;
 using Aspire.Hosting.Docker.Resources.ServiceNodes;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using StreamingDigest.AppHost;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -28,6 +33,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 // when the secrets exist. Load the AppHost user-secrets explicitly so local orchestration gets
 // stable parameter resolution in both CLI and VS Code flows.
 builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
+var matrixNotificationEnvironment = MatrixNotificationEnvironment.Build(builder.Configuration);
 
 const string composeProjectName = "streaming-digest";
 const string defaultEmbeddingModel = "bge-m3";
@@ -40,7 +46,7 @@ var shortCommitId = GetShortCommitId();
 // do NOT WaitFor(whisper). Uses locally built MLX Whisper image (see issue #210 for Dockerfile.whisper creation).
 // TODO: Add Dockerfile.whisper to repository and document build steps for Apple Silicon.
 const string whisperImage = "streaming-digest-whisper";
-var whisperImageTag = shortCommitId;
+const string whisperImageTag = "latest";
 const int whisperPort = 8080;
 
 var postgresUsername = builder.AddParameterFromConfiguration(
@@ -306,7 +312,87 @@ var api = builder.AddProject<Projects.StreamingDigest_Api>("api")
     .WithEnvironment("observability:services:tempo:url", tempoHttpEndpoint)
     .WithEnvironment("observability:services:otelCollector:url", otelCollectorGrpcEndpoint);
 
-builder.AddProject<Projects.StreamingDigest_Worker>("worker")
+foreach (var matrixEnvironmentVariable in matrixNotificationEnvironment)
+{
+    api.WithEnvironment(matrixEnvironmentVariable.Key, matrixEnvironmentVariable.Value);
+}
+
+#if DEBUG
+    api.WithCommand(
+        name: "set-dev-user-credentials",
+        displayName: "Set Dev User Credentials",
+        executeCommand: async context =>
+        {
+            context.Logger.LogDebug(
+                "Development user credential command invoked for resource {ResourceName}.",
+                context.ResourceName);
+
+            var serverConnectionString = await postgresServer.Resource.GetConnectionStringAsync();
+            if (string.IsNullOrWhiteSpace(serverConnectionString))
+            {
+                context.Logger.LogDebug("Development user credential command could not resolve the application database connection string.");
+                return CommandResults.Failure("Could not resolve the local application database connection string.");
+            }
+
+            var connectionString = new Npgsql.NpgsqlConnectionStringBuilder(serverConnectionString)
+            {
+                Database = "streamingdigest"
+            }.ToString();
+
+            var handler = new DevelopmentUserCredentialCommandHandler(context.Logger);
+            var result = await handler.ResetCredentialsAsync(
+                connectionString,
+                context.Arguments.GetString("currentUsername"),
+                context.Arguments.GetString("newUsername"),
+                context.Arguments.GetString("newPassword"),
+                context.CancellationToken);
+
+            if (!result.Success)
+            {
+                context.Logger.LogDebug(
+                    "Development user credential command failed: {ErrorMessage}.",
+                    result.ErrorMessage);
+                return CommandResults.Failure(result.ErrorMessage ?? "Development credential update failed.");
+            }
+
+            context.Logger.LogDebug(
+                "Development user credential command completed for user {Username}.",
+                result.Username);
+            return CommandResults.Success($"Development user credentials updated for '{result.Username}'.");
+        },
+        commandOptions: new CommandOptions
+        {
+            UpdateState = static context => context.ResourceSnapshot.HealthStatus is HealthStatus.Healthy
+                ? ResourceCommandState.Enabled
+                : ResourceCommandState.Disabled,
+            Arguments =
+            [
+                new InteractionInput
+                {
+                    Name = "currentUsername",
+                    Label = "Current Username",
+                    InputType = InputType.Text,
+                    MaxLength = 200
+                },
+                new InteractionInput
+                {
+                    Name = "newUsername",
+                    Label = "New Username",
+                    InputType = InputType.Text,
+                    MaxLength = 200
+                },
+                new InteractionInput
+                {
+                    Name = "newPassword",
+                    Label = "New Password",
+                    InputType = InputType.SecretText,
+                    MaxLength = 200
+                }
+            ]
+        });
+#endif
+
+var worker = builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     // Note: WithImageTag not supported on ProjectResource (Aspire limitation)
     .WithReference(streamingDigestDatabase)
     .WaitFor(postgresServer)
@@ -321,6 +407,11 @@ builder.AddProject<Projects.StreamingDigest_Worker>("worker")
     .WithEnvironment("Scraper__BaseUrl", scraperHttpEndpoint)
     .WithEnvironment("llm__baseUrl", ollamaHttpEndpoint)
     .WithEnvironment("STREAMINGDIGEST_WHISPER_BASE_URL", whisperHttpEndpoint);
+
+foreach (var matrixEnvironmentVariable in matrixNotificationEnvironment)
+{
+    worker.WithEnvironment(matrixEnvironmentVariable.Key, matrixEnvironmentVariable.Value);
+}
 
 // Blazor WebAssembly frontend
 builder.AddProject<Projects.StreamingDigest_Web>("web")

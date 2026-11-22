@@ -57,6 +57,7 @@ internal static class ApiServiceCollectionExtensions
             DashboardBaseUrl = configuration["notifications:matrix:dashboardBaseUrl"] ?? "http://localhost:8080"
         });
         services.AddSingleton<IMatrixNotificationService, MatrixNotificationService>();
+        services.AddSingleton<MatrixNotificationHealthService>();
         services.AddHangfire(config => config.UseStorage(hangfireStorage));
         // Register the resolved JobStorage singleton explicitly so the download endpoint can
         // inspect the real per-app storage (not the process-global JobStorage.Current, which
@@ -160,6 +161,7 @@ internal static class ApiServiceCollectionExtensions
             sp.GetService<ILogger<DeterministicTranscriptChunkingService>>(),
             sp.GetService<IModelReadinessGuard>(),
             sp.GetService<IModelReadinessNotifier>()));
+        services.AddSingleton<StreamingDigest.Api.Services.HealthStreamService>();
 
         return services;
     }

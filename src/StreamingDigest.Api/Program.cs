@@ -163,6 +163,7 @@ app.UseHangfireDashboard("/admin/jobs", new DashboardOptions
 app.MapStaticAssets();
 app.MapChannelEndpoints();
 app.MapHealthEndpoints(databaseStatus);
+app.MapHealthStreamingEndpoints();
 app.MapAdminHealthEndpoints();
 app.MapAdminOperationEndpoints(applicationConfiguration, builder.Environment.ContentRootPath);
 app.MapIngestionRunEndpoints();
@@ -181,6 +182,7 @@ app.MapNoteEndpoints();
 
 ApiRequestPipeline.MapReservedNotFoundFallbacks(app);
 app.MapFallbackToFile("index.html");
+app.Services.GetRequiredService<StreamingDigest.Api.Services.HealthStreamService>().StartPolling();
 app.Run();
 
 static async Task ReconcileModelRuntimeStateAtStartupAsync(WebApplication app, string connectionString)

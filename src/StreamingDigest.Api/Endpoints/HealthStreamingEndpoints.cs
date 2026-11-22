@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using StreamingDigest.Api.Services;
+using System.Text;
 
 namespace StreamingDigest.Api.Endpoints;
 
@@ -32,6 +33,12 @@ internal static class HealthStreamingEndpoints
         var logger = loggerFactory.CreateLogger("StreamingDigest.Api.Endpoints.HealthStreamingEndpoints");
         logger.LogDebug("SSE client connected: {ClientIp}", httpContext.Connection.RemoteIpAddress);
 
+        if (!ApiRequestPipeline.IsAuthenticated(httpContext.Request))
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+
         var response = httpContext.Response;
         
         // Restrict CORS to configured allowed origins
@@ -49,6 +56,7 @@ internal static class HealthStreamingEndpoints
             logger.LogWarning("CORS origin rejected: {Origin}", origin);
         }
 
+        response.StatusCode = StatusCodes.Status200OK;
         response.ContentType = "text/event-stream";
         response.Headers["Cache-Control"] = "no-cache";
         response.Headers["Connection"] = "keep-alive";
@@ -56,6 +64,15 @@ internal static class HealthStreamingEndpoints
 
         try
         {
+            await response.StartAsync(cancellationToken);
+
+            // Send an initial comment so the client and TestServer both observe the stream as
+            // established before the snapshot payload is written.
+            await response.Body.WriteAsync(Encoding.UTF8.GetBytes(": connected\n\n"), cancellationToken);
+            await response.Body.FlushAsync(cancellationToken);
+
+            await healthStreamService.SendInitialSnapshotAsync(response.Body, cancellationToken);
+
             using (var streamWriter = new StreamWriter(response.Body, leaveOpen: true))
             {
                 streamWriter.AutoFlush = true;
